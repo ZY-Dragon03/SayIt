@@ -13,6 +13,7 @@
 - 默认结果必须紧凑，解释使用简单英文，不能自动附加中文翻译。
 - API 密钥不能进入浏览器；初始模型使用 DeepSeek，但不能让领域逻辑依赖单一提供商。
 - MVP 应可廉价部署、无账户运行、易测试，且不提前引入搜索索引、向量数据库、后台任务或复杂状态管理。
+- 交付分为两个里程碑：先完成个人可用的 Dogfood MVP，再完成面向公开部署的 Production Hardening。后者不得成为前者的前置条件。
 
 ## Goals / Non-Goals
 
@@ -23,6 +24,7 @@
 - 在模型结果不确定时诚实表达不确定性，而不是堆叠解释或伪造确定答案。
 - 将 typing noise、grammar noise 和 expression gap 分离，只有最后一类默认进入学习重点。
 - 让第一次使用不需要账户、配置或语言学知识。
+- 优先让个人用户尽快进入真实日常使用，并用真实反馈校准模型和交互，而不是等待所有生产设施齐备。
 - 保持客户端轻量、键盘优先、响应式，并让本地保存项在离线时仍可用。
 - 通过版本化的结构化契约和提供商适配层，为未来替换模型或增加入口保留边界。
 
@@ -33,6 +35,7 @@
 - 不在 MVP 中做账户、云端同步、远程词库、社交功能、积分、连续学习、间隔重复或分析仪表盘。
 - 不在 MVP 中做浏览器扩展、全局快捷键、浮动窗口、剪贴板监听或桌面原生客户端。
 - 不使用 RAG、向量搜索、专门词典服务或多代理流程来解决一个单轮结构化生成问题。
+- 不把公开部署级别的基础设施、正式质量门槛或完整观测系统作为 Dogfood MVP 的完成条件。
 
 ## Product Definition
 
@@ -80,24 +83,49 @@
 9. **Provider agnostic**：DeepSeek 是适配器，不是产品领域模型。
 10. **Fast feedback**：先给明确的提交状态和可恢复错误，不让界面看起来卡死。
 
-## MVP Boundary
+## Delivery Milestones
 
-### MVP 包含
+产品行为、结构化结果契约、provider abstraction、服务端 secret boundary 和 localStorage 决策在两个里程碑之间保持不变。变化只在交付顺序和非功能性保障的深度。
 
-- 一个桌面优先、响应式的主页面。
-- 一个可自动聚焦的多行输入框；单次输入最多 500 个字符。
-- Enter 提交，Shift+Enter 换行；提交前做空值和长度校验。
-- 一个无流式、结构化的检索请求和紧凑结果面板。
-- `success`、`needs_clarification`、`no_match` 和服务失败状态。
-- 最佳匹配、最多 3 个替代项、自然句、必要时的简单英文解释。
-- `normalized_input`、`typo_corrections` 和 `learnable_items` 作为契约字段；明显 typo 默认不成为视觉重点。
+### Milestone 1 — Dogfood MVP
+
+目标是让个人用户尽快把 SayIt 放进日常工作流，而不是先完成一个面向公众的生产平台。
+
+Dogfood MVP MUST 包含：
+
+- 一个桌面优先、可在个人设备上使用的主页面。
+- 一个可自动聚焦的多行输入框；单次输入最多 500 个字符；Enter 提交，Shift+Enter 换行。
+- 一个最小同源 `/api/retrieve` proxy；DeepSeek 调用和 API key 只在服务端发生。
+- 基础请求校验、响应 schema 校验、一次明确的超时/失败处理，不渲染非法模型输出。
+- `success`、`needs_clarification`、`no_match` 和基本服务错误状态。
+- 固定层级的结构化结果：Best match、Useful expressions、Natural version，以及必要时的 Explanation。
 - 复制最佳表达、替代表达和自然句子的操作。
-- 显式保存、查看、复制和删除本地表达快照。
-- 系统主题跟随和一个不打扰主流程的深色模式切换。
-- 基本键盘可达性、焦点状态、屏幕阅读器结果播报、窄屏布局和 reduced-motion 支持。
-- 服务端 API 代理、DeepSeek 适配器、运行时响应校验、限流和超时。
+- 显式保存、查看、复制和删除 localStorage 中的表达快照。
+- 基础键盘操作、输入保留、Retry 和足够清晰的 loading/error 反馈。
+- 至少一次真实 DeepSeek model smoke test，确认从输入到结构化结果的完整链路可用。
+- 本地运行或私有部署均可；若部署到远程环境，必须保持 API 不公开暴露且 secret 不进入浏览器。
 
-### MVP 不包含
+Dogfood MVP MUST NOT 被以下事项阻塞：
+
+- 公开部署级别的 rate limiting、abuse protection、成本告警和多租户配额。
+- 完整 CSP/CORS 安全策略、正式观测平台和一键生产回滚。
+- 全套 Playwright E2E、可访问性审计、性能预算和正式模型质量门槛。
+- 完整 Fluent/acrylic 视觉打磨、PWA、账户、同步、分析或扩展入口。
+
+Dogfood 的最低退出条件是：个人用户能输入真实工作中的 messy English，在几秒内得到合法结构化结果，复制表达，主动保存，并连续使用多次而不丢输入或保存项。
+
+### Milestone 2 — Production Hardening
+
+第二里程碑不改变产品定位或核心 API 契约，而是使同一 MVP 能够安全、可观测、可回滚地面向更广泛用户：
+
+- 公开部署保护、rate limiting、abuse protection、成本上限和告警。
+- CSP、CORS、HTTPS、安全响应头、日志隐私和更严格的请求边界。
+- 非敏感 observability，包括延迟、错误类别、模型质量和成本指标。
+- 完整单元、API 集成、E2E、可访问性、响应式和性能验证。
+- 版本化 prompt/model/schema 的正式质量门槛、兼容策略和回滚流程。
+- 完整 Fluent/Windows 11 视觉打磨、焦点细节和多浏览器验证。
+
+### 共享非目标
 
 - 自动查询历史。只有用户主动保存的项目被持久化。
 - 账户、登录、跨设备同步和远程保存。
@@ -262,7 +290,7 @@ DeepSeek 作为第一版提供商，但调用只能通过 `ExpressionProvider` �
 ```
 
 1. 客户端拒绝空值和超过 500 字符的输入。
-2. API 再次执行长度、内容大小和速率限制校验。
+2. API 再次执行长度和内容大小校验；公开部署在 Production Hardening 阶段再增加速率限制。
 3. 提供商适配器发送版本化系统提示和用户输入。
 4. 服务端解析响应，并用运行时 schema 验证；不接受任意额外内容直接进入 UI。
 5. 若上游返回格式错误，可进行一次受限的同提供商修复请求；再次失败就返回可重试错误，不在服务端猜改表达。
@@ -316,6 +344,33 @@ MVP 使用 React 局部状态和少量共享 context 即可，不需要全局状
 
 provider adapter 不应暴露给客户端，也不应让 UI 根据提供商名称分支。模型名称和密钥来自服务端环境变量，部署配置变更不需要修改前端。
 
+### 分阶段拓扑
+
+Dogfood MVP 采用最小可用拓扑，不引入数据库、认证服务、队列或公开 API 网关：
+
+```text
++---------+       same-origin       +----------------+       HTTPS       +-----------+
+| Browser | ----------------------> | Minimal proxy | ----------------> | DeepSeek  |
+| React   |                         | validate      | <---------------- | chat call |
++----+----+                         +----------------+                  +-----------+
+     |
+     v
+ localStorage
+```
+
+Dogfood proxy 只需要完成输入边界校验、DeepSeek 调用、基础超时/错误映射和结果 schema 校验。它可以作为本地开发服务器路由或私有部署函数运行；如果远程运行，必须通过部署环境限制访问，不能把未经保护的匿名端点暴露到公网。
+
+Production Hardening 在同一逻辑边界外增加公开部署所需的 rate limiting、abuse protection、成本控制、CSP/CORS、安全响应头、非敏感 observability 和回滚机制：
+
+```text
++---------+    HTTPS    +-------------------+    +----------------+
+| Browser | ----------> | Public edge/API   | -> | Minimal proxy  | -> DeepSeek
++---------+             | limits + headers  |    | same contract  |
+                        +-------------------+    +----------------+
+```
+
+两种拓扑共享 `POST /api/retrieve`、provider abstraction、结果契约和 localStorage；生产加固不应迫使 Dogfood 预先引入另一套领域架构。
+
 ## Persistence Strategy
 
 ### 选择 localStorage
@@ -334,19 +389,27 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 
 ## Security and Privacy
 
+安全边界按里程碑分层，但 API key 不进入浏览器是两个里程碑都不可退让的条件：
+
+- **Dogfood baseline**：服务端 secret、同源访问、请求大小/输入边界、schema 校验、上游超时和不记录原始输入；远程 Dogfood 只能使用私有访问控制。
+- **Production Hardening**：公开部署的 rate limiting、abuse protection、成本上限、CSP/CORS、安全响应头、非敏感 observability 和更完整的隐私审计。
+
 - API key 只存在服务端环境变量，浏览器 bundle、source map 和错误消息都不得包含它。
-- API 使用 HTTPS 和同源请求；若前后端分离，CORS 只允许实际前端 origin。
-- 服务端限制请求体和输入长度，设置上游超时，并对匿名请求实施按 IP/设备的基础限流和成本保护。
+- 私有远程 Dogfood 使用 HTTPS 和同源请求；本地 localhost 可使用本地开发协议；若生产环境前后端分离，CORS 只允许实际前端 origin。
+- 服务端限制请求体和输入长度并设置上游超时；公开部署再增加按 IP/设备的 rate limiting、abuse protection 和成本控制。
 - 默认不记录原始输入、完整模型响应或保存项；必要日志只记录 request id、延迟、状态和错误类别。
 - 用户输入被当作不可信数据和 prompt injection 载荷处理；没有工具调用、文件访问或任意代码执行路径。
 - 服务端 schema 校验、字段长度上限和允许枚举防止模型输出污染 UI 或日志。
 - 本地保存内容可能包含敏感英语文本；界面提供单项删除和清空入口，并在隐私说明中明确“仅保存在当前浏览器”。
 - 使用 CSP、`X-Content-Type-Options`、安全 cookie 策略（若未来添加 cookie）等基础 Web 安全头。
-- MVP 不做认证并不等于 API 无保护；部署必须有速率和成本上限，否则公开端点容易被滥用。
+- MVP 不做认证；Dogfood 只允许本地或私有部署，Production Hardening 前不得开放未经保护的公开匿名端点。
 
 ## Performance Targets
 
-这些是实现阶段的目标，不是对第三方模型延迟的硬保证：
+性能门槛按里程碑分层，不让正式生产指标阻塞首次个人使用：
+
+- **Dogfood MVP**：提交后立即显示 loading；输入、焦点和本地保存保持即时；真实模型请求有明确超时和可恢复错误；能在个人日常工作中稳定完成“输入 -> 结果”的循环即可，不设置公开发布级 p50/p95 门槛。
+- **Production Hardening**：以下目标用于公开部署前的性能验收，不是对第三方模型延迟的硬保证：
 
 - 初始静态 shell 在常见桌面宽带环境下 p75 小于 1.5 秒可交互。
 - 输入响应、焦点和本地保存操作 p95 小于 100 ms。
@@ -358,6 +421,8 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 如果真实模型延迟超过目标，第一优先级是清晰的等待和重试体验，而不是在 MVP 加入流式 JSON、并行模型或复杂缓存。请求缓存也可能泄露用户输入，默认不启用。
 
 ## Visual and Interaction System
+
+视觉方向在两个里程碑保持一致。Dogfood 只需要清晰、轻量、键盘可用的基础样式；完整 Fluent/acrylic 打磨、跨浏览器检查和细节级可访问性验收属于 Production Hardening，不应阻塞个人试用。
 
 ### 视觉
 
@@ -386,6 +451,8 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 
 ## Failure and Recovery
 
+Dogfood MVP 先覆盖空输入、超长、网络失败、上游超时、非法模型响应、无匹配和 localStorage 失败；Production Hardening 再把公开限流、成本异常、CORS/CSP 违规和观测告警纳入正式故障演练。
+
 | 故障 | 服务端行为 | 客户端行为 |
 | --- | --- | --- |
 | 空输入/超长 | 不调用模型，返回校验错误 | 保留文字并提示修改 |
@@ -398,6 +465,12 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 | 损坏的保存记录 | 跳过坏记录并记录非敏感诊断 | 有效记录正常加载，并给非阻塞提示 |
 
 ## Testing Strategy
+
+### 分阶段质量门槛
+
+Dogfood MVP 的阻塞性验证只包括：schema/契约单元测试、输入边界测试、localStorage 基本读写、mock provider API smoke test，以及一次受控真实 DeepSeek model smoke test。这样可以证明核心链路可用，但不要求先完成完整测试矩阵。
+
+Production Hardening 再增加完整的 API 集成、Playwright E2E、axe/人工可访问性、跨视口/主题、性能预算、安全审计和正式模型评测门槛。现有下列测试策略描述最终目标；任务阶段将其拆到对应里程碑。
 
 ### 单元和契约测试
 
@@ -430,24 +503,34 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 
 ## Deployment and Migration Plan
 
-### 初始部署
+### Milestone 1 — Dogfood MVP
 
-推荐部署为同一站点的静态前端资源加一个无状态 `/api/retrieve` 函数。这样客户端不需要知道模型主机，也避免跨域配置。具体云平台可以在实现前选择，只需满足静态托管、函数环境变量、HTTPS、日志和基础限流。
+优先使用本地或私有部署，目标是尽快进入个人日常使用：
 
-发布顺序：
+1. 先运行不依赖真实模型的前端和 mock API，确认输入、结果渲染、复制和 localStorage。
+2. 通过服务端环境变量接入 DeepSeek，执行一次真实 model smoke test；环境变量不得使用会被 Vite 暴露到浏览器的 `VITE_` 前缀。
+3. 使用同源的最小 `/api/retrieve` proxy；本地开发服务器、单机 Node handler 或私有 serverless function 均可。
+4. 如果部署到远程环境，使用私有仓库/访问控制/网络限制，不开放未经保护的匿名公开 API。
+5. 先以个人真实工作输入连续使用，记录明显错误和延迟问题，再决定是否进入 Production Hardening。
 
-1. 先部署不含真实模型调用的前端和 mock API 预览。
-2. 部署带 secret 的 API 函数，验证 schema、超时、限流和错误映射。
-3. 在受控评测集上验证选定的 DeepSeek 模型和 prompt 版本。
-4. 小流量或内部使用后再公开端点，并设置成本上限和告警。
+Dogfood 发布不需要正式 CDN、WAF、完整观测平台、公开 rate limit 或多环境回滚系统。
 
-静态资源发布应可原子回滚；模型 prompt 和结果契约带版本，旧客户端收到未知字段时忽略而不是崩溃。MVP 无远程数据库，因此没有数据库迁移或数据恢复服务；localStorage 只需执行向后兼容的客户端迁移。
+### Milestone 2 — Production Hardening
 
-### 回滚
+在 Dogfood 已证明核心循环有价值后，再将同一应用提升到公开部署：
 
-- 前端异常：回滚到上一份静态构建。
-- 模型质量异常：切回上一 prompt/model 配置，不改客户端契约。
-- API 异常或费用激增：暂时返回可恢复服务错误，或关闭公开端点；本地保存项不受影响。
+1. 部署同源静态前端和无状态 `/api/retrieve` 函数，配置 HTTPS、CSP/CORS 和安全响应头。
+2. 增加 rate limiting、abuse protection、成本上限、告警和非敏感 observability。
+3. 运行完整模型评测、E2E、可访问性、性能和安全检查，达到正式质量门槛后再开放公众访问。
+4. 建立 prompt/model/schema 版本兼容、静态资源原子发布和可验证回滚流程。
+
+### 迁移与回滚
+
+两种里程碑共享结果契约、prompt 版本、provider abstraction 和 localStorage 数据格式。MVP 无远程数据库，因此没有数据库迁移或数据恢复服务；localStorage 只需执行向后兼容的客户端迁移。
+
+- Dogfood 模型质量异常：切换到上一个 prompt/model 配置或回退到 mock，不改客户端契约。
+- Production 前端异常：回滚上一份静态构建。
+- Production API 异常或费用激增：暂停公开入口或返回可恢复服务错误；本地保存项不受影响。
 - localStorage schema 迁移失败：保留原始键并以只读/空列表启动，不能静默删除用户数据。
 
 ## Future Extension Points
@@ -477,10 +560,16 @@ MVP 的保存对象是少量、小体积、文本为主的快照，因此优先�
 
 ## Open Questions
 
-以下问题不改变已确定的产品契约，可在进入实现前通过小型 spike 决定：
+以下问题不改变已确定的产品契约；只有与 Dogfood 直接相关的问题需要在第一次个人试用前决定：
 
-1. 目标部署平台选择哪一个，才能以同一 origin 同时托管静态资源和函数。
-2. DeepSeek 当前可用模型中，哪一个在低延迟、英文自然性和结构化输出稳定性之间最合适。
+### Dogfood 前
+
+1. 选择本地开发服务器、单机 Node handler 或私有 serverless function 作为最短可用路径。
+2. DeepSeek 当前可用模型中，哪一个在低延迟、英文自然性和结构化输出稳定性之间最适合第一次 smoke test。
 3. 选定模型是否支持原生 JSON/schema 模式；若不支持，使用普通 completion 加服务端校验和一次修复请求。
-4. 首个评测集的人工通过阈值，以及何种失败率会阻止公开发布。
-5. 结果返回后焦点是留在输入框还是移动到结果标题；通过真实键盘可用性测试选择，而不是凭视觉偏好决定。
+4. 结果返回后焦点是留在输入框还是移动到结果标题；通过个人键盘流程测试选择，不阻塞核心链路。
+
+### Production Hardening 前
+
+1. 选择能够以同一 origin 托管静态前端和无状态 API 函数的正式部署平台。
+2. 确定正式评测集的人工通过阈值，以及何种失败率会阻止公开发布。
