@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output and local caches
+dist/
+build/
+coverage/
+.vite/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor swap files
+*.swp
+*.swo
