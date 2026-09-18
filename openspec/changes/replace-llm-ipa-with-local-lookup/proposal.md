@@ -11,7 +11,8 @@
 - 按规范化表达和口音缓存成功的本地 IPA 结果；发音失败只返回 `null`。
 - 保留现有 IPA UI 位置、US/UK selector、Normal/Slow Web Speech playback 和 contextual Listen/Copy actions。
 - IPA 只服务于 primary expression、可用的 expression alternatives 和 primary interpreted expression；不为 Meaning、Usage/reference、Explanation、Example 或 UI labels 生成 IPA。
-- 在实现前对 `phonemizer@1.2.1` 与 `phonemize@2.0.1` 做 golden-set bake-off；具体 engine、license/distribution 方案在评审前保持未决。
+- 已完成 `phonemizer@1.2.1` 与 `phonemize@2.0.1` 的 golden-set bake-off；当前批准的 engine 选择仅适用于私有/本地 Dogfood。
+- 评审结论：`phonemizer@1.2.1` 仅批准用于私有/本地 SayIt Dogfood；公开分发在完成 license/distribution review 或替换为 permissively licensed engine 前保持禁止。
 
 ## Capabilities
 

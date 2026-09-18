@@ -27,10 +27,15 @@ DeepSeek retrieve/interpret 结果 SHALL 只包含语义结果所需字段，不
 - **WHEN** 用户结果包含 `Road House` 且本地 lookup 使用 `us` 或 `uk`
 - **THEN** 系统独立返回对应 accent 的 IPA，且不发送新的 DeepSeek request
 
-#### Scenario: Resolve an unknown or unsupported expression
+#### Scenario: Filter empty or clearly non-language input
 
-- **WHEN** 本地 dictionary/G2P engine 无法可靠转写某个表达
-- **THEN** lookup 返回 `null`，不猜测 IPA，semantic result 和其他 UI 操作保持可用
+- **WHEN** lookup input 为空，或明显是 URL、代码片段、纯符号/数字等非语言输入
+- **THEN** lookup 返回 `null`，不运行 engine，semantic result 和其他 UI 操作保持可用
+
+#### Scenario: Allow an unknown-word Dogfood guess
+
+- **WHEN** `phonemizer` 对未知词或专有名词返回非空 G2P guess
+- **THEN** Dogfood 可以显示该 guess；系统不计算 numeric confidence、不新增 dictionary/service，明显错误留待后续评估
 
 #### Scenario: Switch accent locally
 
@@ -88,3 +93,12 @@ Web Speech playback SHALL 继续使用原始英文 expression text、现有 acce
 
 - **WHEN** 用户选择新的 accent 并播放表达
 - **THEN** Web Speech 使用新 accent voice，同时 IPA lookup 使用新 accent；两者都在客户端完成
+
+### Requirement: Private Dogfood distribution restriction
+
+`phonemizer@1.2.1` SHALL 只用于私有/本地 SayIt Dogfood。公开分发 MUST 保持 blocked，直到完成 eSpeak NG license/distribution review，或替换为 permissively licensed engine。
+
+#### Scenario: Keep public distribution blocked
+
+- **WHEN** 评审 SayIt 的公开发布或可分发构建
+- **THEN** 当前 change 不得把 `phonemizer@1.2.1` 视为公开分发批准

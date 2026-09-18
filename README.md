@@ -52,6 +52,8 @@ Useful English expressions can be played with the small speaker button beside th
 
 When available, the primary expression also shows a compact IPA transcription. Switching US/UK changes both the displayed IPA and the spoken voice. Uncertain pronunciation metadata is omitted instead of blocking the result.
 
+The local IPA engine is approved for private/local Dogfood use only. Public distribution remains blocked pending a license/distribution review of bundled eSpeak NG code or replacement with a permissively licensed engine.
+
 ## Verification
 
 ```powershell

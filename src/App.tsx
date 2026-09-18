@@ -15,7 +15,6 @@ import {
   type SayItResult,
   type SessionContextTurn,
   type ExpressionType,
-  type PronunciationMetadata,
   type RetrievalResult,
 } from "./shared/contract";
 import {
@@ -29,6 +28,7 @@ import {
   savePronunciationPreferences,
   type PronunciationPreferences,
 } from "./lib/pronunciation";
+import { getIPA, getIPACacheKey } from "./lib/ipa";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -82,6 +82,24 @@ function summarizeResult(result: SayItResult): string {
   return "No reliable expression was found.";
 }
 
+function getIPAExpressions(result: SayItResult): string[] {
+  const expressions =
+    result.mode === "retrieve"
+      ? [
+          result.best_match?.text,
+          ...result.alternatives.map((alternative) => alternative.text),
+        ]
+      : [result.interpretation?.expression];
+
+  return Array.from(
+    new Set(
+      expressions.filter(
+        (expression): expression is string => Boolean(expression?.trim()),
+      ),
+    ),
+  );
+}
+
 async function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -125,6 +143,7 @@ function App() {
   const [pronunciationError, setPronunciationError] = useState<string | null>(
     null,
   );
+  const [ipaByKey, setIpaByKey] = useState<Record<string, string>>({});
   const pronunciationServiceRef = useRef<PronunciationService | null>(null);
 
   useEffect(() => {
@@ -148,6 +167,43 @@ function App() {
       pronunciationServiceRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    const expressions = result ? getIPAExpressions(result) : [];
+    const accent = pronunciationPreferences.accent;
+    let cancelled = false;
+    setIpaByKey({});
+
+    if (expressions.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(
+      expressions.map(async (expression) => {
+        const ipa = await getIPA(expression, accent);
+        return ipa
+          ? ([getIPACacheKey(expression, accent), ipa] as const)
+          : null;
+      }),
+    ).then((entries) => {
+      if (cancelled) {
+        return;
+      }
+      setIpaByKey(
+        Object.fromEntries(
+          entries.filter(
+            (entry): entry is readonly [string, string] => entry !== null,
+          ),
+        ),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pronunciationPreferences.accent, result]);
 
   useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
@@ -480,6 +536,7 @@ function App() {
               speakingKey={speakingKey}
               pronunciationErrorKey={pronunciationErrorKey}
               pronunciationAccent={pronunciationPreferences.accent}
+              ipaByKey={ipaByKey}
             />
           )}
 
@@ -580,6 +637,7 @@ interface ResultViewProps {
   speakingKey: string | null;
   pronunciationErrorKey: string | null;
   pronunciationAccent: PronunciationPreferences["accent"];
+  ipaByKey: Record<string, string>;
   onCopy: (text: string, label: string) => Promise<void>;
   onSave: () => void;
   onRetry: () => void;
@@ -593,6 +651,7 @@ function ResultView({
   speakingKey,
   pronunciationErrorKey,
   pronunciationAccent,
+  ipaByKey,
   onCopy,
   onSave,
   onRetry,
@@ -609,6 +668,7 @@ function ResultView({
         speakingKey={speakingKey}
         pronunciationErrorKey={pronunciationErrorKey}
         pronunciationAccent={pronunciationAccent}
+        ipaByKey={ipaByKey}
       />
     );
   }
@@ -645,6 +705,7 @@ function ResultView({
                 speakingKey={speakingKey}
                 pronunciationErrorKey={pronunciationErrorKey}
                 pronunciationAccent={pronunciationAccent}
+                ipaByKey={ipaByKey}
               />
             ))}
           </div>
@@ -676,8 +737,11 @@ function ResultView({
         <div className="playable-text">
           <strong>{result.best_match.text}</strong>
           <ExpressionMeta
-            pronunciation={result.best_match.pronunciation}
-            accent={pronunciationAccent}
+            ipa={
+              ipaByKey[
+                getIPACacheKey(result.best_match.text, pronunciationAccent)
+              ]
+            }
             expressionType={formatExpressionType(result.best_match.expression_type)}
           />
         </div>
@@ -707,6 +771,7 @@ function ResultView({
                 speakingKey={speakingKey}
                 pronunciationErrorKey={pronunciationErrorKey}
                 pronunciationAccent={pronunciationAccent}
+                ipaByKey={ipaByKey}
               />
             ))}
           </div>
@@ -778,6 +843,7 @@ interface InterpretationResultViewProps {
   speakingKey: string | null;
   pronunciationErrorKey: string | null;
   pronunciationAccent: PronunciationPreferences["accent"];
+  ipaByKey: Record<string, string>;
   onCopy: (text: string, label: string) => Promise<void>;
   onRetry: () => void;
   onSpeak: (text: string, key: string) => void;
@@ -789,6 +855,7 @@ function InterpretationResultView({
   speakingKey,
   pronunciationErrorKey,
   pronunciationAccent,
+  ipaByKey,
   onCopy,
   onRetry,
   onSpeak,
@@ -837,8 +904,11 @@ function InterpretationResultView({
         <div className="playable-text">
           <strong>{interpretation.expression}</strong>
           <ExpressionMeta
-            pronunciation={interpretation.pronunciation}
-            accent={pronunciationAccent}
+            ipa={
+              ipaByKey[
+                getIPACacheKey(interpretation.expression, pronunciationAccent)
+              ]
+            }
             expressionType={interpretation.kind.replace("_", " ")}
           />
         </div>
@@ -915,6 +985,7 @@ interface ExpressionRowProps {
   speakingKey: string | null;
   pronunciationErrorKey: string | null;
   pronunciationAccent: PronunciationPreferences["accent"];
+  ipaByKey: Record<string, string>;
   onSpeak: (text: string, key: string) => void;
 }
 
@@ -925,6 +996,7 @@ function ExpressionRow({
   speakingKey,
   pronunciationErrorKey,
   pronunciationAccent,
+  ipaByKey,
   onSpeak,
 }: ExpressionRowProps) {
   const speechKey = `alternative-${expression.text}`;
@@ -935,8 +1007,9 @@ function ExpressionRow({
         <div className="playable-text">
           <strong>{expression.text}</strong>
           <ExpressionMeta
-            pronunciation={expression.pronunciation}
-            accent={pronunciationAccent}
+            ipa={
+              ipaByKey[getIPACacheKey(expression.text, pronunciationAccent)]
+            }
             expressionType={formatExpressionType(expression.expression_type)}
           />
         </div>
@@ -956,17 +1029,14 @@ function ExpressionRow({
 }
 
 interface ExpressionMetaProps {
-  pronunciation: PronunciationMetadata | undefined;
-  accent: PronunciationPreferences["accent"];
+  ipa: string | undefined;
   expressionType: string;
 }
 
 function ExpressionMeta({
-  pronunciation,
-  accent,
+  ipa,
   expressionType,
 }: ExpressionMetaProps) {
-  const ipa = pronunciation?.[accent];
   return (
     <span className="expression-meta">
       {ipa && <span className="ipa-text">{ipa}</span>}

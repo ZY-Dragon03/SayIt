@@ -46,35 +46,11 @@ describe("SayIt retrieval contract", () => {
     }
   });
 
-  it("accepts valid IPA metadata and drops invalid IPA without rejecting the result", () => {
-    const valid = retrievalResultSchema.safeParse({
-      ...successfulResult,
-      best_match: {
-        ...successfulResult.best_match,
-        pronunciation: {
-          us: "/ˈkætəɡəraɪz/",
-          uk: "/ˈkætəɡəraɪz/",
-        },
-      },
-    });
-    expect(valid.success).toBe(true);
-    if (valid.success) {
-      expect(valid.data.best_match?.pronunciation?.us).toBe("/ˈkætəɡəraɪz/");
-    }
-
-    const invalid = retrievalResultSchema.safeParse({
-      ...successfulResult,
-      best_match: {
-        ...successfulResult.best_match,
-        pronunciation: {
-          us: "categorize",
-          uk: "/this is not IPA text/",
-        },
-      },
-    });
-    expect(invalid.success).toBe(true);
-    if (invalid.success) {
-      expect(invalid.data.best_match?.pronunciation).toBeUndefined();
+  it("accepts semantic results without pronunciation metadata", () => {
+    const parsed = retrievalResultSchema.safeParse(successfulResult);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.best_match).not.toHaveProperty("pronunciation");
     }
   });
 

@@ -69,9 +69,13 @@ Compact golden-set observation（同一 Windows/Node 环境；IPA 原始输出�
 
 The full 22-item set produced output for all 44 accent calls in both candidates. Accent output differed for 19/22 cases with phonemizer and 13/22 with phonemize. `record`, `present` and `read` are intentionally ambiguous bare words; no candidate can infer the intended part of speech without sentence context.
 
-The unknown-word cases also exposed a separate gate: both engines produce a plausible-looking guess for `Zzyzx` and `Qwertyblorf` instead of returning a confidence signal. Therefore “engine returned a string” MUST NOT be treated as “reliable pronunciation”; the final adapter needs an explicit confidence/null policy (for example, dictionary coverage plus conservative word/phrase heuristics) before either engine can satisfy the `null when unreliable` contract.
+The unknown-word cases also exposed that both engines produce a plausible-looking guess for `Zzyzx` and `Qwertyblorf` instead of returning a confidence signal. Dogfood explicitly accepts those guesses for now; the adapter only applies lightweight input/output filtering and records obvious bad cases for later evaluation.
 
-**Recommendation:** technically, phonemizer currently has the stronger eSpeak behavior, phrase handling, stress output and GB distinction. It MUST NOT be approved for distribution yet: the Apache package metadata does not settle the GPL-3.0-or-later eSpeak NG bundled-code obligation. Phonemize is the licensing-safer fallback and has very fast warm calls, but its newer rule-derived GB layer loses distinctions for `Road House`, `categorize` and `OpenAI` in this set, and its browser bundle is larger after Vite bundling. Keep the engine selection unresolved until the GPL/distribution review and golden-set quality review are explicitly accepted.
+**Decision for this change:** approve `phonemizer@1.2.1` for private/local SayIt Dogfood only because it has materially better US/UK distinction, phrase behavior and proper-name handling in this bake-off. This is not approval for public distribution: the Apache package metadata does not settle the GPL-3.0-or-later eSpeak NG bundled-code obligation. Public distribution remains blocked pending a license/distribution review or replacement with a permissively licensed engine.
+
+`phonemizer@1.2.1` is approved for private/local Dogfood only. Public distribution remains blocked pending a license/distribution review or replacement with a permissively licensed engine.
+
+For Dogfood, do not add a numeric confidence system, another dictionary, or another service. The adapter only returns `null` for empty output, clearly non-language/code-like input, or engine failure; unknown-word G2P guesses are acceptable and can be recorded for later evaluation.
 
 Regardless of winner, the chosen package is hidden behind SayIt’s `getIPA` adapter; React renderer and cache do not import the engine directly.
 
@@ -83,7 +87,7 @@ Regardless of winner, the chosen package is hidden behind SayIt’s `getIPA` ada
 2. 使用 `${accent}:${normalizedText}` 作为 key；同一 key 的并发请求共享同一个 Promise。
 3. 首次需要 IPA 时动态加载/初始化已通过 decision gate 选定的 engine；初始化不阻塞 retrieve/interpret 结果渲染。
 4. 将 `us`/`uk` 映射到选定 engine 的英美变体，读取非空 IPA 输出并统一为 `/.../` 展示形式。
-5. 空输出、engine error 或无法得到可靠转写时返回 `null`；不得抛出会破坏结果页面的错误。
+5. 空输入、明显非语言/代码样式输入、空输出或 engine error 时返回 `null`；未知词的 engine G2P guess 可以返回，不引入 numeric confidence 或额外 dictionary/service。
 
 cache 保存成功的 IPA 值，按表达和 accent 分开。MVP 可以使用 bounded browser-local cache；cache 解析、写入或容量失败时退回内存 cache，不影响 lookup 和结果操作。
 
@@ -110,14 +114,14 @@ accent 改变后，UI 使用新 accent 的 cache key 重新读取本地结果；
 
 - [候选 engine 的初始化和约 MB 级 browser bundle 增加首次资源成本] → 仅在需要显示 IPA 时 lazy load；semantic result 首屏不等待 engine。
 - [eSpeak NG IPA 与专业词典可能存在差异] → 将其定位为 Dogfood 学习提示，保留 `null` fallback 和可替换 adapter boundary。
-- [专有名词/文化短语可能没有可靠转写] → engine 返回空或失败时隐藏 IPA，不猜测、不回写 DeepSeek、不影响播放。
+- [专有名词/文化短语可能没有可靠转写] → engine 返回空、失败或输入被 lightweight filter 拦截时隐藏 IPA；未知词 guess 可以显示，但不回写 DeepSeek、不影响播放。
 - [候选包的 license/distribution 义务或维护状态不适合发布] → 在实现前完成 license review 和 golden-set review；未通过前不锁定依赖。
 - [本地 cache 数据损坏或容量受限] → bounded、safe parse、失败退回内存；cache 不是 semantic result 的依赖。
 
 ## Migration Plan
 
 1. 先删除 contract、prompt、provider tests 和 fixtures 中的 LLM pronunciation 字段与校验。
-2. 在 engine decision gate 通过后固定选定依赖，新增 local lookup adapter、lazy initialization、cache 和单元测试。
+2. 固定 `phonemizer@1.2.1` 作为私有/本地 Dogfood 依赖，新增 local lookup adapter、lazy initialization、cache 和单元测试；不得把该决定解释为公开分发许可。
 3. 让 React 从 lookup state 渲染 IPA，保留现有 IPA 位置、accent selector、Web Speech playback 和 contextual actions。
 4. 运行 typecheck、Vitest、build；手动验证 `Road House`、普通 retrieve expression、US/UK 切换、缓存命中和 lookup 失败。
 5. 若 local engine 不可用，只隐藏 IPA；retrieve、interpret、Copy、Save、session context 和 Web Speech playback 继续工作。无需数据迁移或 API rollback。
