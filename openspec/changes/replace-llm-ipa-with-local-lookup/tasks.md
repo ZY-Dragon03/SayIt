@@ -2,6 +2,7 @@
 
 - [x] 0.1 在隔离临时目录运行 `phonemizer@1.2.1` 与 `phonemize@2.0.1` 的相同 golden set，并记录 IPA、US/UK 差异、Vite bundle/load、延迟、包体积和依赖信息
 - [ ] 0.2 评审 eSpeak NG GPL-3.0-or-later bundled-code 风险、`phonemize` MIT/transitive licenses 和 golden-set 质量，明确批准一个 engine 或决定继续保持未决；未批准前不得加入 SayIt
+- [ ] 0.3 为未知词/专有名词定义 conservative confidence/null policy，验证 engine 输出字符串不会被自动当作可靠 IPA
 
 ## 1. Semantic contract cleanup
 

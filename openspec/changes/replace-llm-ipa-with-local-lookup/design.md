@@ -69,6 +69,8 @@ Compact golden-set observation（同一 Windows/Node 环境；IPA 原始输出�
 
 The full 22-item set produced output for all 44 accent calls in both candidates. Accent output differed for 19/22 cases with phonemizer and 13/22 with phonemize. `record`, `present` and `read` are intentionally ambiguous bare words; no candidate can infer the intended part of speech without sentence context.
 
+The unknown-word cases also exposed a separate gate: both engines produce a plausible-looking guess for `Zzyzx` and `Qwertyblorf` instead of returning a confidence signal. Therefore “engine returned a string” MUST NOT be treated as “reliable pronunciation”; the final adapter needs an explicit confidence/null policy (for example, dictionary coverage plus conservative word/phrase heuristics) before either engine can satisfy the `null when unreliable` contract.
+
 **Recommendation:** technically, phonemizer currently has the stronger eSpeak behavior, phrase handling, stress output and GB distinction. It MUST NOT be approved for distribution yet: the Apache package metadata does not settle the GPL-3.0-or-later eSpeak NG bundled-code obligation. Phonemize is the licensing-safer fallback and has very fast warm calls, but its newer rule-derived GB layer loses distinctions for `Road House`, `categorize` and `OpenAI` in this set, and its browser bundle is larger after Vite bundling. Keep the engine selection unresolved until the GPL/distribution review and golden-set quality review are explicitly accepted.
 
 Regardless of winner, the chosen package is hidden behind SayIt’s `getIPA` adapter; React renderer and cache do not import the engine directly.
