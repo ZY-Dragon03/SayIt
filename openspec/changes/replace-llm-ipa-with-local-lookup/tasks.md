@@ -1,3 +1,8 @@
+## 0. Engine decision gate
+
+- [x] 0.1 在隔离临时目录运行 `phonemizer@1.2.1` 与 `phonemize@2.0.1` 的相同 golden set，并记录 IPA、US/UK 差异、Vite bundle/load、延迟、包体积和依赖信息
+- [ ] 0.2 评审 eSpeak NG GPL-3.0-or-later bundled-code 风险、`phonemize` MIT/transitive licenses 和 golden-set 质量，明确批准一个 engine 或决定继续保持未决；未批准前不得加入 SayIt
+
 ## 1. Semantic contract cleanup
 
 - [ ] 1.1 从 shared contract、result types、fixtures 和 storage 相关类型中移除 LLM pronunciation metadata，并验证没有 result schema 依赖该字段
@@ -6,7 +11,7 @@
 
 ## 2. Local pronunciation service
 
-- [ ] 2.1 固定安装 `phonemizer@1.2.1` 及其 browser/WASM 入口，核对 Apache-2.0 license、bundle 资产和 Windows launcher 不需要额外原生安装
+- [ ] 2.1 在 engine decision gate 通过后固定选定依赖及 browser 入口，核对 license、bundle 资产和 Windows launcher 不需要额外原生安装
 - [ ] 2.2 实现 `getIPA(text, accent): Promise<string | null>` adapter，使用 lazy WASM 初始化、`en-us`/`en-gb` 映射和 slash-delimited 输出，并验证 engine 失败返回 null
 - [ ] 2.3 增加按规范化 expression + accent 的 bounded local cache，并验证相同 key 复用、US/UK 隔离、并发请求去重和 cache 失败回退
 - [ ] 2.4 为 Road House、普通单词/短语、未知表达和 US/UK 输出增加 deterministic lookup tests，验证不产生网络或 DeepSeek 请求

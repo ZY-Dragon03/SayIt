@@ -11,6 +11,7 @@
 - 按规范化表达和口音缓存成功的本地 IPA 结果；发音失败只返回 `null`。
 - 保留现有 IPA UI 位置、US/UK selector、Normal/Slow Web Speech playback 和 contextual Listen/Copy actions。
 - IPA 只服务于 primary expression、可用的 expression alternatives 和 primary interpreted expression；不为 Meaning、Usage/reference、Explanation、Example 或 UI labels 生成 IPA。
+- 在实现前对 `phonemizer@1.2.1` 与 `phonemize@2.0.1` 做 golden-set bake-off；具体 engine、license/distribution 方案在评审前保持未决。
 
 ## Capabilities
 
@@ -25,6 +26,6 @@
 ## Impact
 
 - 修改 `src/shared/contract.ts`、DeepSeek provider prompt/测试和相关 fixture，移除 LLM pronunciation metadata。
-- 新增浏览器端本地 phonemizer adapter、lazy WASM 初始化、IPA cache 和 lookup 测试。
+- 新增浏览器端本地 engine adapter、lazy 初始化、IPA cache 和 lookup 测试；具体依赖由 bake-off 决策门确定。
 - React 结果层从本地 lookup 获取 IPA，不再读取 API 结果中的 pronunciation 字段。
 - 增加一个浏览器可加载的离线 phonemizer 依赖；不改变 `/api/retrieve`、server secret boundary 或 DeepSeek 请求职责。
