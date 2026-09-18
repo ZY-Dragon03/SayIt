@@ -29,6 +29,23 @@ npm run dev
 
 Open the local URL printed by Vite. Type a rough English thought and press Enter. Use Shift+Enter for a new line.
 
+## Daily use on Windows
+
+Double-click the root-level **`Start SayIt.vbs`** file.
+
+On the first run, open the generated `.env.local` file in Notepad, replace `your-key` with your DeepSeek key, save it, and double-click **`Start SayIt.vbs`** again.
+
+It will:
+
+- create `.env.local` from `.env.example` on the first run and tell you when to add `DEEPSEEK_API_KEY`;
+- install dependencies automatically if `node_modules` is missing;
+- start the existing Vite/SayIt server in a hidden window;
+- wait for `http://127.0.0.1:5173/` to respond;
+- open SayIt in the default browser;
+- reuse an already-running SayIt server instead of starting a duplicate.
+
+Node.js must be installed on Windows. The launcher uses Windows Script Host and does not require PowerShell execution-policy changes. Startup logs are written to `%TEMP%\SayIt\server.log`.
+
 ## Verification
 
 ```powershell
