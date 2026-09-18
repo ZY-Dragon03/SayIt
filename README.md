@@ -17,7 +17,7 @@ Add your DeepSeek key to `.env.local`:
 
 ```text
 DEEPSEEK_API_KEY=your-key
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 

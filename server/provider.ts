@@ -4,7 +4,7 @@ import {
   type RetrievalResult,
 } from "../src/shared/contract";
 
-const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_MODEL = "deepseek-flash";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const MODEL_TIMEOUT_MS = 12_000;
 
@@ -197,6 +197,7 @@ Return the SayIt result JSON only.`;
           ],
           temperature: 0.2,
           max_tokens: 700,
+          response_format: { type: "json_object" },
         }),
         signal: timeout.signal,
       });

@@ -42,7 +42,7 @@ describe("DeepSeekProvider", () => {
 
     const provider = new DeepSeekProvider({
       apiKey: "server-only-test-key",
-      model: "deepseek-chat",
+      model: "deepseek-flash",
       baseUrl: "https://example.test",
     });
     const result = await provider.retrieve("put things into categories");
@@ -56,6 +56,9 @@ describe("DeepSeekProvider", () => {
     expect(String(init.body)).toContain("schema_version");
     expect(String(init.body)).toContain("make typos");
     expect(String(init.body)).toContain("slack off");
+    expect(JSON.parse(String(init.body)).response_format).toEqual({
+      type: "json_object",
+    });
   });
 
   it("repairs one invalid model response and then validates it", async () => {
