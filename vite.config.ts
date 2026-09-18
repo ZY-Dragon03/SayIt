@@ -7,6 +7,7 @@ interface ApiPluginOptions {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  diagnostics?: boolean;
 }
 
 function sayItApiPlugin(options: ApiPluginOptions): Plugin {
@@ -32,6 +33,7 @@ export default defineConfig(({ mode }) => {
         apiKey: env.DEEPSEEK_API_KEY,
         model: env.DEEPSEEK_MODEL,
         baseUrl: env.DEEPSEEK_BASE_URL,
+        diagnostics: mode === "development",
       }),
     ],
   };

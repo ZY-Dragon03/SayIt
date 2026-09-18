@@ -10,7 +10,10 @@ import {
   apiErrorSchema,
   isSuccessfulResult,
   MAX_INPUT_LENGTH,
-  retrievalResultSchema,
+  MAX_SESSION_TURNS,
+  sayItResultSchema,
+  type SayItResult,
+  type SessionContextTurn,
   type ExpressionType,
   type RetrievalResult,
 } from "./shared/contract";
@@ -41,6 +44,37 @@ function formatExpressionType(type: ExpressionType): string {
   return type.replace("_", " ");
 }
 
+function summarizeResult(result: SayItResult): string {
+  if (result.mode === "interpret") {
+    if (result.interpretation) {
+      return [
+        `Expression: ${result.interpretation.expression}`,
+        `Meaning: ${result.interpretation.meaning_in_context}`,
+        `Usage or reference: ${result.interpretation.usage_or_reference}`,
+      ].join(" ");
+    }
+    if (result.clarifying_question) {
+      return `Clarification question: ${result.clarifying_question}`;
+    }
+    return "No reliable interpretation was found.";
+  }
+
+  if (result.best_match) {
+    return [
+      `Best match: ${result.best_match.text}`,
+      result.natural_sentence
+        ? `Natural version: ${result.natural_sentence}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (result.clarifying_question) {
+    return `Clarification question: ${result.clarifying_question}`;
+  }
+  return "No reliable expression was found.";
+}
+
 async function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -63,7 +97,10 @@ async function copyToClipboard(text: string): Promise<void> {
 function App() {
   const repositoryRef = useRef<LocalMemoryRepository | null>(null);
   const [input, setInput] = useState("");
-  const [result, setResult] = useState<RetrievalResult | null>(null);
+  const [result, setResult] = useState<SayItResult | null>(null);
+  const [sessionContext, setSessionContext] = useState<SessionContextTurn[]>(
+    [],
+  );
   const [savedItems, setSavedItems] = useState<SavedExpression[]>([]);
   const [activeSavedId, setActiveSavedId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -114,7 +151,10 @@ function App() {
       const response = await fetch("/api/retrieve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: value }),
+        body: JSON.stringify({
+          input: value,
+          context: sessionContext.slice(-MAX_SESSION_TURNS),
+        }),
       });
       const payload: unknown = await response.json();
 
@@ -127,11 +167,19 @@ function App() {
         );
       }
 
-      const parsedResult = retrievalResultSchema.safeParse(payload);
+      const parsedResult = sayItResultSchema.safeParse(payload);
       if (!parsedResult.success) {
         throw new Error("SayIt received an invalid result.");
       }
       setResult(parsedResult.data);
+      setSessionContext((currentContext) => [
+        ...currentContext,
+        {
+          input: value,
+          mode: parsedResult.data.mode,
+          assistant_summary: summarizeResult(parsedResult.data),
+        },
+      ].slice(-MAX_SESSION_TURNS));
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -141,7 +189,7 @@ function App() {
     } finally {
       setIsSubmitting(false);
     }
-  }, []);
+  }, [sessionContext]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -276,11 +324,11 @@ function App() {
 
       <main className="main-content">
         <section className="hero-copy" aria-labelledby="page-title">
-          <p className="eyebrow">Expression retrieval engine</p>
+          <p className="eyebrow">English expression tool</p>
           <h1 id="page-title">What are you trying to say?</h1>
           <p>
             Type the rough version. SayIt will find the natural word, phrase,
-            or sentence.
+            sentence, or explain an expression in context.
           </p>
         </section>
 
@@ -448,7 +496,7 @@ function App() {
 }
 
 interface ResultViewProps {
-  result: RetrievalResult;
+  result: SayItResult;
   isSaved: boolean;
   copiedLabel: string | null;
   onCopy: (text: string, label: string) => Promise<void>;
@@ -464,6 +512,17 @@ function ResultView({
   onSave,
   onRetry,
 }: ResultViewProps) {
+  if (result.mode === "interpret") {
+    return (
+      <InterpretationResultView
+        result={result}
+        copiedLabel={copiedLabel}
+        onCopy={onCopy}
+        onRetry={onRetry}
+      />
+    );
+  }
+
   if (result.status === "no_match") {
     return (
       <div className="message-state no-match-state">
@@ -588,6 +647,119 @@ function ResultView({
               .join(" · ")}
           </p>
         </details>
+      )}
+    </div>
+  );
+}
+
+interface InterpretationResultViewProps {
+  result: Extract<SayItResult, { mode: "interpret" }>;
+  copiedLabel: string | null;
+  onCopy: (text: string, label: string) => Promise<void>;
+  onRetry: () => void;
+}
+
+function InterpretationResultView({
+  result,
+  copiedLabel,
+  onCopy,
+  onRetry,
+}: InterpretationResultViewProps) {
+  if (result.status === "no_match") {
+    return (
+      <div className="message-state no-match-state">
+        <div>
+          <span className="result-kicker">No reliable interpretation yet</span>
+          <strong>Try adding the scene or speaker.</strong>
+          <span>
+            {result.inferred_intent ||
+              "Add the sentence, show, speaker, or situation."}
+          </span>
+        </div>
+        <button className="secondary-button" type="button" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (result.status === "needs_clarification") {
+    return (
+      <div className="clarification-state">
+        <span className="result-kicker">One quick question</span>
+        <h2>{result.clarifying_question}</h2>
+        <button className="secondary-button" type="button" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!result.interpretation) {
+    return null;
+  }
+
+  const interpretation = result.interpretation;
+  return (
+    <div className="result-content interpretation-content">
+      <div className="result-heading-row">
+        <span className="result-kicker">Expression</span>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => void onCopy(interpretation.expression, "Expression")}
+        >
+          {copiedLabel === "Expression" ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <div className="best-match">
+        <strong>{interpretation.expression}</strong>
+        <span>{interpretation.kind.replace("_", " ")}</span>
+      </div>
+
+      <div className="result-section">
+        <span className="result-kicker">Meaning in this context</span>
+        <div className="natural-sentence">
+          <p>{interpretation.meaning_in_context}</p>
+          <button
+            className="tiny-button"
+            type="button"
+            onClick={() =>
+              void onCopy(
+                interpretation.meaning_in_context,
+                "Meaning in this context",
+              )
+            }
+          >
+            {copiedLabel === "Meaning in this context" ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      <div className="result-section">
+        <span className="result-kicker">Usage / reference</span>
+        <div className="natural-sentence">
+          <p>{interpretation.usage_or_reference}</p>
+          <button
+            className="tiny-button"
+            type="button"
+            onClick={() =>
+              void onCopy(
+                interpretation.usage_or_reference,
+                "Usage / reference",
+              )
+            }
+          >
+            {copiedLabel === "Usage / reference" ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {interpretation.example && (
+        <div className="explanation">
+          <span className="result-kicker">Example</span>
+          <p>{interpretation.example}</p>
+        </div>
       )}
     </div>
   );

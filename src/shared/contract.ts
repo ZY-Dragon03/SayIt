@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 export const MAX_INPUT_LENGTH = 500;
+export const MAX_SESSION_TURNS = 3;
+export const MAX_CONTEXT_SUMMARY_LENGTH = 600;
+
+export const resultModeSchema = z.enum(["retrieve", "interpret"]);
+export type ResultMode = z.infer<typeof resultModeSchema>;
 
 export const expressionTypeSchema = z.enum([
   "word",
@@ -14,6 +19,18 @@ export const expressionTypeSchema = z.enum([
 ]);
 
 export type ExpressionType = z.infer<typeof expressionTypeSchema>;
+
+export const interpretationKindSchema = z.enum([
+  "literal_expression",
+  "idiom",
+  "slang",
+  "catchphrase",
+  "cultural_reference",
+  "proper_name",
+  "other",
+]);
+
+export type InterpretationKind = z.infer<typeof interpretationKindSchema>;
 
 const expressionSchema = z
   .object({
@@ -42,6 +59,7 @@ const learnableItemSchema = z
 export const retrievalResultSchema = z
   .object({
     schema_version: z.literal("1"),
+    mode: z.literal("retrieve").default("retrieve"),
     status: z.enum(["success", "needs_clarification", "no_match"]),
     normalized_input: z.string().trim().min(1).max(MAX_INPUT_LENGTH),
     inferred_intent: z.string().trim().max(240),
@@ -83,6 +101,71 @@ export const retrievalResultSchema = z
 
 export type RetrievalResult = z.infer<typeof retrievalResultSchema>;
 
+const interpretationPayloadSchema = z
+  .object({
+    expression: z.string().trim().min(1).max(160),
+    kind: interpretationKindSchema,
+    meaning_in_context: z.string().trim().min(1).max(360),
+    usage_or_reference: z.string().trim().min(1).max(360),
+    example: z.string().trim().max(300).nullable(),
+  })
+  .strict();
+
+export const interpretationResultSchema = z
+  .object({
+    schema_version: z.literal("1"),
+    mode: z.literal("interpret"),
+    status: z.enum(["success", "needs_clarification", "no_match"]),
+    normalized_input: z.string().trim().min(1).max(MAX_INPUT_LENGTH),
+    inferred_intent: z.string().trim().max(240),
+    interpretation: interpretationPayloadSchema.nullable(),
+    clarifying_question: z.string().trim().max(240).nullable(),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (result.status === "success" && !result.interpretation) {
+      context.addIssue({
+        code: "custom",
+        path: ["interpretation"],
+        message: "A successful interpretation must include interpretation.",
+      });
+    }
+
+    if (
+      result.status === "needs_clarification" &&
+      !result.clarifying_question
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["clarifying_question"],
+        message: "A clarification result must include clarifying_question.",
+      });
+    }
+  });
+
+export type InterpretationResult = z.infer<typeof interpretationResultSchema>;
+
+export const sayItResultSchema = z.union([
+  retrievalResultSchema,
+  interpretationResultSchema,
+]);
+
+export type SayItResult = z.infer<typeof sayItResultSchema>;
+
+export const sessionContextTurnSchema = z
+  .object({
+    input: z.string().trim().min(1).max(MAX_INPUT_LENGTH),
+    mode: resultModeSchema,
+    assistant_summary: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_CONTEXT_SUMMARY_LENGTH),
+  })
+  .strict();
+
+export type SessionContextTurn = z.infer<typeof sessionContextTurnSchema>;
+
 export const retrieveRequestSchema = z
   .object({
     input: z
@@ -90,6 +173,10 @@ export const retrieveRequestSchema = z
       .trim()
       .min(1, "Enter an English thought first.")
       .max(MAX_INPUT_LENGTH, `Keep your input under ${MAX_INPUT_LENGTH} characters.`),
+    context: z
+      .array(sessionContextTurnSchema)
+      .max(MAX_SESSION_TURNS, `Keep session context under ${MAX_SESSION_TURNS} turns.`)
+      .default([]),
   })
   .strict();
 
@@ -104,13 +191,14 @@ export const apiErrorSchema = z.object({
 export type ApiErrorResponse = z.infer<typeof apiErrorSchema>;
 
 export function isSuccessfulResult(
-  result: RetrievalResult | null,
+  result: SayItResult | null,
 ): result is RetrievalResult & {
   status: "success";
   best_match: NonNullable<RetrievalResult["best_match"]>;
   natural_sentence: string;
 } {
   return (
+    result?.mode === "retrieve" &&
     result?.status === "success" &&
     result.best_match !== null &&
     result.natural_sentence !== null

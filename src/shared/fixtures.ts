@@ -18,6 +18,19 @@ export const dogfoodFixtures = [
     expectedBestMatch: "slack off",
   },
   {
+    id: "known-expression-to-interpretation",
+    input:
+      "road house, what isnt the meaning of the house beside the road. i wanna know its other meaning. such as what peter say in the catoon",
+    expectedStatus: "success",
+    expectedMode: "interpret",
+  },
+  {
+    id: "correction-with-session-context",
+    input: "no, I mean what Peter says in the cartoon",
+    expectedStatus: "success",
+    expectedMode: "interpret",
+  },
+  {
     id: "ambiguous-input",
     input: "that thing with the words",
     expectedStatus: "needs_clarification",

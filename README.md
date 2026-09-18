@@ -1,6 +1,6 @@
 # SayIt
 
-SayIt turns messy English thoughts into natural words, phrases, chunks, and sentences.
+SayIt turns messy English thoughts into natural words, phrases, chunks, and sentences, and explains known expressions in context.
 
 ## Dogfood MVP
 

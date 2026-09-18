@@ -4,6 +4,7 @@ import type { RetrievalResult } from "../shared/contract";
 
 const result: RetrievalResult = {
   schema_version: "1",
+  mode: "retrieve",
   status: "success",
   normalized_input: "type on keyboard and make mistakes",
   inferred_intent: "describe making typing mistakes",

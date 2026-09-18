@@ -100,7 +100,10 @@ export function createRetrieveHandler(provider: ExpressionProvider) {
         );
       }
 
-      const result = await provider.retrieve(parsedRequest.data.input);
+      const result = await provider.retrieve(
+        parsedRequest.data.input,
+        parsedRequest.data.context,
+      );
       sendJson(response, 200, result);
     } catch (error) {
       if (error instanceof RequestError) {

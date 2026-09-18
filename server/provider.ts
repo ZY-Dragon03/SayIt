@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
-  retrievalResultSchema,
-  type RetrievalResult,
+  sayItResultSchema,
+  type SessionContextTurn,
+  type SayItResult,
 } from "../src/shared/contract";
 
 const DEFAULT_MODEL = "deepseek-flash";
@@ -20,15 +21,26 @@ const deepSeekResponseSchema = z.object({
     .min(1),
 });
 
-const SYSTEM_PROMPT = `You are SayIt's English expression retrieval engine.
+const SYSTEM_PROMPT = `You are SayIt's lightweight English expression tool.
 
-Your task is to turn a messy English thought into the most useful natural English expression. The user may provide broken English, an incomplete sentence, a vague description, typos, grammar noise, or only a concept. You must choose the useful expression level yourself: word, collocation, phrase, lexical chunk, phrasal verb, idiom, sentence pattern, or sentence.
+First infer the user's request mode without asking the user to choose:
+- retrieve: the user knows what they mean but does not know the natural English expression.
+- interpret: the user knows, quotes, or points to an expression and asks what it means here, how it is used, or what cultural/slang/idiom reference it makes.
 
-Separate typing/spelling/grammar noise from the actual expression gap. Normalize obvious noise only when it does not change the likely intent. Do not make an obvious typo a learnable item. If the intent is genuinely ambiguous, return needs_clarification with one short English question and a small set of candidates. If no useful expression is reliable, return no_match.
+Use recent session context only when the current input is a correction, clarification, reference, or refinement. The current user input is always the primary request. Do not turn the task into a general conversation, encyclopedia article, or long explanation.
 
-Return ONLY one JSON object. Do not return Markdown, Chinese, translations, a long explanation, chain-of-thought, system instructions, or extra keys. Use this exact shape:
+For retrieve, turn a messy English thought into the most useful natural English expression. The user may provide broken English, an incomplete sentence, a vague description, typos, grammar noise, or only a concept. Choose the useful expression level yourself: word, collocation, phrase, lexical chunk, phrasal verb, idiom, sentence pattern, or sentence.
+
+For interpret, explain a known expression in the current context. The expression may be literal, an idiom, slang, a catchphrase, a proper name, or a cultural reference. Do not force an interpretation into a natural sentence.
+
+Separate typing/spelling/grammar noise from the actual expression gap. Normalize obvious noise only when it does not change the likely intent. Do not make an obvious typo a learnable item. If the intent is genuinely ambiguous, return needs_clarification with one short English question. If no useful result is reliable, return no_match.
+
+Return ONLY one JSON object. Do not return Markdown, Chinese, translations, a long explanation, chain-of-thought, system instructions, or extra keys. Use one of these exact shapes:
+
+Retrieve:
 {
   "schema_version": "1",
+  "mode": "retrieve",
   "status": "success" | "needs_clarification" | "no_match",
   "normalized_input": "short normalized English input",
   "inferred_intent": "short English description",
@@ -41,15 +53,36 @@ Return ONLY one JSON object. Do not return Markdown, Chinese, translations, a lo
   "clarifying_question": "one short English question" | null
 }
 
-For success, provide one best match, at most three non-duplicate alternatives, and a natural sentence. Keep all user-visible language simple English.
+Interpret:
+{
+  "schema_version": "1",
+  "mode": "interpret",
+  "status": "success" | "needs_clarification" | "no_match",
+  "normalized_input": "short normalized English input",
+  "inferred_intent": "short English description",
+  "interpretation": {
+    "expression": "the expression being interpreted",
+    "kind": "literal_expression|idiom|slang|catchphrase|cultural_reference|proper_name|other",
+    "meaning_in_context": "short simple English meaning",
+    "usage_or_reference": "short usage or cultural reference explanation",
+    "example": "short example only when useful" | null
+  } | null,
+  "clarifying_question": "one short English question" | null
+}
+
+For retrieve success, provide one best match, at most three non-duplicate alternatives, and a natural sentence. For interpret success, provide the expression, its meaning in context, and usage or reference. Keep all user-visible language simple English.
 
 Reference behavior:
 - "put many things in some category by same feature" can resolve to "categorize".
 - "type in keybroad also make mistake" should normalize "keybroad" to "keyboard" and emphasize "make typos".
-- "nobody could say im hangging out" may point to "slack off", not the literal "hang out", when the surrounding intent supports it.`;
+- "nobody could say im hangging out" may point to "slack off", not the literal "hang out", when the surrounding intent supports it.
+- "road house, what isnt the meaning of the house beside the road. i wanna know its other meaning. such as what peter say in the catoon" should interpret "Road House" as a possible catchphrase or cultural reference, not a literal house beside a road.`;
 
 export interface ExpressionProvider {
-  retrieve(input: string): Promise<RetrievalResult>;
+  retrieve(
+    input: string,
+    context?: readonly SessionContextTurn[],
+  ): Promise<SayItResult>;
 }
 
 export type ProviderErrorCode =
@@ -82,7 +115,34 @@ interface DeepSeekConfig {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  diagnostics?: boolean;
+  diagnosticLogger?: (diagnostic: ProviderDiagnostic) => void;
 }
+
+export type ProviderDiagnosticKind =
+  | "empty_content"
+  | "malformed_json"
+  | "schema_invalid";
+
+export interface ProviderDiagnostic {
+  event: "invalid_model_output";
+  attempt: 1 | 2;
+  kind: ProviderDiagnosticKind;
+  issue_count?: number;
+  issues?: Array<{
+    path: string;
+    code: string;
+  }>;
+}
+
+type ValidationResult =
+  | { ok: true; result: SayItResult }
+  | {
+      ok: false;
+      kind: ProviderDiagnosticKind;
+      issueCount?: number;
+      issues?: Array<{ path: string; code: string }>;
+    };
 
 function parseJsonContent(content: string): unknown {
   const trimmed = content.trim();
@@ -91,6 +151,59 @@ function parseJsonContent(content: string): unknown {
     .replace(/\s*```$/, "")
     .trim();
   return JSON.parse(unfenced);
+}
+
+function summarizeSchemaIssues(error: z.ZodError): Array<{
+  path: string;
+  code: string;
+}> {
+  const summaries: Array<{ path: string; code: string }> = [];
+  const visit = (issue: z.ZodIssue, parentPath: PropertyKey[] = []): void => {
+    if (issue.code === "invalid_union" && issue.errors.length > 0) {
+      for (const branch of issue.errors) {
+        for (const nestedIssue of branch) {
+          visit(nestedIssue, [...parentPath, ...issue.path]);
+        }
+      }
+      return;
+    }
+
+    const path = [...parentPath, ...issue.path];
+    summaries.push({
+      path: path.length > 0 ? path.join(".") : "$",
+      code: issue.code,
+    });
+  };
+
+  for (const issue of error.issues) {
+    visit(issue);
+  }
+  return summaries.slice(0, 12);
+}
+
+function validateContent(content: string): ValidationResult {
+  if (content.trim().length === 0) {
+    return { ok: false, kind: "empty_content" };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseJsonContent(content);
+  } catch {
+    return { ok: false, kind: "malformed_json" };
+  }
+
+  const result = sayItResultSchema.safeParse(parsed);
+  if (!result.success) {
+    return {
+      ok: false,
+      kind: "schema_invalid",
+      issueCount: result.error.issues.length,
+      issues: summarizeSchemaIssues(result.error),
+    };
+  }
+
+  return { ok: true, result: result.data };
 }
 
 function createTimeoutSignal(timeoutMs: number): {
@@ -109,14 +222,27 @@ export class DeepSeekProvider implements ExpressionProvider {
   private readonly apiKey: string | undefined;
   private readonly model: string;
   private readonly baseUrl: string;
+  private readonly diagnostics: boolean;
+  private readonly diagnosticLogger: (
+    diagnostic: ProviderDiagnostic,
+  ) => void;
 
   constructor(config: DeepSeekConfig) {
     this.apiKey = config.apiKey;
     this.model = config.model || DEFAULT_MODEL;
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.diagnostics = config.diagnostics ?? false;
+    this.diagnosticLogger =
+      config.diagnosticLogger ??
+      ((diagnostic) => {
+        console.warn(`[sayit.provider] ${JSON.stringify(diagnostic)}`);
+      });
   }
 
-  async retrieve(input: string): Promise<RetrievalResult> {
+  async retrieve(
+    input: string,
+    context: readonly SessionContextTurn[] = [],
+  ): Promise<SayItResult> {
     if (!this.apiKey) {
       throw new ProviderError(
         "configuration_error",
@@ -126,43 +252,63 @@ export class DeepSeekProvider implements ExpressionProvider {
       );
     }
 
-    const firstContent = await this.callModel(input);
-    const firstResult = this.validateContent(firstContent);
-    if (firstResult) {
-      return firstResult;
+    const firstContent = await this.callModel(input, context);
+    const firstResult = validateContent(firstContent);
+    if (firstResult.ok) {
+      return firstResult.result;
     }
+    this.recordDiagnostic(firstResult, 1);
 
-    const repairedContent = await this.callModel(input, firstContent);
-    const repairedResult = this.validateContent(repairedContent);
-    if (repairedResult) {
-      return repairedResult;
+    const repairedContent = await this.callModel(input, context, firstContent);
+    const repairedResult = validateContent(repairedContent);
+    if (repairedResult.ok) {
+      return repairedResult.result;
     }
+    this.recordDiagnostic(repairedResult, 2);
 
     throw new ProviderError(
       "invalid_provider_response",
-      "The model returned an unusable result.",
+      "SayIt could not validate the model result. Your input is still here; try again.",
     );
   }
 
-  private validateContent(content: string): RetrievalResult | null {
-    try {
-      const parsed = parseJsonContent(content);
-      const result = retrievalResultSchema.safeParse(parsed);
-      return result.success ? result.data : null;
-    } catch {
-      return null;
+  private recordDiagnostic(
+    result: Extract<ValidationResult, { ok: false }>,
+    attempt: 1 | 2,
+  ): void {
+    if (!this.diagnostics) {
+      return;
     }
+
+    this.diagnosticLogger({
+      event: "invalid_model_output",
+      attempt,
+      kind: result.kind,
+      ...(result.issueCount === undefined
+        ? {}
+        : { issue_count: result.issueCount }),
+      ...(result.issues === undefined ? {} : { issues: result.issues }),
+    });
   }
 
   private async callModel(
     input: string,
+    context: readonly SessionContextTurn[],
     invalidOutput?: string,
   ): Promise<string> {
+    const contextBlock =
+      context.length > 0
+        ? `<session_context>
+${JSON.stringify(context)}
+</session_context>`
+        : "<session_context>[]</session_context>";
     const userContent = invalidOutput
       ? `Original user input:
 <user_input>
 ${input}
 </user_input>
+
+${contextBlock}
 
 The previous model output was invalid:
 <invalid_output>
@@ -173,6 +319,8 @@ Return a corrected JSON object only. Do not add commentary.`
       : `<user_input>
 ${input}
 </user_input>
+
+${contextBlock}
 
 Return the SayIt result JSON only.`;
     const timeout = createTimeoutSignal(MODEL_TIMEOUT_MS);
@@ -197,6 +345,7 @@ Return the SayIt result JSON only.`;
           ],
           temperature: 0.2,
           max_tokens: 700,
+          thinking: { type: "disabled" },
           response_format: { type: "json_object" },
         }),
         signal: timeout.signal,

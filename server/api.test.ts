@@ -9,6 +9,7 @@ import type { RetrievalResult } from "../src/shared/contract";
 
 const successfulResult: RetrievalResult = {
   schema_version: "1",
+  mode: "retrieve",
   status: "success",
   normalized_input: "organize items by shared features",
   inferred_intent: "put similar items into categories",
@@ -29,6 +30,7 @@ const successfulResult: RetrievalResult = {
 
 const clarificationResult: RetrievalResult = {
   schema_version: "1",
+  mode: "retrieve",
   status: "needs_clarification",
   normalized_input: "that thing with the words",
   inferred_intent: "an unclear reference to an expression",
@@ -46,6 +48,7 @@ const clarificationResult: RetrievalResult = {
 
 const noMatchResult: RetrievalResult = {
   schema_version: "1",
+  mode: "retrieve",
   status: "no_match",
   normalized_input: "blue triangle memory thunder",
   inferred_intent: "no reliable English expression found",
@@ -104,6 +107,7 @@ describe("retrieve API", () => {
     });
     expect(provider.retrieve).toHaveBeenCalledWith(
       "put many things in some category",
+      [],
     );
   });
 
@@ -159,5 +163,37 @@ describe("retrieve API", () => {
         status: expected.status,
       });
     }
+  });
+
+  it("passes validated session context to the provider", async () => {
+    const provider = {
+      retrieve: vi.fn(async () => successfulResult),
+    };
+    const response = await requestWith(provider, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: "no, I mean what Peter says",
+        context: [
+          {
+            input: "road house",
+            mode: "retrieve",
+            assistant_summary: "Best match: a house beside a road.",
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(provider.retrieve).toHaveBeenCalledWith(
+      "no, I mean what Peter says",
+      [
+        {
+          input: "road house",
+          mode: "retrieve",
+          assistant_summary: "Best match: a house beside a road.",
+        },
+      ],
+    );
   });
 });

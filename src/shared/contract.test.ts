@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_INPUT_LENGTH,
+  MAX_SESSION_TURNS,
   retrieveRequestSchema,
   retrievalResultSchema,
+  sayItResultSchema,
 } from "./contract";
 import { dogfoodFixtures } from "./fixtures";
 
@@ -37,7 +39,54 @@ const successfulResult = {
 
 describe("SayIt retrieval contract", () => {
   it("accepts a complete success result", () => {
-    expect(retrievalResultSchema.safeParse(successfulResult).success).toBe(true);
+    const parsed = retrievalResultSchema.safeParse(successfulResult);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.mode).toBe("retrieve");
+    }
+  });
+
+  it("accepts a strict interpretation result without a natural sentence", () => {
+    const result = sayItResultSchema.safeParse({
+      schema_version: "1",
+      mode: "interpret",
+      status: "success",
+      normalized_input: "road house",
+      inferred_intent: "asking about a cultural reference",
+      interpretation: {
+        expression: "Road House",
+        kind: "catchphrase",
+        meaning_in_context:
+          "A catchphrase or cultural reference, not a literal house beside a road.",
+        usage_or_reference:
+          "Peter Griffin uses it as a running gag referencing the movie Road House.",
+        example: null,
+      },
+      clarifying_question: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts bounded ephemeral session context", () => {
+    const parsed = retrieveRequestSchema.safeParse({
+      input: "no, I mean what Peter says",
+      context: Array.from({ length: MAX_SESSION_TURNS }, (_, index) => ({
+        input: `turn ${index}`,
+        mode: "interpret",
+        assistant_summary: "The previous result explained a reference.",
+      })),
+    });
+    expect(parsed.success).toBe(true);
+    expect(
+      retrieveRequestSchema.safeParse({
+        input: "follow up",
+        context: Array.from({ length: MAX_SESSION_TURNS + 1 }, () => ({
+          input: "previous",
+          mode: "retrieve",
+          assistant_summary: "A previous result.",
+        })),
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects success without a best match", () => {
@@ -76,6 +125,8 @@ describe("SayIt retrieval contract", () => {
       "concept-to-word",
       "typing-noise-to-chunk",
       "semantic-noise-to-phrasal-verb",
+      "known-expression-to-interpretation",
+      "correction-with-session-context",
       "ambiguous-input",
       "no-reliable-match",
       "provider-timeout",
