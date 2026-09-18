@@ -46,6 +46,12 @@ It will:
 
 Node.js must be installed on Windows. The launcher uses Windows Script Host and does not require PowerShell execution-policy changes. Startup logs are written to `%TEMP%\SayIt\server.log`.
 
+### Pronunciation playback
+
+Useful English expressions can be played with the small speaker button beside the result. Playback uses the browser's built-in Web Speech API only; no audio is sent to SayIt or DeepSeek. Choose US/UK accent and Normal/Slow speed from the top bar. These preferences are saved in this browser. Voice quality and availability depend on the installed browser/system voices.
+
+When available, the primary expression also shows a compact IPA transcription. Switching US/UK changes both the displayed IPA and the spoken voice. Uncertain pronunciation metadata is omitted instead of blocking the result.
+
 ## Verification
 
 ```powershell

@@ -93,14 +93,50 @@
 }
 
 .topbar-actions {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.pronunciation-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.pronunciation-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pronunciation-controls select {
+  min-height: 25px;
+  padding: 0 2px;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
 }
 
 .icon-button,
 .saved-button,
 .secondary-button,
 .tiny-button,
-.clear-button {
+.clear-button,
+.speak-button,
+.copy-button {
   color: var(--muted);
   border: 1px solid transparent;
   background: transparent;
@@ -115,7 +151,9 @@
 .saved-button:hover,
 .secondary-button:hover,
 .tiny-button:hover,
-.clear-button:hover {
+.clear-button:hover,
+.speak-button:hover,
+.copy-button:hover {
   color: var(--text);
   border-color: var(--border);
   background: var(--surface-muted);
@@ -126,9 +164,11 @@
 .secondary-button:focus-visible,
 .tiny-button:focus-visible,
 .clear-button:focus-visible,
+.speak-button:focus-visible,
 .primary-button:focus-visible,
 .saved-item:focus-visible,
 textarea:focus-visible,
+select:focus-visible,
 summary:focus-visible {
   outline: 3px solid rgba(82, 103, 217, 0.28);
   outline-offset: 2px;
@@ -391,11 +431,38 @@ summary:focus-visible {
 }
 
 .best-match {
+  position: relative;
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 10px;
+  padding-right: 78px;
   margin-top: -14px;
+}
+
+.action-block {
+  position: relative;
+  padding-right: 78px;
+}
+
+.playable-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contextual-actions {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
 }
 
 .best-match strong {
@@ -405,8 +472,23 @@ summary:focus-visible {
   line-height: 1.05;
 }
 
-.best-match span,
-.expression-row span,
+.expression-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ipa-text {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.expression-type,
 .learnable-chip {
   color: var(--accent-strong);
   font-size: 11px;
@@ -427,10 +509,11 @@ summary:focus-visible {
 }
 
 .expression-row {
+  position: relative;
   justify-content: space-between;
   gap: 12px;
   min-height: 43px;
-  padding: 8px 10px 8px 13px;
+  padding: 8px 78px 8px 13px;
   border: 1px solid var(--border);
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.18);
@@ -460,14 +543,54 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.speak-button,
+.copy-button {
+  display: inline-grid;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  place-items: center;
+  color: var(--accent-strong);
+  border-color: var(--border);
+  border-radius: 50%;
+}
+
+.speak-button.speaking {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.speak-button.error {
+  color: var(--danger);
+  border-color: rgba(198, 83, 98, 0.35);
+  background: rgba(198, 83, 98, 0.08);
+}
+
+.copy-button.copied {
+  color: var(--accent-strong);
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+
+.action-icon {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
 .natural-section {
   padding-top: 2px;
 }
 
 .natural-sentence {
+  position: relative;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px;
+  padding: 16px 78px 16px 16px;
   border-left: 3px solid var(--accent);
   border-radius: 0 12px 12px 0;
   background: var(--accent-soft);
@@ -486,6 +609,8 @@ summary:focus-visible {
 }
 
 .explanation {
+  position: relative;
+  padding-right: 78px;
   padding-top: 1px;
 }
 
@@ -495,6 +620,15 @@ summary:focus-visible {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.pronunciation-error {
+  margin-bottom: 16px;
+  padding: 9px 11px;
+  color: var(--danger);
+  font-size: 11px;
+  border-left: 3px solid var(--danger);
+  background: rgba(198, 83, 98, 0.08);
 }
 
 .learnable-row {
@@ -531,6 +665,27 @@ summary:focus-visible {
   justify-content: space-between;
   gap: 18px;
   min-height: 132px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .action-block .contextual-actions {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(6px, -50%);
+  }
+
+  .action-block:hover .contextual-actions,
+  .action-block:focus-within .contextual-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(0, -50%);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .action-block .contextual-actions {
+    opacity: 0.82;
+  }
 }
 
 .error-state {

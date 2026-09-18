@@ -21,6 +21,10 @@ const validContent = JSON.stringify({
     text: "categorize",
     base_form: "categorize",
     expression_type: "word",
+    pronunciation: {
+      us: "/ˈkætəɡəraɪz/",
+      uk: "/ˈkætəɡəraɪz/",
+    },
   },
   alternatives: [],
   natural_sentence: "Categorize the items.",
@@ -46,6 +50,10 @@ const validInterpretationContent = JSON.stringify({
     usage_or_reference:
       "Peter Griffin uses it as a running gag referencing the movie Road House.",
     example: null,
+    pronunciation: {
+      us: "/ˈroʊd ˌhaʊs/",
+      uk: "/ˈrəʊd ˌhaʊs/",
+    },
   },
   clarifying_question: null,
 });
@@ -75,6 +83,7 @@ describe("DeepSeekProvider", () => {
       throw new Error("Expected a retrieve result.");
     }
     expect(result.best_match?.text).toBe("categorize");
+    expect(result.best_match?.pronunciation?.us).toBe("/ˈkætəɡəraɪz/");
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.headers).toMatchObject({
@@ -83,6 +92,7 @@ describe("DeepSeekProvider", () => {
     expect(String(init.body)).toContain("schema_version");
     expect(String(init.body)).toContain("make typos");
     expect(String(init.body)).toContain("slack off");
+    expect(String(init.body)).toContain("pronunciation");
     expect(JSON.parse(String(init.body)).thinking).toEqual({
       type: "disabled",
     });
@@ -116,6 +126,11 @@ describe("DeepSeekProvider", () => {
     );
 
     expect(result.mode).toBe("interpret");
+    if (result.mode === "interpret") {
+      expect(result.interpretation?.pronunciation?.uk).toBe(
+        "/ˈrəʊd ˌhaʊs/",
+      );
+    }
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const body = JSON.parse(String(init.body));

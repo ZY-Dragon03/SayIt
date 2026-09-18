@@ -15,6 +15,7 @@ import {
   type SayItResult,
   type SessionContextTurn,
   type ExpressionType,
+  type PronunciationMetadata,
   type RetrievalResult,
 } from "./shared/contract";
 import {
@@ -22,6 +23,12 @@ import {
   StorageError,
   type SavedExpression,
 } from "./lib/storage";
+import {
+  loadPronunciationPreferences,
+  PronunciationService,
+  savePronunciationPreferences,
+  type PronunciationPreferences,
+} from "./lib/pronunciation";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -109,6 +116,16 @@ function App() {
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [pronunciationPreferences, setPronunciationPreferences] =
+    useState<PronunciationPreferences>(loadPronunciationPreferences);
+  const [speakingKey, setSpeakingKey] = useState<string | null>(null);
+  const [pronunciationErrorKey, setPronunciationErrorKey] = useState<
+    string | null
+  >(null);
+  const [pronunciationError, setPronunciationError] = useState<string | null>(
+    null,
+  );
+  const pronunciationServiceRef = useRef<PronunciationService | null>(null);
 
   useEffect(() => {
     const repository = new LocalMemoryRepository();
@@ -126,6 +143,13 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    pronunciationServiceRef.current = new PronunciationService();
+    return () => {
+      pronunciationServiceRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setDrawerOpen(false);
@@ -139,6 +163,47 @@ function App() {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 2200);
   }, []);
+
+  const updatePronunciationPreferences = useCallback(
+    (next: PronunciationPreferences) => {
+      setPronunciationPreferences(next);
+      savePronunciationPreferences(next);
+    },
+    [],
+  );
+
+  const handleSpeak = useCallback(
+    (text: string, key: string) => {
+      setPronunciationError(null);
+      setPronunciationErrorKey(null);
+      const service = pronunciationServiceRef.current;
+      if (!service) {
+        setPronunciationErrorKey(key);
+        setPronunciationError("Speech playback is unavailable.");
+        return;
+      }
+      try {
+        service.speak(text, pronunciationPreferences, {
+          onStart: () => setSpeakingKey(key),
+          onEnd: () => setSpeakingKey((current) => (current === key ? null : current)),
+          onError: () => {
+            setSpeakingKey((current) => (current === key ? null : current));
+            setPronunciationErrorKey(key);
+            setPronunciationError("Couldn’t play this expression in the browser.");
+          },
+        });
+      } catch (speechError) {
+        setSpeakingKey(null);
+        setPronunciationErrorKey(key);
+        setPronunciationError(
+          speechError instanceof Error
+            ? speechError.message
+            : "Speech playback is unavailable.",
+        );
+      }
+    },
+    [pronunciationPreferences],
+  );
 
   const retrieve = useCallback(async (value: string) => {
     setIsSubmitting(true);
@@ -298,6 +363,10 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <PronunciationControls
+            preferences={pronunciationPreferences}
+            onChange={updatePronunciationPreferences}
+          />
           <button
             className="icon-button"
             type="button"
@@ -367,6 +436,11 @@ function App() {
           aria-atomic="false"
           aria-label="SayIt result"
         >
+          {pronunciationError && (
+            <div className="pronunciation-error" role="status">
+              {pronunciationError}
+            </div>
+          )}
           {isSubmitting && (
             <div className="loading-state">
               <span className="loading-orb" aria-hidden="true" />
@@ -402,6 +476,10 @@ function App() {
               onCopy={handleCopy}
               onSave={handleSave}
               onRetry={() => void retrieve(input.trim())}
+              onSpeak={handleSpeak}
+              speakingKey={speakingKey}
+              pronunciationErrorKey={pronunciationErrorKey}
+              pronunciationAccent={pronunciationPreferences.accent}
             />
           )}
 
@@ -460,18 +538,18 @@ function App() {
                         <span>{item.result.natural_sentence ?? item.input}</span>
                       </button>
                       <div className="saved-item-actions">
-                        <button
-                          className="tiny-button"
-                          type="button"
-                          onClick={() =>
+                        <CopyButton
+                          label="Saved sentence"
+                          copied={copiedLabel === "Saved sentence"}
+                          onCopy={() =>
                             void handleCopy(
-                              item.result.natural_sentence ?? item.result.best_match?.text ?? item.input,
+                              item.result.natural_sentence ??
+                                item.result.best_match?.text ??
+                                item.input,
                               "Saved sentence",
                             )
                           }
-                        >
-                          Copy
-                        </button>
+                        />
                         <button
                           className="tiny-button danger-button"
                           type="button"
@@ -499,18 +577,26 @@ interface ResultViewProps {
   result: SayItResult;
   isSaved: boolean;
   copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  pronunciationAccent: PronunciationPreferences["accent"];
   onCopy: (text: string, label: string) => Promise<void>;
   onSave: () => void;
   onRetry: () => void;
+  onSpeak: (text: string, key: string) => void;
 }
 
 function ResultView({
   result,
   isSaved,
   copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  pronunciationAccent,
   onCopy,
   onSave,
   onRetry,
+  onSpeak,
 }: ResultViewProps) {
   if (result.mode === "interpret") {
     return (
@@ -519,6 +605,10 @@ function ResultView({
         copiedLabel={copiedLabel}
         onCopy={onCopy}
         onRetry={onRetry}
+        onSpeak={onSpeak}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        pronunciationAccent={pronunciationAccent}
       />
     );
   }
@@ -551,6 +641,10 @@ function ResultView({
                 expression={alternative}
                 onCopy={onCopy}
                 copiedLabel={copiedLabel}
+                onSpeak={onSpeak}
+                speakingKey={speakingKey}
+                pronunciationErrorKey={pronunciationErrorKey}
+                pronunciationAccent={pronunciationAccent}
               />
             ))}
           </div>
@@ -576,18 +670,27 @@ function ResultView({
           >
             {isSaved ? "Saved locally" : "Save"}
           </button>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void onCopy(result.best_match!.text, "Best match")}
-          >
-            {copiedLabel === "Best match" ? "Copied" : "Copy"}
-          </button>
         </div>
       </div>
-      <div className="best-match">
-        <strong>{result.best_match.text}</strong>
-        <span>{formatExpressionType(result.best_match.expression_type)}</span>
+      <div className="best-match action-block">
+        <div className="playable-text">
+          <strong>{result.best_match.text}</strong>
+          <ExpressionMeta
+            pronunciation={result.best_match.pronunciation}
+            accent={pronunciationAccent}
+            expressionType={formatExpressionType(result.best_match.expression_type)}
+          />
+        </div>
+        <ContextualActions
+          text={result.best_match.text}
+          label="Best match"
+          speechKey="best-match"
+          copiedLabel={copiedLabel}
+          speakingKey={speakingKey}
+          pronunciationErrorKey={pronunciationErrorKey}
+          onCopy={onCopy}
+          onSpeak={onSpeak}
+        />
       </div>
 
       {result.alternatives.length > 0 && (
@@ -600,6 +703,10 @@ function ResultView({
                 expression={alternative}
                 onCopy={onCopy}
                 copiedLabel={copiedLabel}
+                onSpeak={onSpeak}
+                speakingKey={speakingKey}
+                pronunciationErrorKey={pronunciationErrorKey}
+                pronunciationAccent={pronunciationAccent}
               />
             ))}
           </div>
@@ -608,22 +715,35 @@ function ResultView({
 
       <div className="natural-section">
         <span className="result-kicker">Natural version</span>
-        <div className="natural-sentence">
+        <div className="natural-sentence action-block">
           <p>{result.natural_sentence}</p>
-          <button
-            className="tiny-button"
-            type="button"
-            onClick={() => void onCopy(result.natural_sentence!, "Natural version")}
-          >
-            {copiedLabel === "Natural version" ? "Copied" : "Copy"}
-          </button>
+          <ContextualActions
+            text={result.natural_sentence}
+            label="Natural version"
+            speechKey="natural-version"
+            copiedLabel={copiedLabel}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            onCopy={onCopy}
+            onSpeak={onSpeak}
+          />
         </div>
       </div>
 
       {result.short_explanation && (
-        <div className="explanation">
+        <div className="explanation action-block">
           <span className="result-kicker">Explanation</span>
           <p>{result.short_explanation}</p>
+          <ContextualActions
+            text={result.short_explanation}
+            label="Explanation"
+            speechKey="short-explanation"
+            copiedLabel={copiedLabel}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            onCopy={onCopy}
+            onSpeak={onSpeak}
+          />
         </div>
       )}
 
@@ -655,15 +775,23 @@ function ResultView({
 interface InterpretationResultViewProps {
   result: Extract<SayItResult, { mode: "interpret" }>;
   copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  pronunciationAccent: PronunciationPreferences["accent"];
   onCopy: (text: string, label: string) => Promise<void>;
   onRetry: () => void;
+  onSpeak: (text: string, key: string) => void;
 }
 
 function InterpretationResultView({
   result,
   copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  pronunciationAccent,
   onCopy,
   onRetry,
+  onSpeak,
 }: InterpretationResultViewProps) {
   if (result.status === "no_match") {
     return (
@@ -704,61 +832,76 @@ function InterpretationResultView({
     <div className="result-content interpretation-content">
       <div className="result-heading-row">
         <span className="result-kicker">Expression</span>
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={() => void onCopy(interpretation.expression, "Expression")}
-        >
-          {copiedLabel === "Expression" ? "Copied" : "Copy"}
-        </button>
       </div>
-      <div className="best-match">
-        <strong>{interpretation.expression}</strong>
-        <span>{interpretation.kind.replace("_", " ")}</span>
+      <div className="best-match action-block">
+        <div className="playable-text">
+          <strong>{interpretation.expression}</strong>
+          <ExpressionMeta
+            pronunciation={interpretation.pronunciation}
+            accent={pronunciationAccent}
+            expressionType={interpretation.kind.replace("_", " ")}
+          />
+        </div>
+        <ContextualActions
+          text={interpretation.expression}
+          label="Expression"
+          speechKey="interpretation-expression"
+          copiedLabel={copiedLabel}
+          speakingKey={speakingKey}
+          pronunciationErrorKey={pronunciationErrorKey}
+          onCopy={onCopy}
+          onSpeak={onSpeak}
+        />
       </div>
 
       <div className="result-section">
         <span className="result-kicker">Meaning in this context</span>
-        <div className="natural-sentence">
+        <div className="natural-sentence action-block">
           <p>{interpretation.meaning_in_context}</p>
-          <button
-            className="tiny-button"
-            type="button"
-            onClick={() =>
-              void onCopy(
-                interpretation.meaning_in_context,
-                "Meaning in this context",
-              )
-            }
-          >
-            {copiedLabel === "Meaning in this context" ? "Copied" : "Copy"}
-          </button>
+          <ContextualActions
+            text={interpretation.meaning_in_context}
+            label="Meaning in this context"
+            speechKey="interpretation-meaning"
+            copiedLabel={copiedLabel}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            onCopy={onCopy}
+            onSpeak={onSpeak}
+          />
         </div>
       </div>
 
       <div className="result-section">
         <span className="result-kicker">Usage / reference</span>
-        <div className="natural-sentence">
+        <div className="natural-sentence action-block">
           <p>{interpretation.usage_or_reference}</p>
-          <button
-            className="tiny-button"
-            type="button"
-            onClick={() =>
-              void onCopy(
-                interpretation.usage_or_reference,
-                "Usage / reference",
-              )
-            }
-          >
-            {copiedLabel === "Usage / reference" ? "Copied" : "Copy"}
-          </button>
+          <ContextualActions
+            text={interpretation.usage_or_reference}
+            label="Usage / reference"
+            speechKey="interpretation-usage"
+            copiedLabel={copiedLabel}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            onCopy={onCopy}
+            onSpeak={onSpeak}
+          />
         </div>
       </div>
 
       {interpretation.example && (
-        <div className="explanation">
+        <div className="explanation action-block">
           <span className="result-kicker">Example</span>
           <p>{interpretation.example}</p>
+          <ContextualActions
+            text={interpretation.example}
+            label="Example"
+            speechKey="interpretation-example"
+            copiedLabel={copiedLabel}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            onCopy={onCopy}
+            onSpeak={onSpeak}
+          />
         </div>
       )}
     </div>
@@ -769,28 +912,277 @@ interface ExpressionRowProps {
   expression: NonNullable<RetrievalResult["alternatives"]>[number];
   onCopy: (text: string, label: string) => Promise<void>;
   copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  pronunciationAccent: PronunciationPreferences["accent"];
+  onSpeak: (text: string, key: string) => void;
 }
 
 function ExpressionRow({
   expression,
   onCopy,
   copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  pronunciationAccent,
+  onSpeak,
 }: ExpressionRowProps) {
-  const label = `Copy ${expression.text}`;
+  const speechKey = `alternative-${expression.text}`;
+  const label = `Useful expression: ${expression.text}`;
   return (
-    <div className="expression-row">
+    <div className="expression-row action-block">
       <div>
-        <strong>{expression.text}</strong>
-        <span>{formatExpressionType(expression.expression_type)}</span>
+        <div className="playable-text">
+          <strong>{expression.text}</strong>
+          <ExpressionMeta
+            pronunciation={expression.pronunciation}
+            accent={pronunciationAccent}
+            expressionType={formatExpressionType(expression.expression_type)}
+          />
+        </div>
       </div>
-      <button
-        className="tiny-button"
-        type="button"
-        onClick={() => void onCopy(expression.text, label)}
-      >
-        {copiedLabel === label ? "Copied" : "Copy"}
-      </button>
+      <ContextualActions
+        text={expression.text}
+        label={label}
+        speechKey={speechKey}
+        copiedLabel={copiedLabel}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        onCopy={onCopy}
+        onSpeak={onSpeak}
+      />
     </div>
+  );
+}
+
+interface ExpressionMetaProps {
+  pronunciation: PronunciationMetadata | undefined;
+  accent: PronunciationPreferences["accent"];
+  expressionType: string;
+}
+
+function ExpressionMeta({
+  pronunciation,
+  accent,
+  expressionType,
+}: ExpressionMetaProps) {
+  const ipa = pronunciation?.[accent];
+  return (
+    <span className="expression-meta">
+      {ipa && <span className="ipa-text">{ipa}</span>}
+      <span className="expression-type">· {expressionType}</span>
+    </span>
+  );
+}
+
+interface ContextualActionsProps {
+  text: string;
+  label: string;
+  speechKey: string;
+  copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  onCopy: (text: string, label: string) => Promise<void>;
+  onSpeak: (text: string, key: string) => void;
+}
+
+function ContextualActions({
+  text,
+  label,
+  speechKey,
+  copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  onCopy,
+  onSpeak,
+}: ContextualActionsProps) {
+  return (
+    <div className="contextual-actions">
+      <SpeakButton
+        text={text}
+        label={label}
+        speaking={speakingKey === speechKey}
+        error={pronunciationErrorKey === speechKey}
+        onSpeak={onSpeak}
+        speechKey={speechKey}
+      />
+      <CopyButton
+        label={label}
+        copied={copiedLabel === label}
+        onCopy={() => void onCopy(text, label)}
+      />
+    </div>
+  );
+}
+
+interface CopyButtonProps {
+  label: string;
+  copied: boolean;
+  onCopy: () => void;
+}
+
+function CopyButton({ label, copied, onCopy }: CopyButtonProps) {
+  return (
+    <button
+      className={`copy-button ${copied ? "copied" : ""}`}
+      type="button"
+      aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
+      title={copied ? "Copied" : "Copy"}
+      onClick={onCopy}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
+  );
+}
+
+interface PronunciationControlsProps {
+  preferences: PronunciationPreferences;
+  onChange: (preferences: PronunciationPreferences) => void;
+}
+
+function PronunciationControls({
+  preferences,
+  onChange,
+}: PronunciationControlsProps) {
+  return (
+    <div className="pronunciation-controls" aria-label="Pronunciation settings">
+      <label>
+        <span>Accent</span>
+        <select
+          value={preferences.accent}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              accent: event.target.value as PronunciationPreferences["accent"],
+            })
+          }
+        >
+          <option value="us">US</option>
+          <option value="uk">UK</option>
+        </select>
+      </label>
+      <label>
+        <span>Speed</span>
+        <select
+          value={preferences.speed}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              speed: event.target.value as PronunciationPreferences["speed"],
+            })
+          }
+        >
+          <option value="normal">Normal</option>
+          <option value="slow">Slow</option>
+        </select>
+      </label>
+    </div>
+  );
+}
+
+interface SpeakButtonProps {
+  text: string;
+  label: string;
+  speaking: boolean;
+  error: boolean;
+  onSpeak: (text: string, key: string) => void;
+  speechKey?: string;
+}
+
+function SpeakButton({
+  text,
+  label,
+  speaking,
+  error,
+  onSpeak,
+  speechKey = label.toLowerCase().replaceAll(" ", "-"),
+}: SpeakButtonProps) {
+  return (
+    <button
+      className={`speak-button ${speaking ? "speaking" : ""} ${
+        error ? "error" : ""
+      }`}
+      type="button"
+      aria-label={
+        error
+          ? `Pronunciation unavailable for ${label}`
+          : `${speaking ? "Playing" : "Listen to"} ${label}`
+      }
+      aria-pressed={speaking}
+      title={error ? "Listen unavailable" : speaking ? "Playing" : "Listen"}
+      onClick={() => onSpeak(text, speechKey)}
+    >
+      {error ? <ErrorIcon /> : speaking ? <StopIcon /> : <SpeakerIcon />}
+    </button>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+    >
+      <rect x="5.25" y="2.25" width="8.5" height="9.5" rx="1.5" />
+      <path d="M10.75 13.75H3.5A1.25 1.25 0 0 1 2.25 12.5V5.25" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+    >
+      <path d="m3.25 8.25 3 3 6.5-6.5" />
+    </svg>
+  );
+}
+
+function SpeakerIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+    >
+      <path d="M2.5 6.25h2l3-2.5v8.5l-3-2.5h-2z" />
+      <path d="M10 5.5a3.5 3.5 0 0 1 0 5" />
+      <path d="M11.75 3.75a6 6 0 0 1 0 8.5" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+    >
+      <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="action-icon"
+      viewBox="0 0 16 16"
+      fill="none"
+    >
+      <path d="M8 2.25 14 13.5H2z" />
+      <path d="M8 6v3.25M8 11.5v.25" />
+    </svg>
   );
 }
 

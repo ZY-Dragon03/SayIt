@@ -44,8 +44,8 @@ Retrieve:
   "status": "success" | "needs_clarification" | "no_match",
   "normalized_input": "short normalized English input",
   "inferred_intent": "short English description",
-  "best_match": { "text": "string", "base_form": "string", "expression_type": "word|collocation|phrase|lexical_chunk|phrasal_verb|idiom|sentence_pattern|sentence" } | null,
-  "alternatives": [{ "text": "string", "base_form": "string", "expression_type": "..." }],
+  "best_match": { "text": "string", "base_form": "string", "expression_type": "word|collocation|phrase|lexical_chunk|phrasal_verb|idiom|sentence_pattern|sentence", "pronunciation": { "us": "/American IPA/", "uk": "/British IPA/" } | null } | null,
+  "alternatives": [{ "text": "string", "base_form": "string", "expression_type": "...", "pronunciation": { "us": "/American IPA/", "uk": "/British IPA/" } | null }],
   "natural_sentence": "one natural English sentence" | null,
   "short_explanation": "simple English only when useful" | null,
   "typo_corrections": [{ "original": "string", "corrected": "string", "kind": "typing_noise|spelling_noise|grammar_noise" }],
@@ -65,12 +65,15 @@ Interpret:
     "kind": "literal_expression|idiom|slang|catchphrase|cultural_reference|proper_name|other",
     "meaning_in_context": "short simple English meaning",
     "usage_or_reference": "short usage or cultural reference explanation",
-    "example": "short example only when useful" | null
+    "example": "short example only when useful" | null,
+    "pronunciation": { "us": "/American IPA/", "uk": "/British IPA/" } | null
   } | null,
   "clarifying_question": "one short English question" | null
 }
 
 For retrieve success, provide one best match, at most three non-duplicate alternatives, and a natural sentence. For interpret success, provide the expression, its meaning in context, and usage or reference. Keep all user-visible language simple English.
+
+Pronunciation metadata is optional and non-blocking. For a primary expression or interpretation expression, include pronunciation only when you are confident; alternatives may omit it. Use a short slash-delimited IPA transcription with no prose. Provide both US and UK values when known, use null for an uncertain accent, and omit the field when pronunciation is unavailable. Never add pronunciation metadata to meanings, usage/reference, explanations, or example sentences.
 
 Reference behavior:
 - "put many things in some category by same feature" can resolve to "categorize".

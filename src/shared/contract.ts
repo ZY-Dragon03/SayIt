@@ -32,11 +32,48 @@ export const interpretationKindSchema = z.enum([
 
 export type InterpretationKind = z.infer<typeof interpretationKindSchema>;
 
+const ipaBodyPattern =
+  /^\/[A-Za-zɑɐɒɓʙβɔɕçɗɖðəɛɜɝɞɟɡɣɤɦɪɨɫɬɭɮɯɰɱɲɳɴŋɵɸɹɾʀʁɶʃʈʉʊʋʌʍχʎʏʑʐʒθʔæœɨˈˌːˑ͜͡.ʰʲʷ̴̩̞̝̟̠̪̰̹̜̘̙̤̥̬̻̺̼̃\s'-]+\/$/u;
+const ipaSignalPattern =
+  /[ɑɐɒɔəɛɜɝɞɪʊʌɹʃʒθðŋɾɲɳʔˈˌːˑæœɶɨʉɵ]/u;
+
+const ipaTextSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(80)
+  .regex(ipaBodyPattern)
+  .refine((value) => ipaSignalPattern.test(value), {
+    message: "Value must look like an IPA transcription.",
+  });
+
+const rawPronunciationSchema = z
+  .object({
+    us: ipaTextSchema.nullable().optional(),
+    uk: ipaTextSchema.nullable().optional(),
+  })
+  .strict()
+  .nullable();
+
+export const pronunciationSchema = z.preprocess(
+  (value) => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const parsed = rawPronunciationSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  },
+  rawPronunciationSchema.optional(),
+);
+
+export type PronunciationMetadata = z.infer<typeof rawPronunciationSchema>;
+
 const expressionSchema = z
   .object({
     text: z.string().trim().min(1).max(160),
     base_form: z.string().trim().min(1).max(160).optional(),
     expression_type: expressionTypeSchema,
+    pronunciation: pronunciationSchema.optional(),
   })
   .strict();
 
@@ -108,6 +145,7 @@ const interpretationPayloadSchema = z
     meaning_in_context: z.string().trim().min(1).max(360),
     usage_or_reference: z.string().trim().min(1).max(360),
     example: z.string().trim().max(300).nullable(),
+    pronunciation: pronunciationSchema.optional(),
   })
   .strict();
 
