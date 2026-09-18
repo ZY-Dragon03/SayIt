@@ -101,7 +101,9 @@ Function HasConfiguredApiKey(path)
   file.Close
   On Error GoTo 0
 
-  lines = Split(text, vbCrLf)
+  text = Replace(text, vbCrLf, vbLf)
+  text = Replace(text, vbCr, vbLf)
+  lines = Split(text, vbLf)
   For Each line In lines
     If LCase(Left(Trim(line), 17)) = "deepseek_api_key=" Then
       index = InStr(1, line, "=", vbBinaryCompare)
