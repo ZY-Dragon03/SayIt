@@ -1,29 +1,29 @@
 ## 1. Milestone 1 — Dogfood MVP：最小基础
 
-- [ ] 1.1 初始化 React、TypeScript、Vite 和最小测试工具链，并保持前端与 API 的类型边界清晰；通过开发构建和类型检查命令验证
-- [ ] 1.2 选择本地运行或私有部署作为首次使用路径，配置服务端 DeepSeek secret 和最短启动命令；通过环境变量审查确认 key 未进入客户端 bundle
-- [ ] 1.3 建立版本化检索结果 schema、表达类型枚举、状态枚举和 API 错误形状；通过合法/非法 fixture 的运行时校验测试验证
-- [ ] 1.4 建立最小输入、噪声、成功、澄清、无匹配和错误 fixture 集；通过 fixture 清单覆盖两份 capability spec 的核心场景验证
+- [x] 1.1 初始化 React、TypeScript、Vite 和最小测试工具链，并保持前端与 API 的类型边界清晰；通过开发构建和类型检查命令验证
+- [x] 1.2 选择本地运行或私有部署作为首次使用路径，配置服务端 DeepSeek secret 和最短启动命令；通过环境变量审查确认 key 未进入客户端 bundle
+- [x] 1.3 建立版本化检索结果 schema、表达类型枚举、状态枚举和 API 错误形状；通过合法/非法 fixture 的运行时校验测试验证
+- [x] 1.4 建立最小输入、噪声、成功、澄清、无匹配和错误 fixture 集；通过 fixture 清单覆盖两份 capability spec 的核心场景验证
 
 ## 2. Milestone 1 — Dogfood MVP：最小模型与 API 链路
 
-- [ ] 2.1 实现不暴露给客户端的 `ExpressionProvider` 接口和 DeepSeek adapter，隔离鉴权、模型名、参数、上游响应和错误格式；通过 mock provider contract test 验证
-- [ ] 2.2 编写 `sayit.expression-retrieval.v1` 系统 prompt，覆盖意图推断、噪声分离、自然表达优先、英文-only、候选上限和输入隔离；通过代表性 fixture smoke test 验证
-- [ ] 2.3 实现最小同源 `POST /api/retrieve` proxy，包含空值/500 字符/请求体校验、上游调用、基础超时和稳定错误映射；通过 400、成功、超时和网络失败测试验证
-- [ ] 2.4 实现模型响应解析、结果 schema 校验、字段长度/枚举约束和最多一次受限修复请求；通过非法 JSON、错误枚举和修复失败测试验证半成品不会进入客户端
+- [x] 2.1 实现不暴露给客户端的 `ExpressionProvider` 接口和 DeepSeek adapter，隔离鉴权、模型名、参数、上游响应和错误格式；通过 mock provider contract test 验证
+- [x] 2.2 编写 `sayit.expression-retrieval.v1` 系统 prompt，覆盖意图推断、噪声分离、自然表达优先、英文-only、候选上限和输入隔离；通过代表性 fixture smoke test 验证
+- [x] 2.3 实现最小同源 `POST /api/retrieve` proxy，包含空值/500 字符/请求体校验、上游调用、基础超时和稳定错误映射；通过 400、成功、超时和网络失败测试验证
+- [x] 2.4 实现模型响应解析、结果 schema 校验、字段长度/枚举约束和最多一次受限修复请求；通过非法 JSON、错误枚举和修复失败测试验证半成品不会进入客户端
 
 ## 3. Milestone 1 — Dogfood MVP：个人使用界面
 
-- [ ] 3.1 实现单页输入 surface，包含自动聚焦、多行编辑、500 字符限制、空值提示、Enter 提交和 Shift+Enter 换行；通过键盘流程验证 composition 状态不会误提交
-- [ ] 3.2 实现 `idle`、`editing`、`submitting`、成功、澄清、无匹配和基础服务错误状态；通过状态测试验证重复提交被阻止、输入保留且 Retry 可用
-- [ ] 3.3 实现固定层级结果 renderer：Best match、Useful expressions、Natural version 和条件性 Explanation；通过契约 fixture 验证最多 3 个替代项、空解释不占位、中文不自动渲染
-- [ ] 3.4 实现表达、替代项和自然句的 Copy 操作及基础成功反馈；通过剪贴板 mock 和手动键盘流程验证复制内容准确
-- [ ] 3.5 实现版本化 `MemoryRepository`，使用命名空间 localStorage 保存显式快照并处理基本读写失败；通过保存、浏览器重载、删除和配额失败测试验证
-- [ ] 3.6 实现基础清晰样式、焦点状态、保存入口、深浅色可用主题和保存项查看区域；通过个人桌面浏览器手动检查验证主循环无需额外导航即可完成
+- [x] 3.1 实现单页输入 surface，包含自动聚焦、多行编辑、500 字符限制、空值提示、Enter 提交和 Shift+Enter 换行；通过键盘流程验证 composition 状态不会误提交
+- [x] 3.2 实现 `idle`、`editing`、`submitting`、成功、澄清、无匹配和基础服务错误状态；通过状态测试验证重复提交被阻止、输入保留且 Retry 可用
+- [x] 3.3 实现固定层级结果 renderer：Best match、Useful expressions、Natural version 和条件性 Explanation；通过契约 fixture 验证最多 3 个替代项、空解释不占位、中文不自动渲染
+- [x] 3.4 实现表达、替代项和自然句的 Copy 操作及基础成功反馈；通过剪贴板 mock 和手动键盘流程验证复制内容准确
+- [x] 3.5 实现版本化 `MemoryRepository`，使用命名空间 localStorage 保存显式快照并处理基本读写失败；通过保存、浏览器重载、删除和配额失败测试验证
+- [x] 3.6 实现基础清晰样式、焦点状态、保存入口、深浅色可用主题和保存项查看区域；通过个人桌面浏览器手动检查验证主循环无需额外导航即可完成
 
 ## 4. Milestone 1 — Dogfood MVP：验证与发布
 
-- [ ] 4.1 使用 mock provider 完成核心 API smoke test，覆盖成功、澄清、无匹配、非法模型响应和基础错误；通过本地测试确认不依赖真实 DeepSeek
+- [x] 4.1 使用 mock provider 完成核心 API smoke test，覆盖成功、澄清、无匹配、非法模型响应和基础错误；通过本地测试确认不依赖真实 DeepSeek
 - [ ] 4.2 在受控环境运行一次真实 DeepSeek model smoke test，仅记录 fixture id/输入类别、结构化结果摘要、延迟和失败原因，不记录敏感原文；通过人工检查确认完整链路可用
 - [ ] 4.3 部署到本地或私有环境并验证同源请求、服务端 secret、复制、localStorage 保存和错误重试；通过一次从冷启动到连续两次检索的手动验收验证
 - [ ] 4.4 使用真实个人工作输入连续试用，并记录明显错误、缺失表达、延迟和保存问题；通过 Dogfood checklist 确认“输入 -> 结果 -> Copy/Save -> 下一次输入”可重复完成

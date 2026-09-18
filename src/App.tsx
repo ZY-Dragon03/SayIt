@@ -1,0 +1,625 @@
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import {
+  apiErrorSchema,
+  isSuccessfulResult,
+  MAX_INPUT_LENGTH,
+  retrievalResultSchema,
+  type ExpressionType,
+  type RetrievalResult,
+} from "./shared/contract";
+import {
+  LocalMemoryRepository,
+  StorageError,
+  type SavedExpression,
+} from "./lib/storage";
+import "./App.css";
+
+type Theme = "light" | "dark";
+
+function getInitialTheme(): Theme {
+  try {
+    const savedTheme = window.localStorage.getItem("sayit.theme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      return savedTheme;
+    }
+  } catch {
+    // Fall back to the browser preference when local storage is unavailable.
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+function formatExpressionType(type: ExpressionType): string {
+  return type.replace("_", " ");
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.style.position = "fixed";
+  helper.style.opacity = "0";
+  document.body.appendChild(helper);
+  helper.select();
+  const copied = document.execCommand("copy");
+  helper.remove();
+  if (!copied) {
+    throw new Error("Clipboard access is unavailable.");
+  }
+}
+
+function App() {
+  const repositoryRef = useRef<LocalMemoryRepository | null>(null);
+  const [input, setInput] = useState("");
+  const [result, setResult] = useState<RetrievalResult | null>(null);
+  const [savedItems, setSavedItems] = useState<SavedExpression[]>([]);
+  const [activeSavedId, setActiveSavedId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  useEffect(() => {
+    const repository = new LocalMemoryRepository();
+    repositoryRef.current = repository;
+    setSavedItems(repository.list());
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      window.localStorage.setItem("sayit.theme", theme);
+    } catch {
+      // Theme persistence is optional; the current session still works.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  const showNotice = useCallback((message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(null), 2200);
+  }, []);
+
+  const retrieve = useCallback(async (value: string) => {
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    setResult(null);
+    setActiveSavedId(null);
+
+    try {
+      const response = await fetch("/api/retrieve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: value }),
+      });
+      const payload: unknown = await response.json();
+
+      if (!response.ok) {
+        const parsedError = apiErrorSchema.safeParse(payload);
+        throw new Error(
+          parsedError.success
+            ? parsedError.data.error.message
+            : "SayIt could not complete this request.",
+        );
+      }
+
+      const parsedResult = retrievalResultSchema.safeParse(payload);
+      if (!parsedResult.success) {
+        throw new Error("SayIt received an invalid result.");
+      }
+      setResult(parsedResult.data);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "SayIt could not complete this request.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, []);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const value = input.trim();
+    if (!value) {
+      setError("Enter an English thought first.");
+      return;
+    }
+    if (value.length > MAX_INPUT_LENGTH) {
+      setError(`Keep your input under ${MAX_INPUT_LENGTH} characters.`);
+      return;
+    }
+    void retrieve(value);
+  };
+
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  };
+
+  const handleCopy = async (text: string, label: string) => {
+    try {
+      await copyToClipboard(text);
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(null), 1600);
+    } catch {
+      setError("Clipboard access is unavailable.");
+    }
+  };
+
+  const handleSave = () => {
+    if (!isSuccessfulResult(result) || !repositoryRef.current) {
+      return;
+    }
+    try {
+      const saved = repositoryRef.current.save(input.trim(), result);
+      setSavedItems(repositoryRef.current.list());
+      setActiveSavedId(saved.id);
+      showNotice("Saved locally");
+    } catch (storageError) {
+      setError(
+        storageError instanceof StorageError
+          ? storageError.message
+          : "Could not save this expression locally.",
+      );
+    }
+  };
+
+  const handleRemove = (id: string) => {
+    if (!repositoryRef.current) {
+      return;
+    }
+    try {
+      repositoryRef.current.remove(id);
+      setSavedItems(repositoryRef.current.list());
+      if (activeSavedId === id) {
+        setActiveSavedId(null);
+      }
+      showNotice("Removed from saved expressions");
+    } catch {
+      setError("Could not remove this saved expression.");
+    }
+  };
+
+  const handleClearSaved = () => {
+    if (!repositoryRef.current || savedItems.length === 0) {
+      return;
+    }
+    if (!window.confirm("Clear all saved expressions from this browser?")) {
+      return;
+    }
+    try {
+      repositoryRef.current.clear();
+      setSavedItems([]);
+      setActiveSavedId(null);
+      showNotice("Saved expressions cleared");
+    } catch {
+      setError("Could not clear saved expressions.");
+    }
+  };
+
+  const handleLoadSaved = (item: SavedExpression) => {
+    setInput(item.input);
+    setResult(item.result);
+    setActiveSavedId(item.id);
+    setError(null);
+    setDrawerOpen(false);
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark" aria-hidden="true">
+            S
+          </div>
+          <div>
+            <div className="brand-name">SayIt</div>
+            <div className="brand-tagline">Find the natural way to say it.</div>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? "☼" : "☾"}
+          </button>
+          <button
+            className="saved-button"
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label={`Open saved expressions, ${savedItems.length} saved`}
+          >
+            <span aria-hidden="true">♡</span>
+            Saved
+            {savedItems.length > 0 && (
+              <span className="saved-count">{savedItems.length}</span>
+            )}
+          </button>
+        </div>
+      </header>
+
+      <main className="main-content">
+        <section className="hero-copy" aria-labelledby="page-title">
+          <p className="eyebrow">Expression retrieval engine</p>
+          <h1 id="page-title">What are you trying to say?</h1>
+          <p>
+            Type the rough version. SayIt will find the natural word, phrase,
+            or sentence.
+          </p>
+        </section>
+
+        <form className="input-card" onSubmit={handleSubmit}>
+          <label htmlFor="expression-input">Your thought</label>
+          <textarea
+            id="expression-input"
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+              setError(null);
+              setActiveSavedId(null);
+            }}
+            onKeyDown={handleInputKeyDown}
+            placeholder="e.g. put many things in some category by same feature"
+            maxLength={MAX_INPUT_LENGTH}
+            autoFocus
+            aria-describedby="input-hint input-count"
+            aria-busy={isSubmitting}
+          />
+          <div className="input-footer">
+            <span id="input-hint">Enter to retrieve · Shift+Enter for a new line</span>
+            <span id="input-count" className="character-count">
+              {input.length}/{MAX_INPUT_LENGTH}
+            </span>
+            <button className="primary-button" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Finding…" : "Say it"}
+              <span aria-hidden="true">↵</span>
+            </button>
+          </div>
+        </form>
+
+        <section
+          className={`result-card ${result || error || isSubmitting ? "has-content" : ""}`}
+          aria-live="polite"
+          aria-atomic="false"
+          aria-label="SayIt result"
+        >
+          {isSubmitting && (
+            <div className="loading-state">
+              <span className="loading-orb" aria-hidden="true" />
+              <div>
+                <strong>Finding a natural expression…</strong>
+                <span>Keeping it short and useful.</span>
+              </div>
+            </div>
+          )}
+
+          {!isSubmitting && error && (
+            <div className="message-state error-state" role="alert">
+              <div>
+                <strong>Couldn’t retrieve that.</strong>
+                <span>{error}</span>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void retrieve(input.trim())}
+                disabled={!input.trim()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {!isSubmitting && !error && result && (
+            <ResultView
+              result={result}
+              isSaved={activeSavedId !== null}
+              copiedLabel={copiedLabel}
+              onCopy={handleCopy}
+              onSave={handleSave}
+              onRetry={() => void retrieve(input.trim())}
+            />
+          )}
+
+          {!isSubmitting && !error && !result && (
+            <div className="empty-result">
+              <span className="empty-icon" aria-hidden="true">
+                ✦
+              </span>
+              <span>Your useful expression will appear here.</span>
+            </div>
+          )}
+        </section>
+      </main>
+
+      {notice && <div className="toast" role="status">{notice}</div>}
+
+      {drawerOpen && (
+        <div className="drawer-layer" role="presentation" onMouseDown={() => setDrawerOpen(false)}>
+          <aside
+            className="saved-drawer"
+            aria-label="Saved expressions"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Local memory</p>
+                <h2>Saved expressions</h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close saved expressions"
+                onClick={() => setDrawerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            {savedItems.length === 0 ? (
+              <div className="drawer-empty">
+                <span className="empty-icon" aria-hidden="true">♡</span>
+                <p>Save an expression and it will stay in this browser.</p>
+              </div>
+            ) : (
+              <>
+                <ul className="saved-list">
+                  {savedItems.map((item) => (
+                    <li className="saved-list-item" key={item.id}>
+                      <button
+                        className="saved-item"
+                        type="button"
+                        onClick={() => handleLoadSaved(item)}
+                      >
+                        <strong>{item.result.best_match?.text ?? "Saved result"}</strong>
+                        <span>{item.result.natural_sentence ?? item.input}</span>
+                      </button>
+                      <div className="saved-item-actions">
+                        <button
+                          className="tiny-button"
+                          type="button"
+                          onClick={() =>
+                            void handleCopy(
+                              item.result.natural_sentence ?? item.result.best_match?.text ?? item.input,
+                              "Saved sentence",
+                            )
+                          }
+                        >
+                          Copy
+                        </button>
+                        <button
+                          className="tiny-button danger-button"
+                          type="button"
+                          onClick={() => handleRemove(item.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <button className="clear-button" type="button" onClick={handleClearSaved}>
+                  Clear all saved expressions
+                </button>
+              </>
+            )}
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ResultViewProps {
+  result: RetrievalResult;
+  isSaved: boolean;
+  copiedLabel: string | null;
+  onCopy: (text: string, label: string) => Promise<void>;
+  onSave: () => void;
+  onRetry: () => void;
+}
+
+function ResultView({
+  result,
+  isSaved,
+  copiedLabel,
+  onCopy,
+  onSave,
+  onRetry,
+}: ResultViewProps) {
+  if (result.status === "no_match") {
+    return (
+      <div className="message-state no-match-state">
+        <div>
+          <span className="result-kicker">No reliable match yet</span>
+          <strong>Try adding a little more context.</strong>
+          <span>{result.inferred_intent || "Say what you want to express in your own words."}</span>
+        </div>
+        <button className="secondary-button" type="button" onClick={onRetry}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (result.status === "needs_clarification") {
+    return (
+      <div className="clarification-state">
+        <span className="result-kicker">One quick question</span>
+        <h2>{result.clarifying_question}</h2>
+        {result.alternatives.length > 0 && (
+          <div className="alternative-list">
+            {result.alternatives.map((alternative) => (
+              <ExpressionRow
+                key={`${alternative.text}-${alternative.expression_type}`}
+                expression={alternative}
+                onCopy={onCopy}
+                copiedLabel={copiedLabel}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!result.best_match || !result.natural_sentence) {
+    return null;
+  }
+
+  return (
+    <div className="result-content">
+      <div className="result-heading-row">
+        <span className="result-kicker">Best match</span>
+        <div className="result-actions">
+          <button
+            className={`secondary-button ${isSaved ? "saved-state" : ""}`}
+            type="button"
+            onClick={onSave}
+            disabled={isSaved}
+          >
+            {isSaved ? "Saved locally" : "Save"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void onCopy(result.best_match!.text, "Best match")}
+          >
+            {copiedLabel === "Best match" ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+      <div className="best-match">
+        <strong>{result.best_match.text}</strong>
+        <span>{formatExpressionType(result.best_match.expression_type)}</span>
+      </div>
+
+      {result.alternatives.length > 0 && (
+        <div className="result-section">
+          <span className="result-kicker">Useful expressions</span>
+          <div className="alternative-list">
+            {result.alternatives.map((alternative) => (
+              <ExpressionRow
+                key={`${alternative.text}-${alternative.expression_type}`}
+                expression={alternative}
+                onCopy={onCopy}
+                copiedLabel={copiedLabel}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="natural-section">
+        <span className="result-kicker">Natural version</span>
+        <div className="natural-sentence">
+          <p>{result.natural_sentence}</p>
+          <button
+            className="tiny-button"
+            type="button"
+            onClick={() => void onCopy(result.natural_sentence!, "Natural version")}
+          >
+            {copiedLabel === "Natural version" ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {result.short_explanation && (
+        <div className="explanation">
+          <span className="result-kicker">Explanation</span>
+          <p>{result.short_explanation}</p>
+        </div>
+      )}
+
+      {result.learnable_items.length > 0 && (
+        <div className="learnable-row">
+          <span>Worth noticing</span>
+          {result.learnable_items.map((item) => (
+            <span className="learnable-chip" key={`${item.text}-${item.expression_type}`}>
+              {item.text}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {result.typo_corrections.length > 0 && (
+        <details className="normalization-details">
+          <summary>Show normalization</summary>
+          <p>
+            {result.typo_corrections
+              .map((correction) => `${correction.original} → ${correction.corrected}`)
+              .join(" · ")}
+          </p>
+        </details>
+      )}
+    </div>
+  );
+}
+
+interface ExpressionRowProps {
+  expression: NonNullable<RetrievalResult["alternatives"]>[number];
+  onCopy: (text: string, label: string) => Promise<void>;
+  copiedLabel: string | null;
+}
+
+function ExpressionRow({
+  expression,
+  onCopy,
+  copiedLabel,
+}: ExpressionRowProps) {
+  const label = `Copy ${expression.text}`;
+  return (
+    <div className="expression-row">
+      <div>
+        <strong>{expression.text}</strong>
+        <span>{formatExpressionType(expression.expression_type)}</span>
+      </div>
+      <button
+        className="tiny-button"
+        type="button"
+        onClick={() => void onCopy(expression.text, label)}
+      >
+        {copiedLabel === label ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+export default App;
