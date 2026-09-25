@@ -2,7 +2,7 @@
 
 SayIt 已有：同源 `POST /api/retrieve`、union `SayItResult`、最多 3 轮客户端 session context、右侧 Saved 抽屉与 `sayit.saved.v1`（当前仅持久化 retrieve 成功快照）、本地 `getIPA` + Web Speech、解释性区块上分散的 `action-block` / `natural-sentence` / `explanation` 样式。
 
-本变更在 Dogfood 层增加自动 History、解释区块 UI 统一、以及解释段落内的 contextual gloss。不改变 retrieve/interpret 的主语义契约字段；gloss 为独立、按需、小请求能力。
+本变更在 Dogfood 层增加自动 History、解释区块 UI 统一、以及解释段落内的 **instant local word lookup**（本地 IPA + 本地英英释义）。不改变 retrieve/interpret 的主语义契约字段；hover **不得** 调用 LLM 或新增 API。
 
 ## Goals / Non-Goals
 
@@ -11,13 +11,13 @@ SayIt 已有：同源 `POST /api/retrieve`、union `SayItResult`、最多 3 轮�
 - History 与 Saved 并列且概念清晰：自动 vs  intentional curation。
 - 历史恢复可继续 refinement，且 IPA/口音/theme 遵循**当前**客户端状态。
 - 解释性区块视觉与 Listen/Copy 行为一致。
-- 词级 hover 保持阅读面干净；gloss 为短英文 contextual gloss，强化英语沉浸。
-- IPA 与 playback 完全 deterministic/local；gloss  alone 走轻量 DeepSeek（或等价）路径。
+- 词级 hover 保持阅读面干净；释义为短 **英英 dictionary definition**，强化英语沉浸。
+- IPA、playback、definition 均 deterministic/local；hover 路径 **零 DeepSeek、零网络**（词典 lazy load 后同步查表）。
 
 **Non-Goals:**
 
 - 中文翻译、词典式多义项、账户/云同步、Production Hardening。
-- 在 `/api/retrieve` 中批量返回词义或 IPA。
+- 在 `/api/retrieve` 中批量返回词义；为 hover 增加 `/api/gloss` 或任何 LLM 释义。
 - 为每个词增加 keyboard tab stop；复杂 touch 手势系统。
 - 修改 Saved 为自动写入 History 的替代品（两者并存）。
 
@@ -92,7 +92,7 @@ Top bar:  [History] ... [Saved] [Theme] [Pronunciation]
 - Example 不再使用单独弱化的 `explanation` 视觉层级；与 Meaning/Usage 相同 surface。
 - **不**改变 `SayItResult` JSON；仅 React/CSS 重构。
 
-### 4. Contextual word hover — 分段与命中
+### 4. Instant local word lookup — 分段与命中
 
 **范围**：仅 `meaning_in_context`、`usage_or_reference`、`example`、retrieve 的 `short_explanation`（Explanation）四类纯文本 props。
 
@@ -114,69 +114,58 @@ Top bar:  [History] ... [Saved] [Theme] [Pronunciation]
 
 **Hover 时序**：pointer enter → **300 ms** timer → 打开 tooltip；leave 取消 timer；移入 tooltip 不立即关闭（短 grace）。
 
-### 5. Tooltip 内容与加载顺序
+### 5. Tooltip 内容与定义行为
 
 ```
 ┌─────────────────────────────┐
 │ gag                         │
 │ /ɡæɡ/  [Listen]             │
-│ a repeated joke   (loading…)│
+│ a joke or funny trick       │
+│ (optional 2nd short line)   │
 └─────────────────────────────┘
 ```
 
-- **T0**：显示 lexical unit + 本地 IPA（`getIPA(unit, accent)`，单词/短语级；失败则隐藏 IPA 行）+ Listen（Web Speech，原文 unit）。
-- **T0+**：若 cache miss，发起 gloss 请求；pending 时第三行 skeleton 或 “…”。
-- **禁止**中文；UI  copy 使用 “contextual gloss” 而非 “translation”。
+- 显示 lexical unit + 本地 IPA（`getIPA(unit, accent)`）+ Listen + **本地 definition**。
+- 定义 **英英**、简单、通常一行；优先最常见义项；最多 **再一条** 短补充义项。
+- 禁止：长义项列表、词源、同义词树、非必要例句、中文。
+- 无定义时：仍显示 word / IPA / Listen（可用部分）。
 
-### 6. Contextual gloss API 契约
+**Adapter**（与 `getIPA` 对称）：
 
-**Endpoint**：`POST /api/gloss`（同源 Vite middleware，与 retrieve 相同 secret 边界）。
-
-**Request**（Zod）：
-
-```json
-{
-  "word": "gag",
-  "context": "Peter Griffin uses it as a running gag referencing the movie."
-}
+```ts
+getDefinition(lemma: string): Promise<{
+  primary: string;
+  secondary?: string;
+} | null>
 ```
 
-| Field | Constraint |
-| --- | --- |
-| `word` | 1–80 chars，trim；与 UI 选中 unit 一致 |
-| `context` | 1–600 chars；**整句**或包含该词的段落（来自当前 block 的全文，非全页） |
+- `lemma`：hover 选中的 lexical unit，normalize（NFKC、trim、小写、strip 边缘标点）。
+- 返回前对 WordNet 式长 gloss 做 **deterministic 裁剪**（取第一个 `;` 前、去掉 lexicographer prefix、长度上限 ~120 字符）。
 
-**Response**：
+**Cache**：内存 Map keyed by normalized lemma（bounded LRU）；**不**依赖 sentence context。更换词典 engine 时 bump 资源版本（类似 `sayit.ipa.v1` 规则）。
 
-```json
-{
-  "gloss": "a repeated joke"
-}
-```
+### 6. Dictionary engine decision gate（bake-off，实现前评审）
 
-| Field | Constraint |
-| --- | --- |
-| `gloss` | 3–10 英文词（soft validate）；无中文；无 Markdown；单句 |
+隔离测量（Windows/Node + npm metadata；Vite 仅对 JSON 资源做量级估算）：
 
-**Provider 行为**：
+| 候选 | 体积（约） | 浏览器 | 释义 | 延迟（观测） | 许可 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `dictionary-en@4.0.0` | ~575 KB | Hunspell aff/dic | **无**（拼写） | N/A | MIT+BSD | **不适合** |
+| `wordnet@2.0.0` | ~28 MB unpacked | Node 模块 + 数据文件；可 lazy chunk | WordNet gloss，需裁剪 | init ~970 ms；lookup ~0.5–3 ms | MIT | **备选**（覆盖好，体积大） |
+| `en-dictionary` + `en-wordnet` | ~70 MB+ | 重 | WordNet | init 重 | MIT | **不适合** browser Dogfood |
+| **Generated compact lexicon JSON**（建议 `sayit-lexicon.v1.json`） | 目标 **1–3 MB gzip**（~8k–15k lemmas） | `import()` lazy；O(1) map | 离线预裁剪 primary/secondary | 加载后 **<1 ms** | 需 WordNet/数据源 attribution | **推荐** |
 
-- DeepSeek：`thinking: { type: "disabled" }`，`response_format: { type: "json_object" }`，低 `max_tokens`（如 40–80），temperature 低。
-- System prompt：要求 **contextual gloss in simple English for this sentence only**；禁止词典多义项、禁止中文、禁止 IPA。
-- 失败 → `{ "error": { "code", "message", "retryable" } }` 或 HTTP 502；tooltip 保留 word/IPA/Listen，gloss 行显示短英文 fallback “Couldn’t load gloss” 或隐藏。
+Golden lemmas（Dogfood）：`gag`, `cartoon`, `categorize`, `granted`, `reference`, `literal`, `xyznotaword`.
 
-**不**把 gloss 写入 History 或 `SayItResult`。
+`wordnet` 对 `gag` 的首条裁剪示例：`a humorous anecdote or remark intended to provoke laughter` → UI 可进一步 shorten 为 `a joke or funny trick` 级别（实现时在生成脚本或 adapter 中统一）。
 
-### 7. Gloss 缓存策略
+**Recommendation（评审门）**：
 
-**Key**：`gloss:v1:${normalize(word)}:${hash(normalize(context))}`  
-- `normalize`：NFKC、trim、collapse whitespace、context 截断至 600。  
-- `hash`：短 SHA-256 或 FNV 前缀即可（客户端）。
+1. **首选**：仓库内 **generated compact lexicon**（构建脚本从 WordNet 3.0 提取高频 lemma + 1–2 条短 gloss），Vite `import()` lazy load，adapter `getDefinition`。最小 bundle、零网络、满足 “instant tooltip”。
+2. **若 Dogfood 覆盖率不足**：fallback 到 **`wordnet@2.0.0` lazy chunk**（私有/local 可接受 ~28MB），仍 **禁止** LLM。
+3. **不选**：`dictionary-en`（无释义）、`en-wordnet` 全量（过大）、任何 `/api/gloss`。
 
-**Store**：内存 LRU（如 256 entries）+ 可选 `sessionStorage` 或 `localStorage` 子键 `sayit.gloss.v1`（bounded）；**不**与 IPA cache 混用。
-
-**In-flight dedupe**：同 key 并发共享 Promise。
-
-**Invalidation**：改 word/context 即新 key；无 server push。
+实现 change 在 **词典来源评审通过** 后再锁定依赖或生成物；OpenSpec 先固定架构：`definition → local dictionary`，`IPA → getIPA`，`playback → Web Speech`。
 
 ### 8. Session context 与 History 恢复
 
@@ -191,20 +180,21 @@ Top bar:  [History] ... [Saved] [Theme] [Pronunciation]
 | Risk | Mitigation |
 | --- | --- |
 | 200 条完整 `SayItResult` 体积 | Zod 校验 + 监控 localStorage quota；失败时 stop append + toast |
-| Hover gloss 请求过多 | 300 ms 门槛 + cache + 取消离开 hover 的 in-flight |
+| Hover 首次加载词典 chunk | 可在首个解释块 mount 时 idle prefetch；tooltip 仍先显示 word/IPA/Listen |
 | Segmenter 浏览器差异 | 特性检测；不支持时整段不启用 hover（graceful degrade） |
-| Gloss 质量不稳定 | 短 prompt、context 必填、Dogfood 记录 bad cases；不阻塞阅读 |
+| 定义过长或多义 | adapter 裁剪 + 最多 primary/secondary 两行 |
 | 左/右双 drawer 小屏拥挤 | 全屏 overlay drawer；互斥打开 |
-| 像词典应用 | 仅解释性段落、无词表页、无 retrieve 级 gloss |
-| 误用中文 | prompt + response Zod 拒绝 CJK |
+| 像词典应用 | 仅解释性段落、无词表页 |
+| 紧凑词表覆盖缺口 | 无定义时仅 IPA+Listen；Dogfood 记录缺口词 |
+| 词表 license/attribution | 生成脚本保留 WordNet/数据源说明；公开分发前单独 review |
 | History 仅 success 遗漏澄清 | 产品可后续扩展 status 白名单 |
 
 ## Migration Plan
 
 1. 实现 History repository + UI（不影响 Saved）。
 2. 抽取 `ExplanatoryResultBlock` 并替换四类区块。
-3. 实现 segmenter + tooltip + `/api/gloss` + cache。
+3. 锁定词典来源后实现 segmenter + tooltip + `getDefinition` + lemma cache。
 4. 更新 session-context delta 行为与测试。
-5. Dogfood 手动：恢复 Road House interpret → follow-up；hover “gag”；切换 accent 后 gloss/IPA 一致。
+5. Dogfood 手动：恢复 Road House interpret → follow-up；hover “gag”；切换 accent 后 IPA/Listen 一致；确认无网络请求。
 
 本 artifact 为 **设计评审门**；评审通过后再 `/opsx-apply`。
