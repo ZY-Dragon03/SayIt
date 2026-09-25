@@ -1,7 +1,8 @@
 ## 0. Dictionary engine decision gate
 
 - [x] 0.1 对比 `dictionary-en`、`wordnet`、`en-dictionary`/`en-wordnet` 与 generated compact lexicon 方案，记录体积、延迟、释义质量、浏览器可行性与 license
-- [ ] 0.2 评审并批准词典来源：首选 generated `sayit-lexicon.v1.json`，或 fallback `wordnet@2.0.0` lazy chunk；未批准前不得实现 hover 释义
+- [ ] 0.2 实现 `scripts/generate-sayit-lexicon`（或等价）+ `sayit-lexicon.manifest.json`：锁定频率源 URL/checksum/license、WordNet 版本、entryCount、实测 gzip/sha256；**生成至少一次 artifact 并记录 golden + 词形 fallback 覆盖率**
+- [ ] 0.3 评审并批准词典来源：compact lexicon **仅能在 0.2 实测通过后** 批准；否则 fallback `wordnet@2.0.0` lazy chunk；未批准前不得实现 hover 释义
 
 ## 1. Local History
 
@@ -20,9 +21,10 @@
 ## 3. Instant local word lookup
 
 - [ ] 3.1 实现 `segmentExplanatoryText()`：`Intl.Segmenter` + contraction/hyphen 后处理；特性不支持时 graceful disable
-- [ ] 3.2 实现 300 ms hover/tap tooltip（word、IPA via `getIPA`、Listen）；无 tab stop per word
-- [ ] 3.3 在词典 gate 通过后实现 `getDefinition(lemma)` adapter + gloss 裁剪（primary + optional secondary）；bounded lemma cache
-- [ ] 3.4 集成到四个解释性区块；确认 hover **无** `/api/gloss`、无 DeepSeek；Dogfood 手动 hover “gag” 与 accent 切换
+- [ ] 3.2 实现 `resolveLemma(surface)`：exact normalize 后查表 + 确定性 morphology/irregular fallback（**无 LLM**）；单测：`granted`, `uses`, `referencing`, `kicked`, `children`
+- [ ] 3.3 实现 300 ms pointer hover / touch tap tooltip（word、IPA via `getIPA`、Listen）；**无** per-word keyboard tab stop；解释块 mount 时 idle prefetch 词典 chunk
+- [ ] 3.4 在词典 gate 通过后实现 `getDefinition(resolvedLemma)`：sense 选择 + metadata trim + `;` 分句 + 长度上限（**保留词典措辞，不 paraphrase**）；bounded lemma cache
+- [ ] 3.5 集成到四个解释性区块；hover **无** DeepSeek/外部 API；词典未 load 时仍 word/IPA/Listen；Dogfood 手动 “gag” + 词形用例 + accent 切换
 
 ## 4. Session context delta
 
@@ -32,6 +34,6 @@
 ## 5. Verification（评审通过后执行）
 
 - [ ] 5.1 `npm run typecheck`、`npm test`、`npm run build`
-- [ ] 5.2 Dogfood checklist：History vs Saved、左/右 drawer、Road House 恢复+follow-up、解释块视觉一致、hover 无网络、无中文释义
+- [ ] 5.2 Dogfood checklist：History vs Saved、左/右 drawer、Road House 恢复+follow-up、解释块视觉一致、hover 无 DeepSeek/外部 API、无中文释义、pointer/touch lookup（非逐词 Tab）
 
-**Stop gate:** 词典来源与 OpenSpec 评审通过前 **不得** 开始 `/opsx-apply` 实现。
+**Stop gate:** 词典 **artifact 实测** 与 OpenSpec 评审通过前 **不得** 开始 `/opsx-apply` 实现。
