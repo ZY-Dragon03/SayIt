@@ -31,6 +31,14 @@ export const dogfoodFixtures = [
     expectedMode: "interpret",
   },
   {
+    id: "history-restore-follow-up",
+    restoreInput: "Road House",
+    input: "no, I mean what Peter says in the cartoon",
+    expectedStatus: "success",
+    expectedMode: "interpret",
+    expectedContextTurns: 1,
+  },
+  {
     id: "ambiguous-input",
     input: "that thing with the words",
     expectedStatus: "needs_clarification",

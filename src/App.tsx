@@ -9,6 +9,7 @@ import {
 import {
   apiErrorSchema,
   isSuccessfulResult,
+  MAX_CONTEXT_SUMMARY_LENGTH,
   MAX_INPUT_LENGTH,
   MAX_SESSION_TURNS,
   sayItResultSchema,
@@ -22,6 +23,17 @@ import {
   StorageError,
   type SavedExpression,
 } from "./lib/storage";
+import {
+  LocalHistoryRepository,
+  type HistoryRecord,
+} from "./lib/history";
+import { segmentExplanatoryText } from "./lib/explanatory-text";
+import {
+  getDefinitionForSurface,
+  isDictionaryLoaded,
+  prefetchDictionary,
+  type DictionaryDefinition,
+} from "./lib/local-dictionary";
 import {
   loadPronunciationPreferences,
   PronunciationService,
@@ -52,22 +64,21 @@ function formatExpressionType(type: ExpressionType): string {
 }
 
 function summarizeResult(result: SayItResult): string {
+  let summary: string;
   if (result.mode === "interpret") {
     if (result.interpretation) {
-      return [
+      summary = [
         `Expression: ${result.interpretation.expression}`,
         `Meaning: ${result.interpretation.meaning_in_context}`,
         `Usage or reference: ${result.interpretation.usage_or_reference}`,
       ].join(" ");
+    } else if (result.clarifying_question) {
+      summary = `Clarification question: ${result.clarifying_question}`;
+    } else {
+      summary = "No reliable interpretation was found.";
     }
-    if (result.clarifying_question) {
-      return `Clarification question: ${result.clarifying_question}`;
-    }
-    return "No reliable interpretation was found.";
-  }
-
-  if (result.best_match) {
-    return [
+  } else if (result.best_match) {
+    summary = [
       `Best match: ${result.best_match.text}`,
       result.natural_sentence
         ? `Natural version: ${result.natural_sentence}`
@@ -75,11 +86,32 @@ function summarizeResult(result: SayItResult): string {
     ]
       .filter(Boolean)
       .join(" ");
+  } else if (result.clarifying_question) {
+    summary = `Clarification question: ${result.clarifying_question}`;
+  } else {
+    summary = "No reliable expression was found.";
   }
-  if (result.clarifying_question) {
-    return `Clarification question: ${result.clarifying_question}`;
+  return summary.slice(0, MAX_CONTEXT_SUMMARY_LENGTH);
+}
+
+function historyTitle(record: HistoryRecord): string {
+  return record.result.mode === "interpret"
+    ? record.result.interpretation?.expression ?? record.input
+    : record.result.best_match?.text ?? record.input;
+}
+
+function historySummary(record: HistoryRecord): string {
+  if (record.result.mode === "interpret") {
+    return record.result.interpretation?.meaning_in_context ?? record.input;
   }
-  return "No reliable expression was found.";
+  return record.result.natural_sentence ?? record.input;
+}
+
+function formatHistoryTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function getIPAExpressions(result: SayItResult): string[] {
@@ -121,18 +153,21 @@ async function copyToClipboard(text: string): Promise<void> {
 
 function App() {
   const repositoryRef = useRef<LocalMemoryRepository | null>(null);
+  const historyRepositoryRef = useRef<LocalHistoryRepository | null>(null);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SayItResult | null>(null);
   const [sessionContext, setSessionContext] = useState<SessionContextTurn[]>(
     [],
   );
   const [savedItems, setSavedItems] = useState<SavedExpression[]>([]);
+  const [historyItems, setHistoryItems] = useState<HistoryRecord[]>([]);
   const [activeSavedId, setActiveSavedId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [pronunciationPreferences, setPronunciationPreferences] =
     useState<PronunciationPreferences>(loadPronunciationPreferences);
@@ -150,6 +185,9 @@ function App() {
     const repository = new LocalMemoryRepository();
     repositoryRef.current = repository;
     setSavedItems(repository.list());
+    const historyRepository = new LocalHistoryRepository();
+    historyRepositoryRef.current = historyRepository;
+    setHistoryItems(historyRepository.list());
   }, []);
 
   useEffect(() => {
@@ -209,6 +247,7 @@ function App() {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setDrawerOpen(false);
+        setHistoryDrawerOpen(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -293,6 +332,17 @@ function App() {
         throw new Error("SayIt received an invalid result.");
       }
       setResult(parsedResult.data);
+      if (parsedResult.data.status === "success") {
+        const historyRepository =
+          historyRepositoryRef.current ?? new LocalHistoryRepository();
+        historyRepositoryRef.current = historyRepository;
+        try {
+          historyRepository.append(value, parsedResult.data);
+          setHistoryItems(historyRepository.list());
+        } catch {
+          showNotice("This result could not be added to local history.");
+        }
+      }
       setSessionContext((currentContext) => [
         ...currentContext,
         {
@@ -310,7 +360,7 @@ function App() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [sessionContext]);
+  }, [sessionContext, showNotice]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -404,6 +454,26 @@ function App() {
     setActiveSavedId(item.id);
     setError(null);
     setDrawerOpen(false);
+    setHistoryDrawerOpen(false);
+  };
+
+  const handleRestoreHistory = (item: HistoryRecord) => {
+    const restored = historyRepositoryRef.current?.restore(
+      item.id,
+      summarizeResult,
+    );
+    if (!restored) return;
+
+    setInput(restored.record.input);
+    setResult(restored.record.result);
+    setActiveSavedId(null);
+    setSessionContext(restored.context);
+    setError(null);
+    setIsSubmitting(false);
+    setPronunciationError(null);
+    setPronunciationErrorKey(null);
+    setDrawerOpen(false);
+    setHistoryDrawerOpen(false);
   };
 
   return (
@@ -435,7 +505,25 @@ function App() {
           <button
             className="saved-button"
             type="button"
-            onClick={() => setDrawerOpen(true)}
+            onClick={() => {
+              setDrawerOpen(false);
+              setHistoryDrawerOpen(true);
+            }}
+            aria-label={`Open history, ${historyItems.length} recent items`}
+          >
+            <span aria-hidden="true">◷</span>
+            History
+            {historyItems.length > 0 && (
+              <span className="saved-count">{historyItems.length}</span>
+            )}
+          </button>
+          <button
+            className="saved-button"
+            type="button"
+            onClick={() => {
+              setHistoryDrawerOpen(false);
+              setDrawerOpen(true);
+            }}
             aria-label={`Open saved expressions, ${savedItems.length} saved`}
           >
             <span aria-hidden="true">♡</span>
@@ -552,6 +640,64 @@ function App() {
       </main>
 
       {notice && <div className="toast" role="status">{notice}</div>}
+
+      {historyDrawerOpen && (
+        <div
+          className="drawer-layer history-layer"
+          role="presentation"
+          onMouseDown={() => setHistoryDrawerOpen(false)}
+        >
+          <aside
+            className="saved-drawer history-drawer"
+            aria-label="Recent interaction history"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Recent activity</p>
+                <h2>History</h2>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Close history"
+                onClick={() => setHistoryDrawerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            {historyItems.length === 0 ? (
+              <div className="drawer-empty">
+                <span className="empty-icon" aria-hidden="true">◷</span>
+                <p>Successful results will appear here automatically.</p>
+              </div>
+            ) : (
+              <ul className="saved-list history-list">
+                {historyItems.map((item) => (
+                  <li className="saved-list-item history-list-item" key={item.id}>
+                    <button
+                      className="saved-item history-item"
+                      type="button"
+                      onClick={() => handleRestoreHistory(item)}
+                    >
+                      <span className="history-item-meta">
+                        <span className="history-mode">{item.mode}</span>
+                        <time dateTime={item.created_at}>
+                          {formatHistoryTime(item.created_at)}
+                        </time>
+                      </span>
+                      <strong>{historyTitle(item)}</strong>
+                      <span>{historySummary(item)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </aside>
+        </div>
+      )}
 
       {drawerOpen && (
         <div className="drawer-layer" role="presentation" onMouseDown={() => setDrawerOpen(false)}>
@@ -796,20 +942,18 @@ function ResultView({
       </div>
 
       {result.short_explanation && (
-        <div className="explanation action-block">
-          <span className="result-kicker">Explanation</span>
-          <p>{result.short_explanation}</p>
-          <ContextualActions
-            text={result.short_explanation}
-            label="Explanation"
-            speechKey="short-explanation"
-            copiedLabel={copiedLabel}
-            speakingKey={speakingKey}
-            pronunciationErrorKey={pronunciationErrorKey}
-            onCopy={onCopy}
-            onSpeak={onSpeak}
-          />
-        </div>
+        <ExplanatoryResultBlock
+          kicker="Explanation"
+          text={result.short_explanation}
+          copyLabel="Explanation"
+          speechKey="short-explanation"
+          pronunciationAccent={pronunciationAccent}
+          copiedLabel={copiedLabel}
+          speakingKey={speakingKey}
+          pronunciationErrorKey={pronunciationErrorKey}
+          onCopy={onCopy}
+          onSpeak={onSpeak}
+        />
       )}
 
       {result.learnable_items.length > 0 && (
@@ -924,57 +1068,334 @@ function InterpretationResultView({
         />
       </div>
 
-      <div className="result-section">
-        <span className="result-kicker">Meaning in this context</span>
-        <div className="natural-sentence action-block">
-          <p>{interpretation.meaning_in_context}</p>
-          <ContextualActions
-            text={interpretation.meaning_in_context}
-            label="Meaning in this context"
-            speechKey="interpretation-meaning"
-            copiedLabel={copiedLabel}
-            speakingKey={speakingKey}
-            pronunciationErrorKey={pronunciationErrorKey}
-            onCopy={onCopy}
-            onSpeak={onSpeak}
-          />
-        </div>
-      </div>
+      <ExplanatoryResultBlock
+        kicker="Meaning in this context"
+        text={interpretation.meaning_in_context}
+        copyLabel="Meaning in this context"
+        speechKey="interpretation-meaning"
+        pronunciationAccent={pronunciationAccent}
+        copiedLabel={copiedLabel}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        onCopy={onCopy}
+        onSpeak={onSpeak}
+      />
 
-      <div className="result-section">
-        <span className="result-kicker">Usage / reference</span>
-        <div className="natural-sentence action-block">
-          <p>{interpretation.usage_or_reference}</p>
-          <ContextualActions
-            text={interpretation.usage_or_reference}
-            label="Usage / reference"
-            speechKey="interpretation-usage"
-            copiedLabel={copiedLabel}
-            speakingKey={speakingKey}
-            pronunciationErrorKey={pronunciationErrorKey}
-            onCopy={onCopy}
-            onSpeak={onSpeak}
-          />
-        </div>
-      </div>
+      <ExplanatoryResultBlock
+        kicker="Usage / reference"
+        text={interpretation.usage_or_reference}
+        copyLabel="Usage / reference"
+        speechKey="interpretation-usage"
+        pronunciationAccent={pronunciationAccent}
+        copiedLabel={copiedLabel}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        onCopy={onCopy}
+        onSpeak={onSpeak}
+      />
 
       {interpretation.example && (
-        <div className="explanation action-block">
-          <span className="result-kicker">Example</span>
-          <p>{interpretation.example}</p>
-          <ContextualActions
-            text={interpretation.example}
-            label="Example"
-            speechKey="interpretation-example"
-            copiedLabel={copiedLabel}
-            speakingKey={speakingKey}
-            pronunciationErrorKey={pronunciationErrorKey}
-            onCopy={onCopy}
-            onSpeak={onSpeak}
-          />
-        </div>
+        <ExplanatoryResultBlock
+          kicker="Example"
+          text={interpretation.example}
+          copyLabel="Example"
+          speechKey="interpretation-example"
+          pronunciationAccent={pronunciationAccent}
+          copiedLabel={copiedLabel}
+          speakingKey={speakingKey}
+          pronunciationErrorKey={pronunciationErrorKey}
+          onCopy={onCopy}
+          onSpeak={onSpeak}
+        />
       )}
     </div>
+  );
+}
+
+interface ExplanatoryResultBlockProps {
+  kicker: string;
+  text: string;
+  copyLabel: string;
+  speechKey: string;
+  pronunciationAccent: PronunciationPreferences["accent"];
+  copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  onCopy: (text: string, label: string) => Promise<void>;
+  onSpeak: (text: string, key: string) => void;
+}
+
+function ExplanatoryResultBlock({
+  kicker,
+  text,
+  copyLabel,
+  speechKey,
+  pronunciationAccent,
+  copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  onCopy,
+  onSpeak,
+}: ExplanatoryResultBlockProps) {
+  return (
+    <div className="explanatory-result-block action-block">
+      <span className="result-kicker">{kicker}</span>
+      <LexicalText
+        text={text}
+        pronunciationAccent={pronunciationAccent}
+        onSpeak={onSpeak}
+      />
+      <ContextualActions
+        text={text}
+        label={copyLabel}
+        speechKey={speechKey}
+        copiedLabel={copiedLabel}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        onCopy={onCopy}
+        onSpeak={onSpeak}
+      />
+    </div>
+  );
+}
+
+interface LexicalTextProps {
+  text: string;
+  pronunciationAccent: PronunciationPreferences["accent"];
+  onSpeak: (text: string, key: string) => void;
+}
+
+interface ActiveLexicalWord {
+  key: string;
+  surface: string;
+}
+
+interface IdleWindow {
+  requestIdleCallback?: (
+    callback: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void,
+    options?: { timeout: number },
+  ) => number;
+  cancelIdleCallback?: (id: number) => void;
+}
+
+function LexicalText({
+  text,
+  pronunciationAccent,
+  onSpeak,
+}: LexicalTextProps) {
+  const parts = segmentExplanatoryText(text);
+  const openTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const lastPointerTypeRef = useRef<string | null>(null);
+  const [activeWord, setActiveWord] = useState<ActiveLexicalWord | null>(null);
+  const [ipa, setIpa] = useState<string | null>(null);
+  const [definition, setDefinition] =
+    useState<DictionaryDefinition | null>(null);
+  const [definitionLoading, setDefinitionLoading] = useState(false);
+
+  useEffect(() => {
+    const idleWindow = window as unknown as IdleWindow;
+    const prefetch = () => {
+      void prefetchDictionary().catch(() => undefined);
+    };
+
+    if (idleWindow.requestIdleCallback) {
+      const idleId = idleWindow.requestIdleCallback(prefetch, { timeout: 1200 });
+      return () => idleWindow.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(prefetch, 200);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!activeWord) {
+      setIpa(null);
+      setDefinition(null);
+      setDefinitionLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIpa(null);
+    setDefinition(null);
+    setDefinitionLoading(!isDictionaryLoaded());
+    void getIPA(activeWord.surface, pronunciationAccent)
+      .then((value) => {
+        if (!cancelled) setIpa(value);
+      })
+      .catch(() => {
+        if (!cancelled) setIpa(null);
+      });
+
+    const loadDefinition = () => {
+      if (cancelled) return;
+      setDefinition(getDefinitionForSurface(activeWord.surface));
+      setDefinitionLoading(false);
+    };
+    if (isDictionaryLoaded()) {
+      loadDefinition();
+    } else {
+      void prefetchDictionary().then(loadDefinition).catch(() => {
+        if (!cancelled) setDefinitionLoading(false);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWord, pronunciationAccent]);
+
+  useEffect(() => {
+    if (!activeWord) return;
+
+    const closeOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest("[data-lexical-key]")
+        : null;
+      if (target?.getAttribute("data-lexical-key") !== activeWord.key) {
+        setActiveWord(null);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setActiveWord(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [activeWord]);
+
+  useEffect(
+    () => () => {
+      if (openTimerRef.current !== null) {
+        window.clearTimeout(openTimerRef.current);
+      }
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const openWord = (key: string, surface: string) => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setActiveWord({ key, surface });
+  };
+
+  const closeWordSoon = () => {
+    if (lastPointerTypeRef.current === "touch") return;
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+    }
+    closeTimerRef.current = window.setTimeout(() => {
+      setActiveWord(null);
+      closeTimerRef.current = null;
+    }, 140);
+  };
+
+  if (!parts) {
+    return (
+      <p className="explanatory-copy">
+        {text}
+      </p>
+    );
+  }
+
+  return (
+    <p className="explanatory-copy">
+      {parts.map((part) => {
+        if (!part.isWordLike) {
+          return (
+            <span className="lexical-static-text" key={`${part.start}-${part.end}`}>
+              {part.text}
+            </span>
+          );
+        }
+
+        const key = `${part.start}-${part.end}`;
+        const isActive = activeWord?.key === key;
+        return (
+          <span
+            className="lexical-hit-area"
+            data-lexical-key={key}
+            data-active={isActive ? "true" : undefined}
+            key={key}
+            onPointerEnter={(event) => {
+              lastPointerTypeRef.current = event.pointerType;
+              if (event.pointerType === "touch") return;
+              if (closeTimerRef.current !== null) {
+                window.clearTimeout(closeTimerRef.current);
+                closeTimerRef.current = null;
+              }
+              if (openTimerRef.current !== null) {
+                window.clearTimeout(openTimerRef.current);
+              }
+              openTimerRef.current = window.setTimeout(() => {
+                openWord(key, part.text);
+                openTimerRef.current = null;
+              }, 300);
+            }}
+            onPointerDown={(event) => {
+              lastPointerTypeRef.current = event.pointerType;
+            }}
+            onPointerLeave={closeWordSoon}
+            onClick={() => {
+              if (lastPointerTypeRef.current !== "touch") return;
+              if (isActive) setActiveWord(null);
+              else openWord(key, part.text);
+            }}
+          >
+            <span className="lexical-unit">{part.text}</span>
+            {isActive && activeWord && (
+              <span className="lexical-tooltip" role="status">
+                <strong className="lexical-tooltip-word">
+                  {activeWord.surface}
+                </strong>
+                <span className="lexical-tooltip-pronunciation">
+                  {ipa && <span className="ipa-text">{ipa}</span>}
+                  <button
+                    className="speak-button"
+                    type="button"
+                    aria-label={`Listen to ${activeWord.surface}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSpeak(
+                        activeWord.surface,
+                        `word-${activeWord.key}-${activeWord.surface}`,
+                      );
+                    }}
+                  >
+                    <SpeakerIcon />
+                  </button>
+                </span>
+                {definition ? (
+                  <span className="lexical-definition">
+                    {definition.primary}
+                    {definition.secondary && (
+                      <span>{definition.secondary}</span>
+                    )}
+                  </span>
+                ) : definitionLoading ? (
+                  <span className="lexical-definition-loading">
+                    Loading definition…
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </p>
   );
 }
 

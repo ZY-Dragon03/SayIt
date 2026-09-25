@@ -1,0 +1,571 @@
+{
+  "schemaVersion": 1,
+  "dictionaryDecision": "compact-approved",
+  "generatedAt": "2026-09-25T15:51:22.188Z",
+  "gitSha": "3d43e9b71c763f2e5c9c7e65e50e016e1b4573ad",
+  "wordnet": {
+    "package": "wordnet@2.0.0",
+    "packageUrl": "https://registry.npmjs.org/wordnet/-/wordnet-2.0.0.tgz",
+    "packageIntegrity": "sha512-VQOEUBHU6drwXGQx37bVaRqi042IZ8NwJiT9qLtM2x1QzqgIJIRoyZa++rWrUvICK+tYz9ttfYFk1c8IiN6DVQ==",
+    "dataVersion": "WordNet 3.0",
+    "license": "Princeton University WordNet License",
+    "licenseFile": "WORDNET-LICENSE.txt",
+    "sourceOrder": [
+      "n",
+      "v",
+      "a",
+      "s",
+      "r"
+    ],
+    "senseSelection": "Among each POS first senses, choose the greatest WordNet 3.0 tag_count; ties or all-zero counts use noun, verb, adjective, satellite, adverb order.",
+    "senseCountSource": {
+      "name": "WordNet 3.0 index.sense first-sense tag_count values",
+      "archiveUrl": "https://wordnetcode.princeton.edu/3.0/WNdb-3.0.tar.gz",
+      "archiveSha256": "658b1ba191f5f98c2e9bae3e25c186013158f30ef779f191d2a44e5d25046dc8",
+      "upstreamFile": "dict/index.sense",
+      "upstreamFileSha256": "68b3a468cddfd8e92134b9b0624339a02a1b837159243c297c5f138a3d618392",
+      "filteredInputFile": "scripts/lexicon/wordnet-primary-sense-counts.tsv",
+      "filteredInputSha256": "d520a2366e417c7ddfc3f3c36447322d3713f35a2ec701524e4a7b292ecd2c33",
+      "filteredRecordCount": 11901
+    }
+  },
+  "frequencySource": {
+    "name": "wordfreq 3.0.2 top_n_list('en', 12000, wordlist='large', ascii_only=True)",
+    "url": "https://pypi.org/project/wordfreq/3.0.2/",
+    "wheelUrl": "https://files.pythonhosted.org/packages/d4/9f/407e0b54b530028b960937f528ed34498d195523b4cad8c67e6bdc56e67f/wordfreq-3.0.2-py3-none-any.whl",
+    "wheelSha256": "c5bfdf26cc26437d670ef145326e4e395cf0a4f4de2da85a331ddf3d2a334588",
+    "selectedListFile": "../../scripts/lexicon/frequency-en-wordfreq-3.0.2-top-12000.txt",
+    "selectedListSha256": "56abcb2db68a0c0dd774a3ca14c53a049dbb6d5109e8dc49113b1a980af47b27",
+    "selectedWordCount": 11827,
+    "license": "CC BY-SA 4.0 frequency data; wordfreq code is Apache-2.0",
+    "attribution": "Robyn Speer, wordfreq v3.0.2; source data includes Google Books Ngrams and Syntactic Ngrams, Leeds Internet Corpus, Wikipedia, ParaCrawl, OpenSubtitles 2018, SUBTLEX lists, and Twitter-derived frequency statistics. See scripts/lexicon/README.md."
+  },
+  "selection": {
+    "topN": 12000,
+    "policy": "frequency rank order, unique normalized alphabetic entries; union with positive SayIt golden lemmas",
+    "goldenLemmas": [
+      "gag",
+      "cartoon",
+      "categorize",
+      "granted",
+      "reference",
+      "literal"
+    ]
+  },
+  "entryCount": 8604,
+  "artifactBytes": 1085643,
+  "gzipBytes": 383347,
+  "sha256": "5a84fb2e40d1222435b4a8a0aebc963a5c0b256fb306e75cccaea7bbf62aa2b8",
+  "gzipSha256": "81ea0c8015085d98671e0db5affb81af945c76e60653212fe1ac64d09b1dd731",
+  "goldenCoverage": {
+    "passed": 7,
+    "total": 7,
+    "positivePassed": 6,
+    "positiveTotal": 6,
+    "negativeMissPassed": true,
+    "results": [
+      {
+        "surface": "gag",
+        "lemma": "gag",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "cartoon",
+        "lemma": "cartoon",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "categorize",
+        "lemma": "categorize",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "granted",
+        "lemma": "grant",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "reference",
+        "lemma": "reference",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "literal",
+        "lemma": "literal",
+        "hasDefinition": true,
+        "expectedDefinition": true,
+        "passed": true
+      },
+      {
+        "surface": "xyznotaword",
+        "lemma": null,
+        "hasDefinition": false,
+        "expectedDefinition": false,
+        "passed": true
+      }
+    ]
+  },
+  "morphologyFallbackCoverage": {
+    "passed": 5,
+    "total": 5,
+    "results": [
+      {
+        "surface": "granted",
+        "expectedLemma": "grant",
+        "resolvedLemma": "grant",
+        "passed": true
+      },
+      {
+        "surface": "uses",
+        "expectedLemma": "use",
+        "resolvedLemma": "use",
+        "passed": true
+      },
+      {
+        "surface": "referencing",
+        "expectedLemma": "reference",
+        "resolvedLemma": "reference",
+        "passed": true
+      },
+      {
+        "surface": "kicked",
+        "expectedLemma": "kick",
+        "resolvedLemma": "kick",
+        "passed": true
+      },
+      {
+        "surface": "children",
+        "expectedLemma": "child",
+        "resolvedLemma": "child",
+        "passed": true
+      }
+    ]
+  },
+  "approvalGate": {
+    "maxGzipBytes": 3145728,
+    "minEntryCount": 8000,
+    "sizePassed": true,
+    "entryCountPassed": true,
+    "goldenCoveragePassed": true,
+    "morphologyCoveragePassed": true,
+    "randomSpotCheck": {
+      "method": "Sort entries by SHA-256('sayit-lexicon-v1:' + lemma), inspect first 100 primary glosses.",
+      "sampleSize": 100,
+      "reviewed": true,
+      "reviewedAt": "2026-09-25T15:51:22.188Z",
+      "sample": [
+        {
+          "lemma": "external",
+          "primary": "happening or arising or located outside or beyond some limits or especially surface; \"the external auditory canal\"; \"external pressures\""
+        },
+        {
+          "lemma": "martin",
+          "primary": "French bishop who is a patron saint of France (died in 397)"
+        },
+        {
+          "lemma": "goal",
+          "primary": "the state of affairs that a plan is intended to achieve and that (when achieved) terminates behavior intended to achieve it; \"the ends justify the means\""
+        },
+        {
+          "lemma": "legislature",
+          "primary": "persons who make or amend or repeal laws"
+        },
+        {
+          "lemma": "alaska",
+          "primary": "a state in northwestern North America; the 49th state admitted to the union; \"Alaska is the largest state in the United States\""
+        },
+        {
+          "lemma": "wi",
+          "primary": "a midwestern state in north central United States"
+        },
+        {
+          "lemma": "nothing",
+          "primary": "a quantity of no importance; \"it looked like nothing I had ever seen before\"; \"reduced to nil all the work we had done\"; \"we racked up a pathetic goose egg\"; \"it was all for naught\"; \"I didn't hear zilch about it\""
+        },
+        {
+          "lemma": "falling",
+          "primary": "decreasing in amount or degree; \"falling temperature\""
+        },
+        {
+          "lemma": "soap",
+          "primary": "a cleansing agent made from the salts of vegetable or animal fats"
+        },
+        {
+          "lemma": "surrey",
+          "primary": "a county in southeastern England on the Thames"
+        },
+        {
+          "lemma": "roughly",
+          "primary": "(of quantities) imprecise but fairly close to correct; \"lasted approximately an hour\"; \"in just about a minute\"; \"he's about 30 years old\"; \"I've had about all I can stand\"; \"we meet about once a month\"; \"some forty people came\"; \"weighs around a hundred pounds\"; \"roughly $3,000\"; \"holds 3 gallons, more or less\"; \"20 or so people were at the party\""
+        },
+        {
+          "lemma": "refugee",
+          "primary": "an exile who flees for safety"
+        },
+        {
+          "lemma": "stem",
+          "primary": "(linguistics) the form of a word after all affixes are removed; \"thematic vowels are part of the stem\""
+        },
+        {
+          "lemma": "fibre",
+          "primary": "a slender and greatly elongated substance capable of being spun into yarn"
+        },
+        {
+          "lemma": "finite",
+          "primary": "bounded or limited in magnitude or spatial or temporal extent"
+        },
+        {
+          "lemma": "rail",
+          "primary": "a barrier consisting of a horizontal bar and supports"
+        },
+        {
+          "lemma": "range",
+          "primary": "an area in which something acts or operates or has power or control: \"the range of a supersonic jet\"; \"a piano has a greater range than the human voice\"; \"the ambit of municipal legislation\"; \"within the compass of this article\"; \"within the scope of an investigation\"; \"outside the reach of the law\"; \"in the political orbit of a world power\""
+        },
+        {
+          "lemma": "flush",
+          "primary": "turn red, as if in embarrassment or shame; \"The girl blushed when a young man whistled as she walked by\""
+        },
+        {
+          "lemma": "heating",
+          "primary": "the process of becoming warmer; a rising temperature"
+        },
+        {
+          "lemma": "wandering",
+          "primary": "migratory; \"a restless mobile society\"; \"the nomadic habits of the Bedouins\"; \"believed the profession of a peregrine typist would have a happy future\"; \"wandering tribes\""
+        },
+        {
+          "lemma": "ramp",
+          "primary": "an inclined surface connecting two levels"
+        },
+        {
+          "lemma": "haircut",
+          "primary": "the style in which hair has been cut"
+        },
+        {
+          "lemma": "inaugural",
+          "primary": "an address delivered at an inaugural ceremony (especially by a United States president)"
+        },
+        {
+          "lemma": "watching",
+          "primary": "the act of observing; taking a patient look"
+        },
+        {
+          "lemma": "eldest",
+          "primary": "first in order of birth; \"the firstborn child\""
+        },
+        {
+          "lemma": "sufficiently",
+          "primary": "to a sufficient degree; \"she was sufficiently fluent in Mandarin\""
+        },
+        {
+          "lemma": "radioactive",
+          "primary": "exhibiting or caused by radioactivity; \"radioactive isotope\"; \"radioactive decay\"; \"radioactive fallout\""
+        },
+        {
+          "lemma": "spicy",
+          "primary": "having an agreeably pungent taste"
+        },
+        {
+          "lemma": "adopted",
+          "primary": "acquired as your own by free choice; \"my adopted state\"; \"an adoptive country\""
+        },
+        {
+          "lemma": "worthless",
+          "primary": "lacking in usefulness or value; \"a worthless idler\""
+        },
+        {
+          "lemma": "historically",
+          "primary": "throughout history; \"historically they have never coexisted peacefully\""
+        },
+        {
+          "lemma": "exceptionally",
+          "primary": "to an exceptional degree; \"it worked exceptionally well\""
+        },
+        {
+          "lemma": "cart",
+          "primary": "a heavy open wagon usually having two wheels and drawn by an animal"
+        },
+        {
+          "lemma": "complete",
+          "primary": "having every necessary or normal part or component or step; \"a complete meal\"; \"a complete wardrobe\"; \"a complete set of the Britannica\"; \"a complete set of china\"; \"a complete defeat\"; \"a complete accounting\""
+        },
+        {
+          "lemma": "spin",
+          "primary": "revolve quickly and repeatedly around one's own axis; \"The dervishes whirl around and around without getting dizzy\""
+        },
+        {
+          "lemma": "moreover",
+          "primary": "in addition; \"computer chess games are getting cheaper all the time; furthermore, their quality is improving\"; \"the cellar was dark; moreover, mice nested there\"; \"what is more, there's no sign of a change\""
+        },
+        {
+          "lemma": "fashion",
+          "primary": "how something is done or how it happens; \"her dignified manner\"; \"his rapid manner of talking\"; \"their nomadic mode of existence\"; \"in the characteristic New York style\"; \"a lonely way of life\"; \"in an abrasive fashion\""
+        },
+        {
+          "lemma": "pending",
+          "primary": "awaiting conclusion or confirmation; \"business still pending\""
+        },
+        {
+          "lemma": "am",
+          "primary": "a radioactive transuranic metallic element; discovered by bombarding uranium with helium atoms"
+        },
+        {
+          "lemma": "brother",
+          "primary": "a male with the same parents as someone else; \"my brother still lives with our parents\""
+        },
+        {
+          "lemma": "trump",
+          "primary": "a playing card in the suit that has been declared trumps; \"the ace of trumps is a sure winner\""
+        },
+        {
+          "lemma": "inequality",
+          "primary": "lack of equality; \"the growing inequality between rich and poor\""
+        },
+        {
+          "lemma": "known",
+          "primary": "apprehended with certainty; \"a known quantity\"; \"the limits of the known world\"; \"a musician known throughout the world\"; \"a known criminal\""
+        },
+        {
+          "lemma": "mechanic",
+          "primary": "a craftsman skilled in operating machine tools"
+        },
+        {
+          "lemma": "rushed",
+          "primary": "done under pressure; \"a rush job\""
+        },
+        {
+          "lemma": "magistrate",
+          "primary": "a lay judge or civil authority who administers the law (especially one who conducts a court dealing with minor offenses)"
+        },
+        {
+          "lemma": "loyalty",
+          "primary": "the quality of being loyal"
+        },
+        {
+          "lemma": "joint",
+          "primary": "united or combined; \"a joint session of Congress\"; \"joint owners\""
+        },
+        {
+          "lemma": "cod",
+          "primary": "the vessel that contains the seeds of a plant (not the seeds themselves)"
+        },
+        {
+          "lemma": "cliff",
+          "primary": "a steep high face of rock; \"he stood on a high cliff overlooking the town\"; \"a steep drop\""
+        },
+        {
+          "lemma": "evolution",
+          "primary": "a process in which something passes by degrees to a different stage (especially a more advanced or mature stage); \"the development of his ideas took many years\"; \"the evolution of Greek civilization\"; \"the slow development of her skill as a writer\""
+        },
+        {
+          "lemma": "employ",
+          "primary": "put into service; make work or employ for a particular purpose or for its inherent or natural purpose; \"use your head!\"; \"we only use Spanish at home\"; \"I can't use this tool\"; \"Apply a magnetic field here\"; \"This thinking was applied to many projects\"; \"How do you utilize this tool?\"; \"I apply this rule to get good results\"; \"use the plastic bags to store the food\"; \"He doesn't know how to use a computer\""
+        },
+        {
+          "lemma": "thomas",
+          "primary": "United States clockmaker who introduced mass production (1785-1859)"
+        },
+        {
+          "lemma": "edge",
+          "primary": "the boundary of a surface"
+        },
+        {
+          "lemma": "republic",
+          "primary": "a political system in which the supreme power lies in a body of citizens who can elect people to represent them"
+        },
+        {
+          "lemma": "tokyo",
+          "primary": "the capital and largest city of Japan; the economic and cultural center of Japan"
+        },
+        {
+          "lemma": "interval",
+          "primary": "a definite length of time marked off by two instants"
+        },
+        {
+          "lemma": "gardening",
+          "primary": "the cultivation of plants"
+        },
+        {
+          "lemma": "cheering",
+          "primary": "encouragement in the form of cheers from spectators; \"it's all over but the shouting\""
+        },
+        {
+          "lemma": "herb",
+          "primary": "a plant lacking a permanent woody stem; many are flowering garden plants or potherbs; some having medicinal properties; some are pests"
+        },
+        {
+          "lemma": "porn",
+          "primary": "creative activity (writing or pictures or films etc.) of no literary or artistic value other than to stimulate sexual desire"
+        },
+        {
+          "lemma": "seoul",
+          "primary": "the capital of South Korea and the largest city of Asia; located in northwestern South Korea"
+        },
+        {
+          "lemma": "rarely",
+          "primary": "not often; \"we rarely met\""
+        },
+        {
+          "lemma": "enable",
+          "primary": "render capable or able for some task; \"This skill will enable you to find a job on Wall Street\"; \"The rope enables you to secure yourself when you climb the mountain\""
+        },
+        {
+          "lemma": "winding",
+          "primary": "marked by repeated turns and bends; \"a tortuous road up the mountain\"; \"winding roads are full of surprises\"; \"had to steer the car down a twisty track\""
+        },
+        {
+          "lemma": "parental",
+          "primary": "designating the generation of organisms from which hybrid offspring are produced"
+        },
+        {
+          "lemma": "introduce",
+          "primary": "cause to come to know personally; \"permit me to acquaint you with my son\"; \"introduce the new neighbors to the community\""
+        },
+        {
+          "lemma": "freestyle",
+          "primary": "a race (as in swimming) in which each contestant has a free choice of the style to use"
+        },
+        {
+          "lemma": "reform",
+          "primary": "a change for the better as a result of correcting abuses; \"justice was for sale before the reform of the law courts\""
+        },
+        {
+          "lemma": "substance",
+          "primary": "the real physical matter of which a person or thing consists; \"DNA is the substance of our genes\""
+        },
+        {
+          "lemma": "composed",
+          "primary": "serenely self-possessed and free from agitation especially in times of stress; \"the performer seemed completely composed as she stepped onto the stage\"; \"I felt calm and more composed than I had in a long time\""
+        },
+        {
+          "lemma": "sidewalk",
+          "primary": "walk consisting of a paved area for pedestrians; usually beside a street or roadway"
+        },
+        {
+          "lemma": "summit",
+          "primary": "the highest level or degree attainable; the highest stage of development; \"his landscapes were deemed the acme of beauty\"; \"the artist's gifts are at their acme\"; \"at the height of her career\"; \"the peak of perfection\"; \"summer was at its peak\"; \"...catapulted Einstein to the pinnacle of fame\"; \"the summit of his ambition\"; \"so many highest superlatives achieved by man\"; \"at the top of his profession\""
+        },
+        {
+          "lemma": "approve",
+          "primary": "give sanction to; \"I approve of his educational policies\""
+        },
+        {
+          "lemma": "opening",
+          "primary": "first or beginning; \"the memorable opening bars of Beethoven's Fifth\"; \"the play's opening scene\""
+        },
+        {
+          "lemma": "equipment",
+          "primary": "an instrumentality needed for an undertaking or to perform a service"
+        },
+        {
+          "lemma": "pathway",
+          "primary": "a bundle of myelinated nerve fibers following a path through the brain"
+        },
+        {
+          "lemma": "hunt",
+          "primary": "pursue for food or sport (as of wild animals); \"Goering often hunted wild boars in Poland\"; \"The dogs are running deer\"; \"The Duke hunted in these woods\""
+        },
+        {
+          "lemma": "toddler",
+          "primary": "a young child"
+        },
+        {
+          "lemma": "boiled",
+          "primary": "cooked in hot water"
+        },
+        {
+          "lemma": "whitney",
+          "primary": "United States inventor of the mechanical cotton gin (1765-1825)"
+        },
+        {
+          "lemma": "relation",
+          "primary": "an abstraction belonging to or characteristic of two entities or parts together"
+        },
+        {
+          "lemma": "grease",
+          "primary": "a thick fatty oil (especially one used to lubricate machinery)"
+        },
+        {
+          "lemma": "february",
+          "primary": "the month following January and preceding March"
+        },
+        {
+          "lemma": "gun",
+          "primary": "a weapon that discharges a missile at high velocity (especially from a metal tube or barrel)"
+        },
+        {
+          "lemma": "dull",
+          "primary": "lacking in liveliness or animation; \"he was so dull at parties\"; \"a dull political campaign\"; \"a large dull impassive man\"; \"dull days with nothing to do\"; \"how dull and dreary the world is\"; \"fell back into one of her dull moods\""
+        },
+        {
+          "lemma": "jury",
+          "primary": "a body of citizens sworn to give a true verdict according to the evidence presented in a court of law"
+        },
+        {
+          "lemma": "v",
+          "primary": "a unit of potential equal to the potential difference between two points on a conductor carrying a current of 1 ampere when the power dissipated between the two points is 1 watt; equivalent to the potential difference across a resistance of 1 ohm when 1 ampere of current flows through it"
+        },
+        {
+          "lemma": "dump",
+          "primary": "throw away as refuse; \"No dumping in these woods!\""
+        },
+        {
+          "lemma": "cover",
+          "primary": "provide with a covering or cause to be covered; \"cover her face with a handkerchief\"; \"cover the child with a blanket\"; \"cover the grave with flowers\""
+        },
+        {
+          "lemma": "store",
+          "primary": "a mercantile establishment for the retail sale of goods or services; \"he bought it at a shop on Cape Cod\""
+        },
+        {
+          "lemma": "selected",
+          "primary": "chosen in preference to another"
+        },
+        {
+          "lemma": "manufacturer",
+          "primary": "a business engaged in manufacturing some product"
+        },
+        {
+          "lemma": "pizza",
+          "primary": "Italian open pie made of thin bread dough spread with a spiced mixture of e.g. tomato sauce and cheese"
+        },
+        {
+          "lemma": "scores",
+          "primary": "a large number or amount; \"made lots of new friends\"; \"she amassed stacks of newspapers\""
+        },
+        {
+          "lemma": "collapse",
+          "primary": "break down, literally or metaphorically; \"The wall collapsed\"; \"The business collapsed\"; \"The dam broke\"; \"The roof collapsed\"; \"The wall gave in\"; \"The roof finally gave under the weight of the ice\""
+        },
+        {
+          "lemma": "dialogue",
+          "primary": "a conversation between two persons"
+        },
+        {
+          "lemma": "customs",
+          "primary": "money collected under a tariff"
+        },
+        {
+          "lemma": "proximity",
+          "primary": "the property of being close together"
+        },
+        {
+          "lemma": "hungary",
+          "primary": "a republic in central Europe"
+        }
+      ]
+    },
+    "passed": true
+  }
+}

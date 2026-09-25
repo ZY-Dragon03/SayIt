@@ -97,6 +97,27 @@ describe("SayIt retrieval contract", () => {
     ).toBe(false);
   });
 
+  it("accepts the one restored interaction for a follow-up request", () => {
+    const fixture = dogfoodFixtures.find(
+      (candidate) => candidate.id === "history-restore-follow-up",
+    );
+    expect(fixture).toBeDefined();
+    if (!fixture) return;
+
+    const parsed = retrieveRequestSchema.safeParse({
+      input: fixture.input,
+      context: [
+        {
+          input: fixture.restoreInput,
+          mode: "interpret",
+          assistant_summary: "Expression: Road House. Meaning: A film reference.",
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.context).toHaveLength(1);
+  });
+
   it("rejects success without a best match", () => {
     const result = retrievalResultSchema.safeParse({
       ...successfulResult,
@@ -135,6 +156,7 @@ describe("SayIt retrieval contract", () => {
       "semantic-noise-to-phrasal-verb",
       "known-expression-to-interpretation",
       "correction-with-session-context",
+      "history-restore-follow-up",
       "ambiguous-input",
       "no-reliable-match",
       "provider-timeout",
