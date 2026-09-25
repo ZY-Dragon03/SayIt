@@ -154,6 +154,7 @@ async function copyToClipboard(text: string): Promise<void> {
 function App() {
   const repositoryRef = useRef<LocalMemoryRepository | null>(null);
   const historyRepositoryRef = useRef<LocalHistoryRepository | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SayItResult | null>(null);
   const [sessionContext, setSessionContext] = useState<SessionContextTurn[]>(
@@ -189,6 +190,18 @@ function App() {
     historyRepositoryRef.current = historyRepository;
     setHistoryItems(historyRepository.list());
   }, []);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    const maxHeight =
+      Number.parseFloat(window.getComputedStyle(textarea).maxHeight) || 240;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [input]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -483,10 +496,7 @@ function App() {
           <div className="brand-mark" aria-hidden="true">
             S
           </div>
-          <div>
-            <div className="brand-name">SayIt</div>
-            <div className="brand-tagline">Find the natural way to say it.</div>
-          </div>
+          <div className="brand-name">SayIt</div>
         </div>
         <div className="topbar-actions">
           <PronunciationControls
@@ -503,31 +513,33 @@ function App() {
             {theme === "dark" ? "☼" : "☾"}
           </button>
           <button
-            className="saved-button"
+            className={`icon-button utility-action ${historyDrawerOpen ? "is-active" : ""}`}
             type="button"
+            title={`History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
             onClick={() => {
               setDrawerOpen(false);
               setHistoryDrawerOpen(true);
             }}
+            aria-expanded={historyDrawerOpen}
             aria-label={`Open history, ${historyItems.length} recent items`}
           >
-            <span aria-hidden="true">◷</span>
-            History
+            <HistoryIcon />
             {historyItems.length > 0 && (
               <span className="saved-count">{historyItems.length}</span>
             )}
           </button>
           <button
-            className="saved-button"
+            className={`icon-button utility-action ${drawerOpen ? "is-active" : ""}`}
             type="button"
+            title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
             onClick={() => {
               setHistoryDrawerOpen(false);
               setDrawerOpen(true);
             }}
+            aria-expanded={drawerOpen}
             aria-label={`Open saved expressions, ${savedItems.length} saved`}
           >
-            <span aria-hidden="true">♡</span>
-            Saved
+            <BookmarkIcon />
             {savedItems.length > 0 && (
               <span className="saved-count">{savedItems.length}</span>
             )}
@@ -537,18 +549,17 @@ function App() {
 
       <main className="main-content">
         <section className="hero-copy" aria-labelledby="page-title">
-          <p className="eyebrow">English expression tool</p>
           <h1 id="page-title">What are you trying to say?</h1>
-          <p>
-            Type the rough version. SayIt will find the natural word, phrase,
-            sentence, or explain an expression in context.
-          </p>
+          <p>Find the words, or make sense of an expression.</p>
         </section>
 
         <form className="input-card" onSubmit={handleSubmit}>
-          <label htmlFor="expression-input">Your thought</label>
+          <label className="sr-only" htmlFor="expression-input">
+            Your thought
+          </label>
           <textarea
             id="expression-input"
+            ref={inputRef}
             value={input}
             onChange={(event) => {
               setInput(event.target.value);
@@ -556,14 +567,14 @@ function App() {
               setActiveSavedId(null);
             }}
             onKeyDown={handleInputKeyDown}
-            placeholder="e.g. put many things in some category by same feature"
+            placeholder="Try: sort ideas by shared traits"
             maxLength={MAX_INPUT_LENGTH}
             autoFocus
             aria-describedby="input-hint input-count"
             aria-busy={isSubmitting}
           />
           <div className="input-footer">
-            <span id="input-hint">Enter to retrieve · Shift+Enter for a new line</span>
+            <span id="input-hint">Enter to find · Shift+Enter for a new line</span>
             <span id="input-count" className="character-count">
               {input.length}/{MAX_INPUT_LENGTH}
             </span>
@@ -633,7 +644,7 @@ function App() {
               <span className="empty-icon" aria-hidden="true">
                 ✦
               </span>
-              <span>Your useful expression will appear here.</span>
+              <span>Your next words start here.</span>
             </div>
           )}
         </section>
@@ -866,19 +877,6 @@ function ResultView({
 
   return (
     <div className="result-content">
-      <div className="result-heading-row">
-        <span className="result-kicker">Best match</span>
-        <div className="result-actions">
-          <button
-            className={`secondary-button ${isSaved ? "saved-state" : ""}`}
-            type="button"
-            onClick={onSave}
-            disabled={isSaved}
-          >
-            {isSaved ? "Saved locally" : "Save"}
-          </button>
-        </div>
-      </div>
       <div className="best-match action-block">
         <div className="playable-text">
           <strong>{result.best_match.text}</strong>
@@ -890,6 +888,17 @@ function ResultView({
             }
             expressionType={formatExpressionType(result.best_match.expression_type)}
           />
+          <button
+            className={`icon-button save-result-button ${isSaved ? "saved-state" : ""}`}
+            type="button"
+            onClick={onSave}
+            disabled={isSaved}
+            aria-pressed={isSaved}
+            aria-label={isSaved ? "Saved locally" : "Save expression"}
+            title={isSaved ? "Saved" : "Save expression"}
+          >
+            {isSaved ? <CheckIcon /> : <BookmarkIcon />}
+          </button>
         </div>
         <ContextualActions
           text={result.best_match.text}
@@ -1041,9 +1050,6 @@ function InterpretationResultView({
   const interpretation = result.interpretation;
   return (
     <div className="result-content interpretation-content">
-      <div className="result-heading-row">
-        <span className="result-kicker">Expression</span>
-      </div>
       <div className="best-match action-block">
         <div className="playable-text">
           <strong>{interpretation.expression}</strong>
@@ -1071,6 +1077,7 @@ function InterpretationResultView({
       <ExplanatoryResultBlock
         kicker="Meaning in this context"
         text={interpretation.meaning_in_context}
+        emphasis="primary"
         copyLabel="Meaning in this context"
         speechKey="interpretation-meaning"
         pronunciationAccent={pronunciationAccent}
@@ -1115,6 +1122,7 @@ function InterpretationResultView({
 interface ExplanatoryResultBlockProps {
   kicker: string;
   text: string;
+  emphasis?: "primary" | "supporting";
   copyLabel: string;
   speechKey: string;
   pronunciationAccent: PronunciationPreferences["accent"];
@@ -1128,6 +1136,7 @@ interface ExplanatoryResultBlockProps {
 function ExplanatoryResultBlock({
   kicker,
   text,
+  emphasis = "supporting",
   copyLabel,
   speechKey,
   pronunciationAccent,
@@ -1138,7 +1147,9 @@ function ExplanatoryResultBlock({
   onSpeak,
 }: ExplanatoryResultBlockProps) {
   return (
-    <div className="explanatory-result-block action-block">
+    <div
+      className={`explanatory-result-block explanatory-result-block--${emphasis} action-block`}
+    >
       <span className="result-kicker">{kicker}</span>
       <LexicalText
         text={text}
@@ -1537,9 +1548,10 @@ function PronunciationControls({
 }: PronunciationControlsProps) {
   return (
     <div className="pronunciation-controls" aria-label="Pronunciation settings">
-      <label>
-        <span>Accent</span>
+      <label className="preference-select">
+        <span className="sr-only">Pronunciation accent</span>
         <select
+          aria-label="Pronunciation accent"
           value={preferences.accent}
           onChange={(event) =>
             onChange({
@@ -1551,10 +1563,13 @@ function PronunciationControls({
           <option value="us">US</option>
           <option value="uk">UK</option>
         </select>
+        <ChevronDownIcon />
       </label>
-      <label>
-        <span>Speed</span>
+      <span className="control-divider" aria-hidden="true" />
+      <label className="preference-select">
+        <span className="sr-only">Speech speed</span>
         <select
+          aria-label="Speech speed"
           value={preferences.speed}
           onChange={(event) =>
             onChange({
@@ -1563,11 +1578,37 @@ function PronunciationControls({
             })
           }
         >
-          <option value="normal">Normal</option>
-          <option value="slow">Slow</option>
+          <option value="normal">1×</option>
+          <option value="slow">0.8×</option>
         </select>
+        <ChevronDownIcon />
       </label>
     </div>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.75" />
+      <path d="M8 4.5v3.75l2.5 1.5" />
+    </svg>
+  );
+}
+
+function BookmarkIcon() {
+  return (
+    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
+      <path d="M4 2.25h8a.75.75 0 0 1 .75.75v10.5L8 10.5l-4.75 3V3a.75.75 0 0 1 .75-.75Z" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg aria-hidden="true" className="control-chevron" viewBox="0 0 12 12" fill="none">
+      <path d="m3 4.5 3 3 3-3" />
+    </svg>
   );
 }
 
