@@ -1546,43 +1546,41 @@ function PronunciationControls({
   preferences,
   onChange,
 }: PronunciationControlsProps) {
+  const accentLabel =
+    preferences.accent === "us" ? "US" : "UK";
+  const nextAccentLabel = preferences.accent === "us" ? "UK" : "US";
+  const speedLabel = preferences.speed === "normal" ? "1×" : "0.8×";
+  const nextSpeedLabel = preferences.speed === "normal" ? "0.8×" : "1×";
+
   return (
     <div className="pronunciation-controls" aria-label="Pronunciation settings">
-      <label className="preference-select">
-        <span className="sr-only">Pronunciation accent</span>
-        <select
-          aria-label="Pronunciation accent"
-          value={preferences.accent}
-          onChange={(event) =>
-            onChange({
-              ...preferences,
-              accent: event.target.value as PronunciationPreferences["accent"],
-            })
-          }
-        >
-          <option value="us">US</option>
-          <option value="uk">UK</option>
-        </select>
-        <ChevronDownIcon />
-      </label>
+      <button
+        className="preference-toggle"
+        type="button"
+        aria-label={`Pronunciation accent, currently ${accentLabel}, click to switch to ${nextAccentLabel}`}
+        onClick={() =>
+          onChange({
+            ...preferences,
+            accent: preferences.accent === "us" ? "uk" : "us",
+          })
+        }
+      >
+        {accentLabel}
+      </button>
       <span className="control-divider" aria-hidden="true" />
-      <label className="preference-select">
-        <span className="sr-only">Speech speed</span>
-        <select
-          aria-label="Speech speed"
-          value={preferences.speed}
-          onChange={(event) =>
-            onChange({
-              ...preferences,
-              speed: event.target.value as PronunciationPreferences["speed"],
-            })
-          }
-        >
-          <option value="normal">1×</option>
-          <option value="slow">0.8×</option>
-        </select>
-        <ChevronDownIcon />
-      </label>
+      <button
+        className="preference-toggle"
+        type="button"
+        aria-label={`Speech speed, currently ${speedLabel}, click to switch to ${nextSpeedLabel}`}
+        onClick={() =>
+          onChange({
+            ...preferences,
+            speed: preferences.speed === "normal" ? "slow" : "normal",
+          })
+        }
+      >
+        {speedLabel}
+      </button>
     </div>
   );
 }
@@ -1600,14 +1598,6 @@ function BookmarkIcon() {
   return (
     <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
       <path d="M4 2.25h8a.75.75 0 0 1 .75.75v10.5L8 10.5l-4.75 3V3a.75.75 0 0 1 .75-.75Z" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon() {
-  return (
-    <svg aria-hidden="true" className="control-chevron" viewBox="0 0 12 12" fill="none">
-      <path d="m3 4.5 3 3 3-3" />
     </svg>
   );
 }

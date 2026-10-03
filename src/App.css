@@ -111,43 +111,27 @@
   background: transparent;
 }
 
-.preference-select {
-  position: relative;
-  display: flex;
-  align-items: center;
+.preference-toggle {
   min-height: 34px;
-  border-radius: 9px;
-  transition: background-color 140ms ease;
-}
-
-.preference-select:hover {
-  background: var(--surface-muted);
-}
-
-.preference-select select {
-  min-height: 34px;
-  padding: 0 20px 0 10px;
+  padding: 0 10px;
   color: var(--text);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  appearance: none;
-  border: 0;
-  outline: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
   background: transparent;
   cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
-.control-chevron {
-  position: absolute;
-  right: 6px;
-  width: 11px;
-  height: 11px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.4;
-  pointer-events: none;
+.preference-toggle:hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface-muted);
 }
 
 .control-divider {
@@ -193,6 +177,7 @@
 .saved-item:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
+.preference-toggle:focus-visible,
 summary:focus-visible {
   outline: 3px solid rgba(82, 103, 217, 0.28);
   outline-offset: 2px;
@@ -1080,10 +1065,9 @@ summary:focus-visible {
     height: 31px;
   }
 
-  .preference-select select {
+  .preference-toggle {
     min-height: 31px;
-    padding-right: 17px;
-    padding-left: 7px;
+    padding: 0 7px;
     font-size: 11px;
   }
 
