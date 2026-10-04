@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   collectEditorial,
   countSentenceEnds,
@@ -113,6 +113,85 @@ function makeFetcher(pages: Map<string, FetchedArticlePage>, calls: string[] = [
 }
 
 describe("SayIt Reader Editorial Agent", () => {
+  it("fails retryably only when every preference-generated search query fails", async () => {
+    const search = vi.fn(async () => { throw new Error("offline search transport"); });
+    const result = collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {
+      search,
+      fetchArticle: async () => { throw new Error("No source should be fetched after search failure."); },
+    });
+
+    await expect(result).rejects.toMatchObject({
+      code: "reader_discovery_unavailable",
+      retryable: true,
+    });
+    expect(search).toHaveBeenCalled();
+  });
+
+  it("fails retryably when every discovered source fetch throws before a response", async () => {
+    const url = "https://www.reuters.com/finance/central-bank-report";
+    const result = collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {
+      search: async () => [{ url, title: "Finance report on central bank policy", snippet: "A full report" }],
+      fetchArticle: async () => { throw new Error("offline source transport"); },
+      maxArticleChecks: 1,
+    });
+
+    await expect(result).rejects.toMatchObject({
+      code: "reader_source_unavailable",
+      retryable: true,
+    });
+  });
+
+  it("keeps permanent HTTP unavailability as shortage but retries all-transient source responses", async () => {
+    const url = "https://www.reuters.com/finance/central-bank-http-status";
+    const preferences = preferencesForTopic(articleBody("central bank policy"), "Finance");
+    const search = async () => [{ url, title: "Finance report on central bank policy", snippet: "A full report" }];
+    const permanent404 = { ...pageFor(url, "Finance report", articleBody("central bank policy"), "Reuters"), statusCode: 404 };
+    const unavailable = await collectEditorial(preferences, {
+      search,
+      fetchArticle: async () => permanent404,
+      maxArticleChecks: 1,
+    });
+    expect(unavailable.status).toBe("NOT_DELIVERED");
+    expect(unavailable.candidates[0]?.contentStatus).toBe("UNAVAILABLE");
+
+    const transient503 = { ...permanent404, statusCode: 503 };
+    await expect(collectEditorial(preferences, {
+      search,
+      fetchArticle: async () => transient503,
+      maxArticleChecks: 1,
+    })).rejects.toMatchObject({
+      code: "reader_source_unavailable",
+      retryable: true,
+    });
+  });
+
+  it("returns ordinary NOT_DELIVERED when preference searches succeed without candidates", async () => {
+    const fetchArticle = vi.fn(async () => { throw new Error("No source should be fetched for empty search results."); });
+    const result = await collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {
+      search: async () => [],
+      fetchArticle,
+    });
+
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.articles).toHaveLength(0);
+    expect(fetchArticle).not.toHaveBeenCalled();
+  });
+
+  it("returns ordinary NOT_DELIVERED when every fetched result is summary-only", async () => {
+    const url = "https://www.reuters.com/finance/central-bank-summary";
+    const summary = pageFor(url, "Finance summary of a central bank decision", "A brief summary of the central bank decision and its effect on finance.", "Reuters");
+    const result = await collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {
+      search: async () => [{ url, title: "Finance summary of a central bank decision", snippet: "A short summary" }],
+      fetchArticle: async () => summary,
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.articles).toHaveLength(0);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.contentStatus).toBe("SUMMARY");
+  });
+
   it("rejects an incomplete Readability extraction when story paragraphs are omitted", async () => {
     const url = "https://www.reuters.com/world/analysis/synthetic-continuity-case";
     const title = "Synthetic report on finance and economic evidence";

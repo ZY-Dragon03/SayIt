@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReaderPreferences } from "../../src/shared/reader-contract";
+import { collectEditorial } from "./editorial";
 import { ReaderStore } from "./store";
 import {
   ReaderService,
@@ -186,6 +187,64 @@ describe("Reader collection lifecycle", () => {
     });
     expect(service.today().attempts.map((attempt) => attempt.trigger)).toEqual(["manual", "scheduled"]);
     expect(service.today().occurrence?.scheduledAttemptCount).toBe(1);
+    await service.stop();
+  });
+
+  it("records an all-source outage as a retryable failure without replacing delivered issue state", async () => {
+    let current = new Date("2026-10-04T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    await store.update((state) => {
+      state.preferences = defaultPreferences({ dailyArticleCount: 2, readingBudgetMinutes: 20 });
+    });
+    let collectionCall = 0;
+    const collect = vi.fn<EditorialCollector>(async (preferences) => {
+      collectionCall += 1;
+      if (collectionCall === 1) return collection([article()]);
+      return collectEditorial(preferences, {
+        search: async () => [{
+          url: "https://www.reuters.com/technology/source-outage",
+          title: "Technology report on a source outage",
+          snippet: "A full technology report",
+        }],
+        fetchArticle: async () => { throw new Error("simulated source transport outage"); },
+        maxArticleChecks: 1,
+      });
+    });
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    const preservedIssue = service.today().issue!;
+    expect(preservedIssue.status).toBe("PARTIAL");
+    expect(preservedIssue.articles.filter((item) => item.contentStatus === "FULL_TEXT")).toHaveLength(1);
+    const deliveredArticle = preservedIssue.articles.find((item) => item.contentStatus === "FULL_TEXT")!;
+    const progress = await service.saveProgress({
+      issueId: preservedIssue.id,
+      articleId: deliveredArticle.id,
+      edition: preservedIssue.edition,
+      scrollRatio: 0.42,
+      scrollTop: 480,
+      firstVisibleParagraph: 2,
+      paragraphOffset: 19,
+    });
+    const issueAfterProgress = service.today().issue!;
+
+    current = new Date("2026-10-04T18:00:00.000Z");
+    await service.pulse();
+    await service.waitForIdle();
+
+    const today = service.today();
+    expect(today.attempts.map((attempt) => attempt.state)).toEqual(["SUCCEEDED", "FAILED"]);
+    expect(today.attempts[1]).toMatchObject({
+      retryable: true,
+      failureReason: "All discovered source requests failed transiently before returning usable content.",
+    });
+    expect(today.issue).toEqual(issueAfterProgress);
+    expect(today.issue?.articles).toEqual(issueAfterProgress.articles);
+    expect(store.snapshot().progress).toContainEqual(progress);
+    expect(today.occurrence).toMatchObject({ status: "RETRY_WAIT", scheduledAttemptCount: 1 });
     await service.stop();
   });
 

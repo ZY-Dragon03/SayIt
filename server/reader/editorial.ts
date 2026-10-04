@@ -101,6 +101,17 @@ export interface EditorialOptions {
   signal?: AbortSignal;
 }
 
+export type EditorialCollectionFailureCode = "reader_discovery_unavailable" | "reader_source_unavailable";
+
+export class EditorialCollectionError extends Error {
+  readonly retryable = true;
+
+  constructor(readonly code: EditorialCollectionFailureCode, message: string) {
+    super(message);
+    this.name = "EditorialCollectionError";
+  }
+}
+
 const SEARCH_TIMEOUT_MS = 12_000;
 const MAX_SEARCH_BYTES = 2 * 1024 * 1024;
 const MAX_RESULTS_PER_QUERY = 12;
@@ -193,6 +204,10 @@ const QUERY_VARIANTS = [
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
+}
+
+function isTransientSourceStatus(statusCode: number): boolean {
+  return statusCode === 408 || statusCode === 425 || statusCode === 429 || (statusCode >= 500 && statusCode <= 599);
 }
 
 function hash(value: string): string {
@@ -1098,12 +1113,14 @@ export async function collectEditorial(
   const queries = buildQueries(preferences.topics);
   const trace: EditorialTrace = { queries: [], candidates: [], decisions: [] };
   const discovered = new Map<string, SearchCandidate>();
+  let successfulSearchResponses = 0;
 
   for (const query of queries) {
     if (options.signal?.aborted) break;
     trace.queries.push(query);
     try {
       const results = await search(query, options.signal);
+      successfulSearchResponses += 1;
       for (const result of results) {
         const normalized = normalizeUrl(result.url);
         if (!normalized) {
@@ -1121,8 +1138,18 @@ export async function collectEditorial(
     }
   }
 
+  if (trace.queries.length > 0 && successfulSearchResponses === 0 && !options.signal?.aborted) {
+    throw new EditorialCollectionError(
+      "reader_discovery_unavailable",
+      "All preference-based discovery searches failed before returning results.",
+    );
+  }
+
   const candidates = [...discovered.values()].slice(0, Math.max(1, Math.min(options.maxArticleChecks ?? 36, 60)));
   trace.decisions.push(`Generated ${trace.queries.length} preference-based search queries and discovered ${discovered.size} unique article URLs; no article URL list was supplied as input.`);
+  let transientHttpFailures = 0;
+  let sourceFetchFailures = 0;
+  let nonTransientResponses = 0;
   const checked = await mapLimit(candidates, 3, async (source) => {
     if (options.signal?.aborted) {
       const summary = makeCandidateSummary(source, "UNAVAILABLE", "Collection was cancelled before source verification.", null);
@@ -1130,8 +1157,11 @@ export async function collectEditorial(
     }
     try {
       const page = await options.fetchArticle(source.url, options.signal);
+      if (isTransientSourceStatus(page.statusCode)) transientHttpFailures += 1;
+      else nonTransientResponses += 1;
       return evaluateVerified(source, page, preferences);
     } catch (error) {
+      sourceFetchFailures += 1;
       const message = error instanceof Error ? error.message : "The article source could not be reached.";
       const unavailable = makeCandidateSummary(source, "UNAVAILABLE", message, null);
       return {
@@ -1143,6 +1173,18 @@ export async function collectEditorial(
       };
     }
   });
+
+  if (
+    candidates.length > 0 &&
+    transientHttpFailures + sourceFetchFailures === candidates.length &&
+    nonTransientResponses === 0 &&
+    !options.signal?.aborted
+  ) {
+    throw new EditorialCollectionError(
+      "reader_source_unavailable",
+      "All discovered source requests failed transiently before returning usable content.",
+    );
+  }
 
   const verified: VerifiedCandidate[] = [];
   const allSummaries: EditorialArticle[] = [];

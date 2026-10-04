@@ -181,6 +181,13 @@ function safeErrorText(error: unknown): { message: string; retryable: boolean } 
   if (error && typeof error === "object") {
     const candidate = error as { retryable?: unknown; code?: unknown };
     if (candidate.retryable === true) {
+      const retryableMessages: Record<string, string> = {
+        reader_discovery_unavailable: "All preference-based discovery searches failed before returning results.",
+        reader_source_unavailable: "All discovered source requests failed transiently before returning usable content.",
+      };
+      if (typeof candidate.code === "string" && retryableMessages[candidate.code]) {
+        return { message: retryableMessages[candidate.code]!, retryable: true };
+      }
       return { message: "The collection service could not reach a required source.", retryable: true };
     }
     if (candidate.retryable === false) {
