@@ -123,3 +123,12 @@ Reader SHALL 在每日清单和文章视图中区分可在应用内阅读的全�
 - **GIVEN** 用户选中一个需结合所在句子理解的短语或句子
 - **WHEN** 用户调用 Reader 上下文 SayIt
 - **THEN** SayIt 使用选中文本和必要的相邻文章语境返回 interpretation；关闭结果后原文章位置及主工作区状态不变
+
+### Requirement: Regenerate 保留旧 edition 和阅读进度
+
+Daily Issue Regenerate SHALL 创建同一日期 Issue 的新 edition，不得静默删除先前已交付的文章、edition 或进度。新 edition 中仍存在的文章沿用原进度；被替换的文章继续可从该日旧 edition 打开。
+
+#### Scenario: PAT-RH-15 Regenerate 后保留文章与进度
+- **GIVEN** 用户已阅读某篇文章并保存了阅读位置，且该文章属于已完成 Issue 的旧 edition
+- **WHEN** 用户明确确认 Regenerate 并返回该日历史
+- **THEN** 新 edition 成为当前版本；旧 edition 和原文章仍可访问，原文章的阅读状态及位置不变

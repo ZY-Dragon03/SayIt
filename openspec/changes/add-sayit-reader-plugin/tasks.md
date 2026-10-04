@@ -1,36 +1,48 @@
 # Tasks
 
-## 1. Product Owner Review Gate
+## 1. Frozen Product Contract
 
-- [ ] 1.1 Review and decide each item in `design.md` under “Product Owner Decisions Before Freeze”; verify that the decisions are recorded and reconciled across `proposal.md`, the three delta specs, and `design.md` before any implementation begins.
-- [ ] 1.2 Review and approve or revise the 36 Product Acceptance Cases in the delta specs; verify each names an observable user action and result, and mark the product contract frozen only after explicit Product Owner confirmation.
+- [x] 1.1 Reconcile product decisions A–D across proposal, design, and all delta specs; retain F1–F10 and preserve valid original PAT meanings.
+- [x] 1.2 Verify the complete 49-case set: PAT-RM-01–06, PAT-RC-01–28, PAT-RH-01–15; every case has an observable action and result.
+- [ ] 1.3 Run strict OpenSpec validation, commit the reconciled contract, and create an annotated v1.0 freeze tag that records the contract commit SHA.
 
-## 2. Service and Data Foundation (After Product Approval)
+## 2. Implementation, Acceptance, and Feasibility Plans
 
-- [ ] 2.1 Select the scheduled collection runtime and discovery/full-text provider using the approved cost, attribution, content access, retry, and retention policies; verify startup catch-up, quota, secret handling, failure behavior, and deployment path are documented.
-- [ ] 2.2 Define versioned Reader preference, run, article, and progress records without changing `sayit.history.v1` or `sayit.saved.v1`; verify persistence and upgrade behavior with focused storage tests.
-- [ ] 2.3 Add an Editorial Agent collection interface and dynamic discovery adapter boundary; verify the Agent can discover from preferences without a complete preloaded URL list and provider credentials never enter the browser bundle.
+- [ ] 2.1 Record the local Windows target architecture, service lifecycle, storage/API boundaries, security constraints, dependency verdicts, and rollback path.
+- [ ] 2.2 Map all 49 PATs to candidate-bound engineering tests or manual product evidence; define clock-controlled schedule scenarios and real-network acceptance inputs.
+- [ ] 2.3 Validate at least one no-cost dynamic discovery path and readable-source path without committing to a new paid service; document limits and fallback behavior.
 
-## 3. Reader Mode and Collection Lifecycle
+## 3. Local Collection Service and Persistence
 
-- [ ] 3.1 Add optional Reader mode and transition handling while retaining the SayIt primary workspace state; verify PAT-RM-01 through PAT-RM-06 with state-preservation tests.
-- [ ] 3.2 Add preference editing and persistence for topics, count, difficulty, time budget, local collection time, and timezone; verify saved values survive an application restart.
-- [ ] 3.3 Implement the approved scheduled occurrence lifecycle, service-start catch-up, bounded retry, and isolated Manual Run now behavior; verify schedule state, attempt history, Daily Issue outcome, and PAT-RC-02 through PAT-RC-06.
+- [ ] 3.1 Add versioned Reader preference, schedule occurrence, attempt, Daily Issue edition, candidate, and reading-progress records without changing SayIt history or Saved formats.
+- [ ] 3.2 Add local Reader service APIs for preferences, issues/archive, run status, Regenerate, and article content with safe local-only binding, validation, timeouts, and error states.
+- [ ] 3.3 Implement one occurrence per local date, plan-time waiting, current-day-only startup catch-up, historical MISSED recording, bounded retry, DST behavior, and service/UI independence.
+- [ ] 3.4 Verify Manual, scheduled, and catch-up attempts merge into one dated Issue; complete Issues suppress scheduled discovery; partial Issues can be completed; Regenerate preserves prior editions and progress.
 
-## 4. Discovery, Verification, and Curation
+## 4. Editorial Agent Discovery and Curation
 
-- [ ] 4.1 Have the Editorial Agent generate and execute live discovery queries from saved preferences; verify PAT-RC-07 with no complete preloaded candidate URL list and a reviewable discovery/decision trace.
-- [ ] 4.2 Fetch and verify original and accessible article versions, reject summaries, recheck disappeared sources, deduplicate repeated stories, and retain attribution; verify PAT-RC-08 through PAT-RC-10 and PAT-RC-15 through PAT-RC-16.
-- [ ] 4.3 Curate the exact approved article count, topics, difficulty, and total reading-time limit; verify PAT-RC-12 through PAT-RC-14 distinguish complete fulfillment from explicit partial supply without relaxing saved preferences.
+- [ ] 4.1 Generate dynamic online queries from saved preferences and record query/candidate/decision traces; no complete preloaded article URL list may be supplied to the Agent.
+- [ ] 4.2 Fetch public accessible originals safely; extract and verify readable English body text; distinguish original publication from accessible version; reject summaries, login/paywall responses, disappeared pages, and unverified copies.
+- [ ] 4.3 Deduplicate identical, syndicated, mirrored, and near-duplicate text without rejecting independent reporting or distinct analysis about the same event.
+- [ ] 4.4 Compute the visible 200-words-per-minute reading estimate and Flesch–Kincaid difficulty score; curate exact count, topics, difficulty, and 70%–100% time target, otherwise return explicit PARTIAL/NOT_DELIVERED.
+- [ ] 4.5 Run and preserve evidence from a real network-based Editorial Agent collection using preferences only as discovery input.
 
-## 5. Reading Workspace and SayIt Reuse
+## 5. Reader Workspace and SayIt Reuse
 
-- [ ] 5.1 Build the daily list and immersive article view with Quiet Fluent Utility styling, readable in-app full text, and honest external-link-only status; verify PAT-RH-01, PAT-RH-09, and PAT-RH-12.
-- [ ] 5.2 Route single-word selection to the existing local dictionary/IPA/Listen path and phrase/sentence selection to existing interpretation with necessary article context; verify PAT-RH-13 and PAT-RH-14 without replacing primary workspace state.
-- [ ] 5.3 Reuse existing IPA, speech, Save, and Copy actions where supported by the returned result type; verify PAT-RH-04 and PAT-RH-10 restore the prior article and reading position.
+- [ ] 5.1 Add default-off Reader activation and deactivation while preserving the mounted SayIt workspace and its input, result, context, saved data, and history.
+- [ ] 5.2 Add persistent preference editing and quiet daily-issue/archive views with complete/partial/failure states and source attribution.
+- [ ] 5.3 Deliver readable article bodies in-app; display external-only candidates honestly; implement word lookup through the local dictionary/IPA/Listen path and phrase/sentence interpretation with necessary article context.
+- [ ] 5.4 Persist article selection, reading position, progress, issue editions, and only explicitly cache-permitted full text; restore after Reader restart and support offline access to eligible cached content.
+- [ ] 5.5 Confirm Reader SayIt actions preserve the primary SayIt workspace and successful interpretation is recorded in existing SayIt interaction history.
 
-## 6. Archive, Progress, and Product Acceptance
+## 6. Integration and Engineering Verification
 
-- [ ] 6.1 Persist daily article history, original/accessed source metadata, reading status, and position; cache only approved full text and verify PAT-RH-06 and PAT-RH-11 provide date-based offline continuity without misrepresenting external-only candidates.
-- [ ] 6.2 Add approved retention and user data-clearing controls; verify clearing Reader data leaves SayIt interaction history and saved expressions unchanged.
-- [ ] 6.3 Run Product Acceptance against all 36 approved PAT-RM, PAT-RC, and PAT-RH cases; verify the report identifies the tested application build and records pass/fail evidence for each case.
+- [ ] 6.1 Integrate service and Reader UI into one candidate without changing frozen acceptance meanings.
+- [ ] 6.2 Run focused storage, scheduler/clock, discovery, extraction, curation, API, and UI tests plus the full project test and build commands.
+- [ ] 6.3 Exercise restart, offline, failure recovery, source attribution, duplicate/viewpoint, data isolation, and Regenerate flows on the integrated candidate.
+
+## 7. Product Acceptance
+
+- [ ] 7.1 Run all 49 frozen PAT-RM, PAT-RC, and PAT-RH cases against one identified integrated candidate; record PASS/FAIL/NOT-RUN and evidence for each case.
+- [ ] 7.2 Run a real dynamic network collection and a real article-selection → existing SayIt interpretation flow on that candidate; mocked tests alone do not satisfy these cases.
+- [ ] 7.3 Obtain Acceptance Engineer disposition without asking that role to repair code; remediate failures through implementers, then rerun only invalidated acceptance evidence and issue the final candidate-bound report.

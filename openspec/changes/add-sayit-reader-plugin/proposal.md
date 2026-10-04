@@ -1,44 +1,49 @@
 # Proposal
 
-> **产品负责人评审草案，尚未冻结。** 以下方案和验收标准用于评审；在产品负责人确认前，不得将产品契约标为冻结或开始实现。
+> **冻结产品契约 v1.0。** 产品负责人已明确批准本变更中的产品语义及 A–D 决策，并授权在本文档一致化、严格校验后冻结并直接实施。验收含义冻结后不得在实现中擅自改变。
 
 ## Why
 
-SayIt currently helps with English expression and interpretation after the user supplies text, while finding daily reading material remains a manual task. SayIt Reader adds an optional reading workspace that discovers and verifies suitable English articles, then lets the reader use SayIt's existing language tools in context.
+SayIt 帮助用户理解其主动提交的英语表达，但日常寻找合适的英语阅读材料仍需用户手动完成。SayIt Reader 是可选阅读插件：Editorial Agent 根据已保存偏好自主发现、核验、去重并整理可在应用内阅读的英文原文，用户可在文章中复用 SayIt 能力。
 
 ## What Changes
 
-- 新增可独立启用的 Reader 模式；建议默认关闭，默认状态待产品负责人确认。启用时展示每日阅读清单和沉浸式文章阅读界面，关闭后恢复用户之前的 SayIt 界面状态。
-- 新增阅读偏好：主题、每日篇数、阅读难度、总阅读时长、用户时区和每日收集时间，并提供 Manual Run now。
-- Editorial Agent 以保存的偏好为发现输入，动态搜索、核验、去重并整理候选文章；不得把预先固定的 URL 列表或静态 RSS 清单作为完整候选输入。RSS 可以补充发现。
-- 按用户时区的计划时间启动定时收集，与 Reader 界面当前是否显示无关。若计划时系统/服务不可用，下次启动时补跑。分别记录计划状态、每次运行尝试和实际 Daily Issue；建议每个计划 occurrence 最多自动尝试三次，Manual Run now 使用独立运行记录且不改变计划时间或自动重试额度。重试次数、间隔及手动结果与当日 Issue 的关系待产品负责人确认。
-- 区分完整 Daily Issue、部分 Issue 和未交付；完整 Issue 必须同时满足已保存的主题、目标篇数、难度和总阅读时间约束。供给不足时可显式交付部分 Issue，并列明未满足项，不得静默放宽偏好。
-- 核验原始出版来源与实际可访问文章版本。无法访问、只含摘要或收集时已消失的候选不得计为 Reader 全文；可显示明确标识的外链候选、继续搜索或用另一篇通过核验的文章补充。保留原始出版来源和实际阅读版本的分别归属。
-- Reader 全文文章必须在应用内实际显示可阅读正文。对允许本地缓存的内容保存阅读位置并支持离线续读；外链候选不得冒充应用内全文。
-- 文章中的单词选择优先使用现有本地词典、IPA 和 Listen；短语或句子选择调用现有 SayIt interpretation，并只携带理解所需的文章上下文。两种入口均不得覆盖主 SayIt 工作区或会话上下文。
-- 保留本地每日文章归档、阅读进度及与 SayIt 原有查询历史的区分；不复制检索、解释、IPA、语音、保存或复制引擎。
-- Product Acceptance 草案从原有 26 个扩展为 36 个案例；本次新增的 10 个案例覆盖按偏好交付、动态 Agent 发现、全文可读性/连续性、外链诚实标记和词/短语交互差异。
+- 新增默认关闭、可单独启用的 Reader。Reader 激活时隐藏 SayIt 主输入和检索工作区；退出后恢复原输入、结果、会话上下文与界面状态。
+- 用户可保存主题、每日全文目标篇数、阅读难度、每日阅读时长预算、时区和收集时间，并可 Manual Run now。
+- Editorial Agent 必须根据偏好动态查询互联网、获取候选、核验全文、去重并整理；不得把固定 URL 清单或静态 RSS 清单当作完整发现输入。RSS 可补充发现。
+- 每个用户本地日只有一个 Daily Issue。Manual Run now 与 scheduled occurrence 合并到同一 Issue；完整 Issue 会抑制定时重复发现，部分 Issue 可由之后的 scheduled run 补足。Manual Run 不修改未来计划。完成的 Issue 只有显式 Regenerate 才可替换；旧版本、已交付文章和阅读进度均保留。
+- 调度按偏好时区执行且不依赖 Reader 是否显示。计划前不得提前运行。主机不可用时仅补跑当前日期已过期的 occurrence；更早遗漏的日期标记 MISSED，不追溯生成旧 Issue。每个 occurrence 首次加两次自动重试，建议间隔 5 和 15 分钟；仅瞬时故障重试。
+- 计划 occurrence、run attempt 和 Daily Issue 履约状态独立记录。启动或完成一次尝试不代表 Issue 完整履约。
+- 完整 Issue 必须满足选定主题、精确目标篇数、难度和阅读时长目标。时长是目标区间：以预算的 70% 为下界，100% 为硬上限。供给不足时标为 PARTIAL 并列出缺项，不得静默放宽偏好。
+- 难度以文章正文的 Flesch–Kincaid Grade Level 估计：Easy ≤ 8，Intermediate > 8 且 ≤ 12，Advanced > 12；阅读时长按正文词数 ÷ 200 词/分钟估计。界面显示使用的方法与估值，均标为估计。
+- 去重对象是文章内容而不是事件：相同规范 URL、相同正文、转载/镜像和近重复且无实质独立内容的版本只能占一个位置；同一事件的独立报道或不同分析视角可以并列。
+- 保留 Original publication 与实际 Accessible version 的来源归属。不能访问、只有摘要、登录/付费墙阻挡或全文无法核验时，不得声称已交付 Reader 全文。
+- Reader 提供实际可读的应用内正文、每日归档、进度与允许离线使用的本地缓存。未知缓存许可的全文不持久化；明确获准缓存的内容可离线续读。
+- 单词选择优先复用本地词典、IPA、Listen；短语/句子选择复用现有 SayIt interpretation 并附必要文章语境。上下文结果不能改写主 SayIt 工作区或会话。
+- Reader 文章归档和进度与现有 SayIt 交互历史分离；Reader 内成功的 SayIt interpretation 仍进入原有交互历史。不得复制 SayIt 引擎。
 
-### F1–F10 产品范围保留
+## F1–F10 产品范围
 
-F1 Plugin Mode；F2 Reading Preferences；F3 Autonomous Discovery；F4 Scheduled/Manual Run；F5 Article Curation；F6 Reading Workspace；F7 Inline SayIt；F8 Daily Archive；F9 Failure Handling；F10 Plugin Isolation。以上是原产品范围的细化验收，没有新增或删除候选功能。
+F1 Plugin Mode；F2 Reading Preferences；F3 Autonomous Discovery；F4 Scheduled/Manual Run；F5 Article Curation；F6 Reading Workspace；F7 Inline SayIt；F8 Daily Archive；F9 Failure Handling；F10 Plugin Isolation。范围保留，不新增候选功能。
+
+## Product Acceptance Cases
+
+完整产品验收契约为 49 个可观察 PAT：PAT-RM-01–06（6 项）、PAT-RC-01–28（28 项）、PAT-RH-01–15（15 项）。原 36 项中未被本次明确修订的有效含义保留；PAT-RC-02–06、08、13–14 按本合同收敛，新增的 PAT-RC-17–28 和 PAT-RH-15 覆盖 A–D。
+
+产品验收必须绑定到最终集成候选，逐项记录 PASS/FAIL/NOT-RUN 和证据。工程测试或构建成功不能替代 PAT 验收。必须至少完成一次真实网络 Editorial Agent 收集，以及一次真实文章选择到 SayIt interpretation 的交互。
+
+## Product Decisions and Engineering Decisions
+
+产品语义以上述冻结条款和 delta specs 为准。发现服务、HTTP/API 适配、调度器实现、存储技术、HTML 清理与本地部署属于工程决策；优先复用本地基础设施和低成本/免费能力，不得在未经批准时承诺新的付费外部服务。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `reader-plugin-mode`: Reader 的可选启用、模式切换、界面隔离和关闭后的 SayIt 状态恢复。
-- `reader-collection`: 阅读偏好、Agent 动态发现与整理、用户时区下的计划运行/停机补跑/手动运行、有界重试、Daily Issue 履约状态及来源归属。
-- `reader-reading-history`: 每日阅读清单、文章阅读、内联 SayIt、阅读位置恢复、本地归档、阅读进度和历史。
+- reader-plugin-mode：可选启用、模式切换、界面隔离、恢复 SayIt 会话。
+- reader-collection：偏好、真实动态发现、文章验证和整理、每日 Issue、计划/尝试/履约、来源标注及失败处理。
+- reader-reading-history：应用内阅读、内联 SayIt、版本化归档、位置和进度、合法缓存和离线阅读。
 
 ### Modified Capabilities
 
-无。当前 `openspec/specs/` 中没有已定义的 capability；本变更新增以上三项。
-
-## Impact
-
-- **现有界面与 SayIt 引擎：** `src/App.tsx`、共享检索结果 contract、IPA/语音/复制/保存/历史模块需要提供可复用的 Reader 调用入口，同时避免覆盖主输入、当前结果和会话上下文。
-- **本地数据：** Reader 的偏好、每日集合、文章来源、阅读进度及历史需要独立的数据模型；现有 `sayit.history.v1` 记录成功的 SayIt 交互，`sayit.saved.v1` 保存检索结果，两者都不能单独代表文章归档。
-- **联网收集：** 当前仓库只展示了 Vite 开发服务器中的 `/api/retrieve` 代理，没有已确认的生产调度器或 Editorial Agent 搜索服务。Reader 需另行确定服务运行位置、动态发现提供商、全文获取、凭据与有界重试策略；提供商、覆盖率和成本尚未确认。
-- **本地内容：** Reader 仅可离线保存有权缓存的全文内容，具体允许范围、保留期和清理方式待确认。
-- **浏览器交互：** 新增文章 DOM、文本选择和阅读位置管理；目标浏览器、输入方式、词典未命中回退方式与文章正文持久化策略需由产品负责人确认。
+无。当前主 specs 中没有相关 capability；本变更新增以上三项。

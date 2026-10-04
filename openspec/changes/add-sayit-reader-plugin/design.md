@@ -1,114 +1,103 @@
 # Design
 
-> **评审草案，尚未冻结。** 技术方向依赖下方标明的产品负责人决策；本文件不授权开始实现。
+> **产品契约状态：冻结 v1.0。** 冻结依据为 Product Owner 对 A–D 的明确批准和对本变更直接实施的授权。产品验收含义以三份 delta specs 中的 49 个 PAT 为准；后续技术选型不得改变其含义。Git 冻结 commit identity 在本规格提交后通过 annotated tag 记录。
 
 ## Context
 
-See `proposal.md` for the product intent and the three delta specs for observable behavior.
+当前应用由单一 React App 管理 SayIt 的输入、结果、会话上下文和历史；/api/retrieve 由 Vite 开发服务提供。当前没有 Reader、每日集合、调度状态、文章档案、正文缓存或 Editorial Agent。新增能力必须保持原有 SayIt 工作区状态，并把文章级数据与 SayIt 交互历史分开。
 
-当前应用由 `src/App.tsx` 管理主要输入、检索结果、会话上下文和历史；检索调用 `/api/retrieve`，该路由目前由 Vite 开发服务器配置提供。当前代码没有 Reader、持久化调度器、Editorial Agent 或 Daily Issue 状态。成功的 SayIt 检索进入 `sayit.history.v1`；已保存表达进入独立的 `sayit.saved.v1`。两者均不含 Reader 文章全文和阅读位置。
+本设计将产品决定与工程决定分开。产品规则在本设计及三份 delta specs 中冻结；服务部署、存储引擎、发现提供商、HTTP adapter 和具体依赖由实现阶段通过 Implementation Plan 与 Feasibility Gate 选定。工程方案必须满足冻结 PAT，优先本机/免费能力，不得未经批准承诺新的付费服务。
 
-文本选择可使用浏览器 DOM Selection/Range API。当前 SayIt 主操作会更新主工作区状态，因此 Reader 上下文查询不能未经隔离就直接复用主界面的状态更新处理器。计划收集必须由与 Reader 可见界面分离的服务执行；若调度服务或主机在计划时间不可用，需要持久化到期状态并在下一次启动时补跑。
+## Goals
 
-本轮保持原 F1–F10 产品范围：三份 delta spec 保留原 26 个有效验收案例，并增加 10 个明确覆盖 P0 反馈的案例，共 36 个草案案例。
+- 保留原 SayIt 界面、主会话、存储和已有能力；Reader 为默认关闭的可选工作区。
+- 以真实、动态互联网发现取代人工找文章；按偏好验证、去重、替换并整理全文。
+- 以一个本地日期对应一个 Daily Issue 合并 Manual、scheduled 与 catch-up 的交付。
+- 把计划 occurrence、run attempt、Daily Issue fulfillment 作为独立可观察状态。
+- 让全文、来源归属、估算方法、离线资格、失败和短缺状态对用户诚实可见。
+- 对 49 项冻结 PAT 逐项提供候选版本绑定证据；工程单测或 build 不能代替产品验收。
 
-## Goals / Non-Goals
+## Non-Goals
 
-**Goals:**
+- 不把固定 URL 列表或固定 RSS 清单当作完整发现输入。
+- 不绕过登录、付费墙、反爬访问限制，不把摘要或不完整副本称为全文。
+- 不复制 SayIt 的检索、解释、词典、IPA、语音、保存或复制实现。
+- 不在没有明确缓存许可时持久化文章全文。
+- 不创建历史日期的 Daily Issue 来补齐长期停机期间遗漏的计划。
 
-- 给出可选 Reader 与既有 SayIt 主工作区并存的状态边界，避免上下文查询污染原会话。
-- 定义动态发现、原文核验、全文提取、去重、整理、来源归属与失败信息之间的技术流水线。
-- 定义不依赖 Reader 界面显示的计划生命周期、停机补跑、有限重试、本地文章归档和阅读进度边界。
-- 把来源提供商、内容保留策略和日运行语义等产品决策显式提交评审。
+## Frozen Product Contract
 
-**Non-Goals:**
+### 插件与 SayIt 隔离
 
-- 本阶段不实现代码、不接入服务、不创建服务凭据，也不声称已有生产级文章发现后端。
-- 不在本设计中选定商业搜索供应商、承诺其覆盖率或成本，也不把某个 RSS 清单当作完整发现系统。
-- 不在尚未确定内容访问和保留政策前承诺可抓取、存档或离线分发任意出版物的全文。
+Reader 默认关闭。开启后显示阅读清单或文章阅读面，隐藏并停用 SayIt 主输入/检索面；Reader 的上下文 SayIt 结果独立显示。关闭或重载后，原有 SayIt 输入、结果、会话上下文、已保存表达和交互历史不被 Reader 覆写。Reader 的文章归档、Issue 版本和阅读进度使用独立模型。
 
-## Decisions
+### 单一日期 Issue 与运行生命周期
 
-### Reader 模式与 SayIt 状态隔离
+一个配置时区的本地日只有一个稳定 Daily Issue identity。Manual Run now 与该日 scheduled occurrence 都把合格文章合并到此 Issue；新增只补足尚未满足的偏好，不能添加重复文章或另建平行 Issue。
 
-建议在现有应用根状态中增加 Reader 模式，而不是卸载再重新挂载整个 `App`。Reader 入口切换模式视图；主输入、结果、上下文和偏好继续由现有状态持有。文章内 SayIt 调用走同一检索服务和共享结果 contract，但把所选文本作为独立请求参数，并在 Reader 的上下文结果面板中展示，不能直接覆写主工作区输入或结果。
+Issue fulfillment 独立于 attempts：
 
-这样既能复用现有检索和结果渲染能力，也能满足 PAT-RM-05 / PAT-RH-04 的状态恢复。备选方案是离开 Reader 时序列化整个主会话再还原；它扩大了状态同步面，容易漏掉新增的临时状态，故不作为首选。
+- COMPLETE：精确篇数、全部主题/难度约束和阅读预算区间均满足。
+- PARTIAL：至少有合格全文文章，但一个或多个已配置约束未满足；列出实际值和短缺原因。
+- NOT_DELIVERED：没有可交付的合格全文。
 
-### 发现与文章核验使用服务端适配层
+Scheduled occurrence 有独立日期、时区、本地计划时间、状态和 retry budget。每个 attempt 记录来源（manual、scheduled、catch-up、regenerate）、开始/结束时间和结果。attempt 启动或结束不会自动把 Issue 标记为 COMPLETE。
 
-建议由受控收集服务承载 Editorial Agent、动态发现适配层、原文获取和敏感凭据。Agent 的运行输入是保存的阅读偏好和可用发现能力；预置 URL 清单不能作为完整候选输入，RSS 只能补充发现。Acceptance 需要来自真实运行的搜索查询、候选来源、核验/拒绝、去重和整理轨迹，以证明发现由 Agent 执行。
+若 Manual Run 已使 Issue COMPLETE，计划 occurrence 到期时记录 ALREADY_FULFILLED 并不调用发现服务。若 Issue 为 PARTIAL，scheduled attempt 使用相同 Issue identity 继续补足。普通 Manual Run 不替换已完成 Issue；替换只允许由独立明确的 Regenerate 操作触发。Regenerate 递增同一日期 Issue 的 edition，旧 edition、已交付文章和阅读进度保留在该日期历史中；未改变的文章沿用进度，移出当前 edition 的文章仍可从旧 edition 读取。
 
-候选流水线建议为：偏好生成动态查询 → 搜索并登记候选来源 → 解析并保留原始出版 URL / canonical 提示 → 获取实际可访问版本 → 提取正文、语言、出版者和时间 → 检查全文而非摘要/登录页 → 按故事和正文相似度去重 → 按主题、难度与阅读时间整理 → 生成完整、部分或未交付的 Daily Issue。每个候选分别记录 Original publication 和 Accessible version；无法访问、只含摘要或抓取前消失时，Agent 继续发现/核验或报告短缺，不能将过期元数据当作全文。替换的独立文章使用自身来源。
+每个 scheduled occurrence 最多三个 scheduled attempts（一次初始加两次重试），瞬时网络/服务故障可按 5 分钟、15 分钟重试；永久访问/全文校验失败通过候选替换处理，不重复抓取同一失败候选。Manual Run 和 Regenerate 有独立触发记录，不消耗 scheduled retry budget，也不改变未来日期/时刻。
 
-`Mozilla Readability` 可协助提取正文，但其文档明确说明可读性判断只是启发式，可能误判；因此提取成功不能单独证明全文完整。备选方案是把搜索结果标题/摘要直接当文章交付；这不符合全文阅读意图。Reader 文章视图必须实际呈现可读正文；仅外链候选单独标记且不计入 Issue 篇数或估计阅读时长。
+### 计划日期和停机补跑
 
-### 计划、尝试和 Daily Issue 分离
+发生时刻由 occurrence 创建时保存的 IANA timezone 和该地本地日期/时间决定。计划时间前启动服务只建立/检查待执行 occurrence，不提前运行。服务或主机关闭时不要求它继续执行；下次服务启动：
 
-建议由可持久化的收集调度服务维护每个用户时区的每日 occurrence。计划在用户配置的本地时间才到期；Reader 界面是否显示不参与触发判定。若服务/主机当时不可用，持久化 `due/overdue` 状态，并在下一次服务或 SayIt 启动时补跑原 occurrence。正式实现需选定可承载此调度并在启动时恢复状态的服务位置；当前 Vite `/api/retrieve` 不能证明已有该运行环境。
+1. 将当前日期之前未执行的历史 occurrence 标记为 MISSED，不发起历史收集。
+2. 若当前日期计划时间尚未到，等待该计划时间。
+3. 若当前日期计划时间已过且 Issue 未 COMPLETE，只补跑当前日期 occurrence，并使用该 occurrence 剩余 attempts。
+4. 若当前日期 Issue 已 COMPLETE，将当前 occurrence 标为 ALREADY_FULFILLED。
 
-产品状态分三层：计划显示待到期、待补跑、执行/重试中或已结束；每次尝试单独记录触发来源（scheduled、catch-up、manual）、序号、时间与结果；Daily Issue 单独显示完整、部分或未交付。开始尝试不等于 Issue 履约。完整 Issue 仅在全文、主题、目标篇数、难度和总估计时长都符合已保存偏好时成立。有限尝试结束后可以留下明确的部分 Issue，否则显示未交付。
+同一时区同一日只允许一个 occurrence。DST 跳过的不存在本地时刻顺延到该日第一个有效时刻；DST 重复时刻只执行一次。改变时区不重算已创建的 occurrence，之后日期使用最新保存时区。
 
-评审建议：一个 scheduled occurrence 最多三次自动尝试（首次加两次重试，间隔建议 5 分钟和 15 分钟）；启动时补跑计入该 occurrence 的尝试额度，额度耗尽时明确结束且不抹去失败记录。Manual Run now 建立独立的手动尝试/结果，不更改下一次计划时间、不重置或消耗 scheduled occurrence 的重试额度，也不冒充 scheduled Daily Issue。该建议会避免手动运行破坏未来计划，但同一天是否接受手动结果和定时 Issue 并存仍需 PO 决定。
+### 文章资格、估算与去重
 
-### 阅读数据与交互历史分开保存
+完整 Issue 的总估计阅读时间必须在配置预算的 70% 至 100% 之间（含边界）；100% 为硬上限。篇数是精确目标，每篇须匹配一个或多个已选主题并符合所选难度。
 
-建议将 Reader 的日期集合、文章元数据、文章正文（若内容政策允许）、来源 URL、预计时长、阅读状态和位置保存在独立的 Reader 数据库；大体量全文优先考虑 IndexedDB，偏好和轻量调度索引可沿用本地存储。为已有数据使用单独版本化命名空间，不写入 `sayit.history.v1` 或 `sayit.saved.v1` 的结构。
+估值方法固定且可复算：
 
-Reader 中成功完成的 SayIt 查询仍走现有交互历史仓库，满足用户“像原本 SayIt 一样”的查询历史诉求；文章归档和阅读进度则保存在 Reader 历史。是否还要让查询历史项回链到文章，及文章全文的保留期限/删除入口，需要产品负责人确定。离线展示历史全文依赖正文确实被允许并已存入本地。
+- 正文词数使用提取后英语正文中的空格分词计数；估计分钟数为正文词数 ÷ 200 words per minute，Issue 时长为合格全文的估计分钟数之和。界面显示词数、阅读速率和估计时长。
+- 难度以正文 Flesch–Kincaid Grade Level 估计，公式为 0.39 × (词数/句数) + 11.8 × (音节数/词数) − 15.59。音节数使用项目内、可测试的英语音节计数规则；句数、词数、音节数和分级结果可在文章信息中查看。Easy ≤ 8；Intermediate > 8 且 ≤ 12；Advanced > 12。
+- 任一估计仅代表可观察的内容指标，不宣称等于用户个人能力或精确阅读耗时。缺失/太短正文不能给出可信估值，因而不计为全文。
 
-备选方案是把文章塞入查询历史，或让查询历史承担阅读进度。这两种方案混合了不同实体和生命周期，不便于按日期恢复文章，也会破坏当前历史格式。
+去重顺序为规范化/最终 URL、正文指纹和正文相似度。相同规范 URL、相同正文、转载/联合发布/镜像，或正文 5-word shingles Jaccard 相似度至少 0.85 且没有有意义独立内容的近重复文章只能占一个位置。仅有共同事件、实体、主题或关键词不构成重复；正文差异明显且有独立报道/分析内容的文章可以同时入选。Agent 保存去重依据和判定说明。
 
-### 文章选择和阅读位置恢复
+### 来源与全文状态
 
-Reader 通过浏览器当前 Selection 获取非空选择文本，并读取选择范围的矩形来放置轻量上下文操作。单词选中优先走现有本地词典定义并提供已有 IPA/Listen；短语或句子走现有 interpretation，请求仅带所选文本和必要的邻近文章语境。执行前复制选择值，不能因按钮获得焦点而依赖实时选择仍然存在。无选择时不发起调用。上下文结果关闭后保留文章及阅读位置，所有路径都不覆写主 SayIt 输入、结果或会话上下文。
+每篇候选分开记录 Original publication、Original URL、Accessible version、Accessible URL、正文核验状态和缓存资格。相同版本时两个来源字段可指向同一出版页；可访问替代版不得冒充原始出版页。替代文章自身归属自己的出版来源。
 
-此方案使用普通 DOM 阅读文本，无需把文章变成不可选的 canvas 或图像。`selectionchange` 在 Document 上触发但不会冒泡，选择范围也可能为空；因此需直接检查 selection/range 状态。目标浏览器和触摸/键盘操作覆盖尚待产品负责人确认。词典未命中时是否提供 interpretation 回退也待确认。
+全文状态仅在当前可访问正文通过正文长度/段落/语言/标题与非摘要/非登录/非付费墙检查后成立。外链/摘要候选不计入完整篇数或阅读时间。已交付全文在打开时可使用可核验本地缓存，或在在线状态重新抓取和核验；源站消失时不能依旧把旧摘要或标题当全文。
 
-### 内容呈现与来源归属
+仅在来源提供明确允许本地保留的许可或其他明确授权信号时持久化正文，以供重启和离线使用。许可未知时可以在当前在线会话内显示刚验证的正文，但不缓存全文；历史保留来源和外链状态。不得绕过登录/付费墙或访问限制。
 
-文章视图从 Reader 自己存储的纯文本/受清理后的 HTML 渲染，不执行出版页面脚本、不加载其原始页面作为嵌入式应用。界面显示标题、实际正文、Original publication 和 Accessible version；两者相同则明确显示为相同来源，不同则分别链接。外链/摘要候选使用不同状态，不显示成 Reader 全文，不计入完整 Issue 的数量或时长。只把获准保存的正文缓存用于历史和离线续读。
+## Engineering Decisions to Resolve After Freeze
 
-HTML 清理、外部图片与链接的加载方式，以及获准本地缓存的范围和保留时长需要在内容访问政策确认后定稿。难度 rubric 和阅读时间估算须向用户可见，且始终作为估计值；在方法获批前不能声称精确或静默放宽阈值。
+这些选择由 implementation roles 在不改变产品语义的前提下完成，并记录在实施计划及 feasibility receipt 中：
 
-## Risks / Trade-offs
+- Windows 本地服务由哪个现有启动入口管理，以及 dev/preview 的 API 生命周期。
+- 动态发现 provider、是否需要备选 provider、实际可用性/配额和免费服务故障策略。
+- HTML fetch、readability extraction、非执行式正文清理和 source/robots/permission 检查使用的依赖。
+- Reader 偏好、attempt、Daily Issue edition、候选、正文缓存和阅读位置的本地持久化格式。
+- scheduler 的可测试 clock、系统重启恢复和并发保护方式。
+- 候选页面 SSRF/私网地址防护、请求超时、响应大小、重定向限制和 localhost API 绑定策略。
+- 真实网络 Editorial Agent 验收的可复现配置与脱敏 trace 位置；真实 SayIt interpretation 验收使用已配置现有 provider，不引入新付费服务。
 
-- [缺少生产级发现服务、凭据或稳定来源配额] → 在产品负责人批准来源成本与服务部署边界前，不承诺覆盖率；实现前做供应商/服务可行性选型。
-- [动态发现能力短时不可用] → 保存搜索与尝试轨迹；区分发现服务故障和候选文章不可读，并按该计划 occurrence 的有限重试预算处理。
-- [网站结构、登录墙、付费墙和地区访问会导致提取不完整] → 将不完整候选标成未核验，允许更换候选，并把失败原因留给用户查看。
-- [可读性提取器会误判页面正文] → 组合语言/正文长度/元数据/片段特征检查与人工可观察失败状态；不把单一提取结果等同全文核验。
-- [文章全文的本地副本涉及内容访问和保留政策] → PO/产品法务策略确认前，不固定全文缓存范围、保留期或离线可用承诺。
-- [服务停机或时区/DST 变化会错过计划时刻] → 持久化用户时区下的计划 occurrence；服务恢复时核对待补跑 occurrence，并保留实际尝试时间。
-- [手动运行或失败尝试被误当作 Issue 履约] → 分开持久化计划状态、带触发类型的尝试和完整/部分/未交付 Issue 状态。
-- [阅读目标互相冲突] → 完整 Issue 才能满足全部已配置约束；不足时显式部分/未交付并列出短缺。
-- [Reader 调用复用全局状态会覆盖已有会话] → 使用独立上下文结果呈现边界，并以 PAT-RM-05、PAT-RH-04 检查往返状态。
-- [原有保存能力可能因结果类型而不同] → 当前已知 Save 入口用于检索结果；产品负责人需决定解释型结果是否也要支持 Save。
+## Acceptance Plan
 
-## Migration Plan
+- Freeze baseline：49 个 PAT-RM/PAT-RC/PAT-RH，编号和含义只在产品契约变更并经用户授权时才能变化。
+- 自动化层：模型/存储校验、时钟控制的 schedule/retry/catch-up、发现/去重/预算规则、Reader 与主状态隔离。
+- 集成层：本地 Windows 收集服务、真实动态搜索与抓取、真实文章选择→现有 SayIt interpretation。
+- 手工产品层：浏览器中验证启停、设置持久化、全文阅读、恢复位置、归档和上下文选择。
+- 候选报告：每个 PAT 标记 PASS/FAIL/NOT-RUN，记录 candidate SHA、浏览器/服务版本、运行输入和证据引用。任一必须项未 PASS 时不得声明 PRODUCT_ACCEPTED。
 
-在产品负责人确认契约之前不开始实现。获批后，按新能力逐步增加独立 Reader 存储与功能门控；现有 `sayit.history.v1` 和 `sayit.saved.v1` 数据不需迁移。回滚时关闭 Reader 入口并保留/提供 Reader 本地数据清除策略，不修改现有 SayIt 历史记录。由于尚未选择生产服务端和供应商，部署与回滚细节须在服务方案获批后补全。
+## Rollback
 
-## Product Owner Decisions Before Freeze
-
-以下决定会改变验收口径或实现方式，当前均未冻结：
-
-1. Reader 的默认状态是关闭还是首次启动时引导启用。
-2. 选择承载定时调度的服务及“下一次启动”的定义；Reader 界面不可见不阻止到时执行，服务/主机停机时在恢复后补跑原 occurrence。
-3. 是否采用评审建议的每 occurrence 最多三次自动尝试（首次加两次重试，间隔 5 分钟和 15 分钟）；确定哪些故障可重试，以及重试耗尽时的部分/未交付策略。
-4. Manual Run now 是否总是生成独立手动结果，还是可以更新当日计划 Issue；若手动结果已完整，计划时间到达时是否仍再次收集。手动运行不得改动下一计划时间或自动重试预算。
-5. “当天”的分界、用户时区变更与夏令时切换采用何种规则；定时器按哪一个计划日期生成 occurrence。
-6. 完整 Issue 要求所有已配置约束同时满足；当前案例把总阅读时长按上限处理，PO 需确认这是上限还是目标区间，并确定难度 rubric、阅读时间估算、主题归类的可观察方法及不同主题间是否要求多样性。
-7. 英文文章是否仅限英文原文，是否接受自动翻译后的英文内容；同一故事的转载/联合发布/镜像如何判定为重复，并如何呈现原始出版与可访问版本。
-8. 批准的动态发现/全文服务、部署位置、凭据、成本上限、覆盖范围和服务故障责任；RSS 仅作为补充来源。
-9. Reader 哪些文章内容获准本地缓存以支持离线、保存期限、清理入口及文章历史与 SayIt 查询历史的关联规则。
-10. 目标浏览器、鼠标/触屏/键盘选择体验、阅读位置按滚动像素还是段落锚点恢复，以及跨重载/设备的保留范围。
-11. 词典未命中单词时是否回退到 interpretation；Reader 中的本地单词查询是否写入 SayIt 历史；Save 是否需要扩展支持解释型结果。
-
-## Sources
-
-- Mozilla Readability 提取与误判说明：[README](https://github.com/mozilla/readability/blob/main/README.md)
-- GDELT DOC API 发现接口背景：[GDELT DOC 2.0](https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/amp/)
-- GDELT API 迁移和负载限制说明：[Scaling GDELT for a New Era](https://blog.gdeltproject.org/scaling-gdelt-for-a-new-era-migrating-to-spanner-with-agentic-interactive-gemini/)
-- Google Custom Search JSON API 当前可用范围：[Overview](https://developers.google.com/custom-search/v1/overview)
-- 浏览器选择范围：[Window.getSelection](https://developer.mozilla.org/en-US/docs/Web/API/Window/getSelection)、[Range.getBoundingClientRect](https://developer.mozilla.org/en-US/docs/Web/API/Range/getBoundingClientRect)
-- 后台页面定时行为：[Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API)
+通过关闭 Reader 功能入口回退可见界面，不改写 SayIt 历史或 Saved。Reader 独立数据在用户选择明确清理操作后删除；失败或 Regenerate 不自动删除旧 edition、文章或阅读进度。
