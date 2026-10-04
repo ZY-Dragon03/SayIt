@@ -1033,7 +1033,7 @@ export function ReaderWorkspace({
           </>
         ) : (
           <>
-            <div className="reader-article-toolbar">
+            <div className="reader-article-toolbar reader-article-toolbar--sticky">
               <button className="reader-back-button" type="button" onClick={closeArticle} aria-label="Back to reading list">
                 <span aria-hidden="true">←</span> {selectedIssue?.localDate === todayIssue?.localDate ? "Today" : selectedIssue ? formatDate(selectedIssue.localDate) : "Reading list"}
               </button>

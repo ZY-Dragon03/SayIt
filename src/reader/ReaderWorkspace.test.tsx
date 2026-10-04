@@ -478,13 +478,17 @@ describe("Reader workspace", () => {
     const backButton = [...container.querySelectorAll("button")].find((button) =>
       button.getAttribute("aria-label") === "Back to reading list",
     );
+    const articleToolbar = container.querySelector<HTMLElement>(".reader-article-toolbar");
+    expect(articleToolbar).toBeTruthy();
+    const articleToolbarIsSticky = articleToolbar!.classList.contains("reader-article-toolbar--sticky");
+    const browserMustScrollToBackButton = !articleToolbarIsSticky;
     await act(async () => {
+      if (browserMustScrollToBackButton) {
+        // Playwright scrolls an offscreen non-sticky button into view before click.
+        Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+        window.dispatchEvent(new Event("scroll"));
+      }
       backButton?.click();
-      // The browser may emit a scroll event after the article has been removed
-      // from view but before passive effect cleanup detaches its old listener.
-      // Such a stale callback must not replace the final article position with 0.
-      Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
-      window.dispatchEvent(new Event("scroll"));
     });
     await flush();
     const todayButton = [...container.querySelectorAll("button")].find((button) =>
@@ -537,6 +541,7 @@ describe("Reader workspace", () => {
       firstVisibleParagraph: 13,
       scrollTop: 2100,
     });
+    expect(browserMustScrollToBackButton).toBe(false);
   });
 
   it("does not start confirmed Regenerate when the final progress flush fails", async () => {
