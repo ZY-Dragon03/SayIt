@@ -110,23 +110,27 @@ function pageWithSemanticBodyAndReadabilityOmissions(
   title: string,
   paragraphs: string[],
   omittedIndexes: ReadonlySet<number>,
-  semanticSource: "itemprop" | "json-ld" = "itemprop",
+  semanticSource: "itemprop" | "json-ld" | "article-page" = "itemprop",
 ): FetchedArticlePage {
   const sourceBody = paragraphs.map((paragraph, index) =>
     `<p${omittedIndexes.has(index) ? ' class="comment"' : ""}>${paragraph}</p>`,
   ).join("");
   const itemprop = semanticSource === "itemprop" ? ' itemprop="articleBody"' : "";
-  const structuredArticle = semanticSource === "json-ld"
+  const openGraphType = semanticSource === "article-page"
+    ? '<meta property="og:type" content="article">'
+    : "";
+  const structuredArticle = semanticSource !== "itemprop"
     ? `<script type="application/ld+json">${JSON.stringify({
         "@context": "https://schema.org",
         "@type": "NewsArticle",
         headline: title,
-        articleBody: paragraphs.join(" "),
+        ...(semanticSource === "json-ld" ? { articleBody: paragraphs.join(" ") } : {}),
         publisher: { "@type": "Organization", name: "Reuters" },
       })}</script>`
     : "";
   const html = `<!doctype html><html lang="en"><head>
     <title>${title} | Reuters</title>
+    ${openGraphType}
     <meta property="og:site_name" content="Reuters">
     ${structuredArticle}</head><body><main><article><h1>${title}</h1>
     <div${itemprop}>${sourceBody}</div>
@@ -326,18 +330,24 @@ describe("SayIt Reader Editorial Agent", () => {
 
   it("reconstructs small Readability omissions from verified semantic article bodies", async () => {
     const title = "How finance researchers track regional lending changes";
-    const paragraphs = Array.from({ length: 31 }, (_, index) => [
-      `Researchers studied finance policy and regional credit activity during economic review ${index + 1}.`,
-      "The report compares Federal Reserve records with published forecasts and household borrowing across several markets.",
-      "Analysts explain how business investment changed as lending standards evolved over several months and influenced prices.",
-    ].join(" "));
-    const omittedIndexes = new Set([4, 13, 26]);
-    const sourceBody = paragraphs.join("\n\n");
-    for (const semanticSource of ["itemprop", "json-ld"] as const) {
-      const url = `https://www.reuters.com/finance/synthetic-body-recovery-${semanticSource}`;
+    const cases = [
+      { paragraphCount: 31, omittedIndexes: [4, 13, 26], semanticSource: "itemprop" },
+      { paragraphCount: 31, omittedIndexes: [4, 13, 26], semanticSource: "json-ld" },
+      { paragraphCount: 33, omittedIndexes: [4, 13, 26], semanticSource: "article-page" },
+      { paragraphCount: 15, omittedIndexes: [7], semanticSource: "article-page" },
+    ] as const;
+    for (const testCase of cases) {
+      const paragraphs = Array.from({ length: testCase.paragraphCount }, (_, index) => [
+        `Researchers studied finance policy and regional credit activity during economic review ${index + 1}.`,
+        "The report compares Federal Reserve records with published forecasts and household borrowing across several markets.",
+        "Analysts explain how business investment changed as lending standards evolved over several months and influenced prices.",
+      ].join(" "));
+      const omittedIndexes = new Set<number>(testCase.omittedIndexes);
+      const sourceBody = paragraphs.join("\n\n");
+      const url = `https://www.reuters.com/finance/synthetic-body-recovery-${testCase.paragraphCount}-${testCase.semanticSource}`;
       const result = await collectEditorial(preferencesForTopic(sourceBody, "Finance"), {
         search: async () => [{ url, title, snippet: "A finance report on regional lending" }],
-        fetchArticle: makeFetcher(new Map([[url, pageWithSemanticBodyAndReadabilityOmissions(url, title, paragraphs, omittedIndexes, semanticSource)]])),
+        fetchArticle: makeFetcher(new Map([[url, pageWithSemanticBodyAndReadabilityOmissions(url, title, paragraphs, omittedIndexes, testCase.semanticSource)]])),
         maxArticleChecks: 1,
       });
 
@@ -349,7 +359,9 @@ describe("SayIt Reader Editorial Agent", () => {
       const acceptedTrace = result.trace.candidates.find(
         (candidate) => candidate.url === url && candidate.outcome === "ACCEPTED",
       );
-      expect(acceptedTrace?.reason).toMatch(/Reconstructed 3 paragraph\(s\) from source articleBody/iu);
+      expect(acceptedTrace?.reason).toMatch(
+        new RegExp(`Reconstructed ${omittedIndexes.size} paragraph\\(s\\) from the verified source article body`, "iu"),
+      );
     }
   });
 

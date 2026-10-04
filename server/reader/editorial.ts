@@ -415,6 +415,7 @@ function extractStructuredArticle(document: Document): {
   articleBody: string | null;
   headline: string | null;
   licenses: string[];
+  hasArticleType: boolean;
 } {
   const records: unknown[] = [];
   for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
@@ -462,6 +463,7 @@ function extractStructuredArticle(document: Document): {
     articleBody: textValue(article?.articleBody),
     headline: textValue(article?.headline),
     licenses: licenseValues,
+    hasArticleType: articles.length > 0,
   };
 }
 
@@ -740,10 +742,31 @@ function paragraphsFromReadability(content: string): string[] {
 
 interface SourceArticleParagraphs {
   paragraphs: string[];
-  explicitArticleBody: boolean;
+  verifiedBodyBoundary: boolean;
 }
 
-function sourceArticleParagraphs(document: Document, structuredBody: string | null): SourceArticleParagraphs {
+function hasVerifiedStandaloneArticleRoot(
+  document: Document,
+  title: string,
+  hasStructuredArticleType: boolean,
+): boolean {
+  const roots = [...document.querySelectorAll("article")];
+  if (roots.length !== 1) return false;
+  const openGraphType = normalizeWhitespace(
+    document.querySelector<HTMLMetaElement>('meta[property="og:type"]')?.content ?? "",
+  ).toLowerCase();
+  if (openGraphType !== "article" && !hasStructuredArticleType) return false;
+  const normalizedTitle = normalizeWhitespace(title).toLowerCase();
+  return [...roots[0]!.querySelectorAll("h1")].some(
+    (heading) => normalizeWhitespace(heading.textContent ?? "").toLowerCase() === normalizedTitle,
+  );
+}
+
+function sourceArticleParagraphs(
+  document: Document,
+  structuredBody: string | null,
+  verifiedStandaloneArticleRoot: boolean,
+): SourceArticleParagraphs {
   const articleBodyRoots = [...document.querySelectorAll('[itemprop~="articleBody"]')];
   const articleRoots = [...document.querySelectorAll("article")];
   const roots = articleBodyRoots.length > 0
@@ -761,7 +784,8 @@ function sourceArticleParagraphs(document: Document, structuredBody: string | nu
   );
   return {
     paragraphs,
-    explicitArticleBody: articleBodyRoots.length > 0 || structuredBodyMatchesSource,
+    verifiedBodyBoundary:
+      articleBodyRoots.length > 0 || structuredBodyMatchesSource || verifiedStandaloneArticleRoot,
   };
 }
 
@@ -853,19 +877,24 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     };
   }
   let paragraphs = paragraphsFromReadability(parsedArticle.content);
-  const sourceBody = sourceArticleParagraphs(document, structured.articleBody);
+  const sourceBody = sourceArticleParagraphs(
+    document,
+    structured.articleBody,
+    hasVerifiedStandaloneArticleRoot(document, title, structured.hasArticleType),
+  );
   const sourceParagraphs = sourceBody.paragraphs;
   let omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
   let recoveredParagraphCount = 0;
   const readabilityParagraphsBelongToSourceBody = missingSourceParagraphs(paragraphs, sourceParagraphs) === 0;
   if (
     omittedParagraphCount > 0 &&
-    sourceBody.explicitArticleBody &&
+    sourceBody.verifiedBodyBoundary &&
     sourceParagraphs.length > 0 &&
     readabilityParagraphsBelongToSourceBody
   ) {
     // Readability can discard real paragraphs because of publisher CSS classes such as
-    // "comment" even when the source explicitly marks their container as articleBody.
+    // "comment" even when article-level metadata and one matching article root establish
+    // the page's source body boundary.
     // Reconstruct from that semantic source sequence, then keep the exact completeness
     // check: every meaningful source paragraph must still appear in the delivered body.
     const reconstructedParagraphs = [...sourceParagraphs];
@@ -946,7 +975,7 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     body,
     summary: article,
     reason: recoveredParagraphCount > 0
-      ? `Verified readable English article body; reconstructed ${recoveredParagraphCount} omitted paragraph(s) from the source articleBody.`
+      ? `Verified readable English article body; reconstructed ${recoveredParagraphCount} omitted paragraph(s) from the verified source article body.`
       : "Verified readable English article body.",
     recoveredParagraphCount,
   };
@@ -1006,7 +1035,7 @@ function evaluateVerified(
       url: source.url,
       publication: withTopics.originalPublication,
       outcome: "ACCEPTED",
-      reason: `Topic evidence: ${matched.evidence.join("; ")}; ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.${extracted.recoveredParagraphCount ? ` Reconstructed ${extracted.recoveredParagraphCount} paragraph(s) from source articleBody after Readability omission.` : ""}`,
+      reason: `Topic evidence: ${matched.evidence.join("; ")}; ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.${extracted.recoveredParagraphCount ? ` Reconstructed ${extracted.recoveredParagraphCount} paragraph(s) from the verified source article body after Readability omission.` : ""}`,
       statusCode: page.statusCode,
       articleId: withTopics.id,
     },
