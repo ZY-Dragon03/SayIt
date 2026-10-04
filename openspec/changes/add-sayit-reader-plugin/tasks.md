@@ -8,9 +8,9 @@
 
 ## 2. Implementation, Acceptance, and Feasibility Plans
 
-- [ ] 2.1 Record the local Windows target architecture, service lifecycle, storage/API boundaries, security constraints, dependency verdicts, and rollback path.
-- [ ] 2.2 Map all 49 PATs to candidate-bound engineering tests or manual product evidence; define clock-controlled schedule scenarios and real-network acceptance inputs.
-- [ ] 2.3 Validate at least one no-cost dynamic discovery path and readable-source path without committing to a new paid service; document limits and fallback behavior.
+- [x] 2.1 Record the local Windows target architecture, service lifecycle, storage/API boundaries, security constraints, dependency verdicts, and rollback path.
+- [x] 2.2 Map all 49 PATs to candidate-bound engineering tests or manual product evidence; define clock-controlled schedule scenarios and real-network acceptance inputs.
+- [x] 2.3 Validate at least one no-cost dynamic discovery path and readable-source path without committing to a new paid service; document limits and fallback behavior.
 
 ## 3. Local Collection Service and Persistence
 

@@ -78,17 +78,43 @@ Scheduled occurrence 有独立日期、时区、本地计划时间、状态和 r
 
 仅在来源提供明确允许本地保留的许可或其他明确授权信号时持久化正文，以供重启和离线使用。许可未知时可以在当前在线会话内显示刚验证的正文，但不缓存全文；历史保留来源和外链状态。不得绕过登录/付费墙或访问限制。
 
-## Engineering Decisions to Resolve After Freeze
+## Implementation Plan and Feasibility Gate
 
-这些选择由 implementation roles 在不改变产品语义的前提下完成，并记录在实施计划及 feasibility receipt 中：
+以下均为冻结后确定的工程实现，不改变任何 PAT 的产品含义。
 
-- Windows 本地服务由哪个现有启动入口管理，以及 dev/preview 的 API 生命周期。
-- 动态发现 provider、是否需要备选 provider、实际可用性/配额和免费服务故障策略。
-- HTML fetch、readability extraction、非执行式正文清理和 source/robots/permission 检查使用的依赖。
-- Reader 偏好、attempt、Daily Issue edition、候选、正文缓存和阅读位置的本地持久化格式。
-- scheduler 的可测试 clock、系统重启恢复和并发保护方式。
-- 候选页面 SSRF/私网地址防护、请求超时、响应大小、重定向限制和 localhost API 绑定策略。
-- 真实网络 Editorial Agent 验收的可复现配置与脱敏 trace 位置；真实 SayIt interpretation 验收使用已配置现有 provider，不引入新付费服务。
+### 本机架构和生命周期
+
+- **采用：**扩展现有 Vite Node 服务。`Start SayIt.vbs` 已在 `127.0.0.1:5173` 启动 Vite；在同一服务进程增加 `/api/reader/*` middleware，并在 Vite `configureServer` 生命周期加载本地 Reader store 和 scheduler。Scheduler 不依赖 Reader 组件是否挂载；浏览器关闭但 SayIt 服务仍在运行时，它仍可执行。主机关闭时无需运行；服务下次启动时按冻结规则恢复当天 occurrence。
+- 所有 API 只绑定 loopback，不启用远端监听、CORS 或外部用户账户。利用环境中明确配置的 HTTP(S) 代理；Node 提供 `http.setGlobalProxyFromEnv()` 时在服务启动阶段调用，使现有 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 对 `fetch` 生效。不记录代理 URL、用户名或密码。Node 官方代理接口见 [Node.js HTTP built-in proxy support](https://nodejs.org/api/http.html#built-in-proxy-support)。
+- 同一 Vite 服务关闭时停止 scheduler timers；启动时以保存的 IANA timezone 和当前 UTC instant 恢复 occurrence。时钟注入到所有日期转换、重试和调度逻辑；DST 用 `Intl.DateTimeFormat`/`Temporal` 兼容转换的单元接口封装，测试固定时钟，不等待真实日历变化。
+- Windows 持久化目录为 `%LOCALAPPDATA%\\SayIt\\Reader\\`；非 Windows 测试及开发环境用 `~/.local/share/sayit/reader/`。使用带 schema version 的 JSON envelope 和临时文件原子替换，读写校验失败时返回可见错误而不覆盖原文件。Reader store 与 `sayit.history.v1`、Saved 和其他浏览器 localStorage key 分离。
+- API 按资源分区并由 UI client 调用：`GET/PUT /api/reader/preferences` 读写偏好；`GET /api/reader/issues/today` 返回当日 issue、occurrence 和 attempts；`GET /api/reader/issues/archive?limit=N` 返回日期历史；`POST /api/reader/run` 接收 `{trigger: "manual"|"regenerate", confirmRegenerate?: true}`，不接收候选 URL；`GET /api/reader/articles/:articleId?edition=N` 返回来源/全文状态和可用正文；`PUT /api/reader/progress` 接收 issue/article edition、scroll ratio 和 last position。响应都用 versioned JSON。偏好、occurrence、attempt、issue edition、候选 trace、缓存授权和进度均有独立 schema；manual/regenerate request 不写 schedule fields。HTTP 错误返回 `{error:{code,message,retryable}}`，不返回本机文件路径。
+
+### 在线发现、全文核验和依赖决策
+
+- **Search-first-lite verdict：Compose。**运行时按保存主题生成查询，向 DuckDuckGo 的 query-backed HTML 搜索页发送请求，从结果 DOM 发现候选发布者 URL；代码中不订阅固定 RSS 源或注入完整文章 URL。将查询、发现 URL、抓取/排除理由和最终选择写入去敏 trace。RSS 如后续验证可作补充，不能成为全部输入。
+- **可行性实测：**在 2026-10-04 的 Windows worktree 上，Node 使用机器已配置的 HTTPS proxy 环境变量后，动态 DuckDuckGo query 返回 HTTP 200 和 8–10 个实时结果；没有把候选 URL 传给查询流程。对其中由结果动态发现的出版页面执行 HTTP fetch 和 Readability：若干公开出版页提取出约 682–4,002 个词的文章正文；另有来源返回 401/403、超时或机器人验证页面，必须拒绝并继续候选。直接 Node `fetch` 不启用代理时，对搜索站点超时；启用 Node 24 环境代理后搜索可用。Bing RSS 本次返回无结果；Google News 动态 RSS 有结果但文章链接停留在 Google 包装页，本实现不把包装页当可阅读全文。
+- **全文解析：**使用 `@mozilla/readability` + `jsdom`（Compose；前者 Apache-2.0，后者 MIT；Node 当前为 24.x）。Readability 将页面脚本和资源关闭，不执行网站 JavaScript。只接受公开 HTTPS 页面、成功状态、HTML/XHTML、可解析的可读正文和足够正文段落；最终正文转换为纯文本段落，不将网站 HTML 直接注入 React。摘要、目录/分类页、验证码、登录/付费墙、短片段和无法核实的副本均标记为拒绝/外链，不计全文。Mozilla Readability 使用说明见 [mozilla/readability](https://github.com/mozilla/readability)。
+- 抓取 adapter 逐次验证初始及重定向 URL：只允许 HTTPS/HTTP 公网主机；拒绝 localhost、私网、链路本地、保留地址、非 HTTP(S)、嵌入凭据及重定向至受限地址；限制 DNS 解析、响应大小、重定向数量和总超时，防止 SSRF。未获明确本地留存许可的正文只在当前进程内供 UI 返回，不写入 Reader JSON；历史保留元数据、来源和外链状态。只有可观察的明确缓存许可和当前已验证缓存才允许离线全文阅读。
+- 原始 URL、原出版者、HTTP redirect 后的 accessible URL、网页声明的出版者和授权信号分别保存；值不一致或不足以确认归属时拒绝将其伪装为原文全文。每个失败候选记录单次决策，下一查询继续发现其他候选，不重复请求确定性 401/403 或验证码 URL。
+
+### Scheduler、运行与履约
+
+- 一日 issue id 由 `localDate + timezone` 创建，edition 和 progress 永不原位清除。occurrence 表独立存储计划时间、状态和当日 retry count；attempt 表保存 trigger、开始/结束时间、可重试性及失败原因；issue 表由已验证全文与偏好约束重新计算 COMPLETE/PARTIAL/NOT_DELIVERED。
+- 单进程以持久化 `nextAttemptAt` 和可取消 timer 触发 occurrence；跨服务重启启动检查过期 occurrence。写入时使用同步锁/状态 version 避免同一日期并发重复 run。定时 retry 上限严格为冻结的三次（5、15 分钟建议延迟）；manual/regenerate 另记 attempt，不扣该预算。completed issue 的 scheduled callback 只记录 `ALREADY_FULFILLED`。
+- 策展不依靠事件 ID 去重。使用规范化 URL、正文 SHA-256 和冻结文档规定的 5-word shingle Jaccard ≥0.85；相似度高时只在无法证明独立增量内容时拒绝。主题匹配用确定性 topic terms + candidate/article text evidence，FKGL 用固定 200 wpm 和可测试英语音节算法；界面显示估算输入、实际值、偏好短缺和每个 reject reason。
+
+### UI 和现有 SayIt 能力
+
+- `App` 保持挂载且持有原 SayIt `input`、`result`、session context、Saved、History。Reader toggle 仅切换主要 workspace 的可见 view。文章位置、最后打开文章、Reader preference、edition 与允许缓存正文通过 Reader API 独立持久化。
+- 单词选择先调用现有 `getDefinitionForSurface`、`getIPA`、`PronunciationService`，不请求解释 API；结果组件复用现有 Save/Copy 路径。短语/句子走当前 `/api/retrieve` 和 `createDeepSeekProvider`，以所选文本与裁剪后的相邻句形成一次独立请求；成功后经 `LocalHistoryRepository.append` 进入现有 SayIt interaction history。Reader 不修改 App 主 `result` 或 `sessionContext`。
+- 不增加编辑部 LLM 或付费 search API；运行成本仅为用户已经配置的 SayIt interpretation provider。收集本身不要求该 provider key。真实 SayIt interpretation acceptance 使用项目已有 `.env.local` 的 `DEEPSEEK_API_KEY`；缺少该配置时明确阻止该验收，不以 mock 结果冒充。
+
+### 失败、回滚和初始依赖评估
+
+- 搜索超时/被限流为可重试服务错误；候选页永久 401/403/404、仅摘要、登录/付费墙、验证码、正文不足或来源不明为候选失败并继续动态发现。最终无足量来源则发布 PARTIAL/NOT_DELIVERED 并保留 trace 与历史。
+- 回滚时通过 Reader 入口隐藏插件；既有 SayIt 路径继续由原 `/api/retrieve` 处理。Reader 数据保持在独立本机目录，不迁移或覆写 SayIt history/Saved。清理 Reader 数据仅可作为显式后续用户操作。
+- 新增依赖仅 `@mozilla/readability` 与 `jsdom`；前者承担正文提取，后者提供不执行脚本的 DOM。搜索 provider 用原生 fetch/DOM 解析，不增加付费 SDK 或需密钥的服务。当前 worktree 的 `npm audit` 仍为原有 2 个 moderate advisories，未因本次依赖选择增加。
 
 ## Acceptance Plan
 
