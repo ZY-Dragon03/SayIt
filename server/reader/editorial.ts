@@ -738,16 +738,31 @@ function paragraphsFromReadability(content: string): string[] {
     .filter((paragraph) => paragraph.length >= 20);
 }
 
-function sourceArticleParagraphs(document: Document): string[] {
-  const semanticRoots = [...document.querySelectorAll('[itemprop~="articleBody"], article')];
-  const roots = semanticRoots.length > 0
-    ? semanticRoots
-    : [...document.querySelectorAll("main, [role='main']")];
+interface SourceArticleParagraphs {
+  paragraphs: string[];
+  explicitArticleBody: boolean;
+}
+
+function sourceArticleParagraphs(document: Document, structuredBody: string | null): SourceArticleParagraphs {
+  const articleBodyRoots = [...document.querySelectorAll('[itemprop~="articleBody"]')];
+  const articleRoots = [...document.querySelectorAll("article")];
+  const roots = articleBodyRoots.length > 0
+    ? articleBodyRoots
+    : articleRoots.length > 0
+      ? articleRoots
+      : [...document.querySelectorAll("main, [role='main']")];
   const paragraphSets = roots.map((root) => [...root.querySelectorAll("p")]
     .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
     .filter((paragraph) => paragraph.length >= 20));
-  return paragraphSets
+  const paragraphs = paragraphSets
     .sort((left, right) => right.join(" ").length - left.join(" ").length)[0] ?? [];
+  const structuredBodyMatchesSource = Boolean(
+    structuredBody && normalizeWhitespace(paragraphs.join(" ")) === normalizeWhitespace(structuredBody),
+  );
+  return {
+    paragraphs,
+    explicitArticleBody: articleBodyRoots.length > 0 || structuredBodyMatchesSource,
+  };
 }
 
 function missingSourceParagraphs(sourceParagraphs: string[], extractedParagraphs: string[]): number {
@@ -772,6 +787,7 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   body: string;
   summary: EditorialArticle;
   reason: string;
+  recoveredParagraphCount?: number;
 } {
   const header = (name: string) => {
     const value = page.headers[name] ?? page.headers[name.toLowerCase()];
@@ -836,10 +852,28 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
       reason: "The source is a category or story listing, not an individual article.",
     };
   }
-  const paragraphs = paragraphsFromReadability(parsedArticle.content);
+  let paragraphs = paragraphsFromReadability(parsedArticle.content);
+  const sourceBody = sourceArticleParagraphs(document, structured.articleBody);
+  const sourceParagraphs = sourceBody.paragraphs;
+  let omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
+  let recoveredParagraphCount = 0;
+  const readabilityParagraphsBelongToSourceBody = missingSourceParagraphs(paragraphs, sourceParagraphs) === 0;
+  if (
+    omittedParagraphCount > 0 &&
+    sourceBody.explicitArticleBody &&
+    sourceParagraphs.length > 0 &&
+    readabilityParagraphsBelongToSourceBody
+  ) {
+    // Readability can discard real paragraphs because of publisher CSS classes such as
+    // "comment" even when the source explicitly marks their container as articleBody.
+    // Reconstruct from that semantic source sequence, then keep the exact completeness
+    // check: every meaningful source paragraph must still appear in the delivered body.
+    const reconstructedParagraphs = [...sourceParagraphs];
+    recoveredParagraphCount = omittedParagraphCount;
+    paragraphs = reconstructedParagraphs;
+    omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
+  }
   const body = paragraphs.join("\n\n");
-  const sourceParagraphs = sourceArticleParagraphs(document);
-  const omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
   if (omittedParagraphCount > 0) {
     const reason = `Readability omitted ${omittedParagraphCount} of ${sourceParagraphs.length} meaningful paragraphs from the semantic article body; the extracted text is incomplete.`;
     const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
@@ -907,7 +941,15 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     paragraphs,
     bodyHash,
   };
-  return { article, body, summary: article, reason: "Verified readable English article body." };
+  return {
+    article,
+    body,
+    summary: article,
+    reason: recoveredParagraphCount > 0
+      ? `Verified readable English article body; reconstructed ${recoveredParagraphCount} omitted paragraph(s) from the source articleBody.`
+      : "Verified readable English article body.",
+    recoveredParagraphCount,
+  };
 }
 
 function topicTermsFor(topic: string): string[] {
@@ -964,7 +1006,7 @@ function evaluateVerified(
       url: source.url,
       publication: withTopics.originalPublication,
       outcome: "ACCEPTED",
-      reason: `Topic evidence: ${matched.evidence.join("; ")}; ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.`,
+      reason: `Topic evidence: ${matched.evidence.join("; ")}; ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.${extracted.recoveredParagraphCount ? ` Reconstructed ${extracted.recoveredParagraphCount} paragraph(s) from source articleBody after Readability omission.` : ""}`,
       statusCode: page.statusCode,
       articleId: withTopics.id,
     },

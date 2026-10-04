@@ -105,6 +105,40 @@ function pageWithLinkDenseSourceBlocks(
   };
 }
 
+function pageWithSemanticBodyAndReadabilityOmissions(
+  url: string,
+  title: string,
+  paragraphs: string[],
+  omittedIndexes: ReadonlySet<number>,
+  semanticSource: "itemprop" | "json-ld" = "itemprop",
+): FetchedArticlePage {
+  const sourceBody = paragraphs.map((paragraph, index) =>
+    `<p${omittedIndexes.has(index) ? ' class="comment"' : ""}>${paragraph}</p>`,
+  ).join("");
+  const itemprop = semanticSource === "itemprop" ? ' itemprop="articleBody"' : "";
+  const structuredArticle = semanticSource === "json-ld"
+    ? `<script type="application/ld+json">${JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        headline: title,
+        articleBody: paragraphs.join(" "),
+        publisher: { "@type": "Organization", name: "Reuters" },
+      })}</script>`
+    : "";
+  const html = `<!doctype html><html lang="en"><head>
+    <title>${title} | Reuters</title>
+    <meta property="og:site_name" content="Reuters">
+    ${structuredArticle}</head><body><main><article><h1>${title}</h1>
+    <div${itemprop}>${sourceBody}</div>
+    </article></main></body></html>`;
+  return {
+    statusCode: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from(html),
+    finalUrl: url,
+  };
+}
+
 function preferenceFor(body: string, count = 2): EditorialPreferences {
   return preferencesForBodies([body], count);
 }
@@ -288,6 +322,35 @@ describe("SayIt Reader Editorial Agent", () => {
     });
     expect(completeResult.status).toBe("COMPLETE");
     expect(completeResult.articles[0]?.paragraphCount).toBe(47);
+  });
+
+  it("reconstructs small Readability omissions from verified semantic article bodies", async () => {
+    const title = "How finance researchers track regional lending changes";
+    const paragraphs = Array.from({ length: 31 }, (_, index) => [
+      `Researchers studied finance policy and regional credit activity during economic review ${index + 1}.`,
+      "The report compares Federal Reserve records with published forecasts and household borrowing across several markets.",
+      "Analysts explain how business investment changed as lending standards evolved over several months and influenced prices.",
+    ].join(" "));
+    const omittedIndexes = new Set([4, 13, 26]);
+    const sourceBody = paragraphs.join("\n\n");
+    for (const semanticSource of ["itemprop", "json-ld"] as const) {
+      const url = `https://www.reuters.com/finance/synthetic-body-recovery-${semanticSource}`;
+      const result = await collectEditorial(preferencesForTopic(sourceBody, "Finance"), {
+        search: async () => [{ url, title, snippet: "A finance report on regional lending" }],
+        fetchArticle: makeFetcher(new Map([[url, pageWithSemanticBodyAndReadabilityOmissions(url, title, paragraphs, omittedIndexes, semanticSource)]])),
+        maxArticleChecks: 1,
+      });
+
+      expect(result.status).toBe("COMPLETE");
+      expect(result.articles).toHaveLength(1);
+      expect(result.articles[0]?.contentStatus).toBe("FULL_TEXT");
+      expect(result.articles[0]?.paragraphCount).toBe(paragraphs.length);
+      expect(result.articles[0]?.paragraphs).toEqual(paragraphs);
+      const acceptedTrace = result.trace.candidates.find(
+        (candidate) => candidate.url === url && candidate.outcome === "ACCEPTED",
+      );
+      expect(acceptedTrace?.reason).toMatch(/Reconstructed 3 paragraph\(s\) from source articleBody/iu);
+    }
   });
 
   it("discovers from preference-generated queries, replaces failures, and meets issue constraints", async () => {
