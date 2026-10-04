@@ -69,3 +69,57 @@ Reader SHALL 在无法联网时允许用户查看此前保存在本地的文章�
 - **GIVEN** 设备离线且本地存在已归档 Reader 记录
 - **WHEN** 用户打开 Reader 历史
 - **THEN** Reader 显示本地可用的文章记录和阅读状态，并将无法联网的新收集状态与旧归档区分
+
+### Requirement: 成功交付的 Reader 全文必须可在应用内阅读
+
+被标为 Reader 全文的 Daily Issue 文章 SHALL 在应用内提供经核验的正文阅读体验，不得仅显示标题、摘要或外部页面预览。
+
+#### Scenario: PAT-RH-09 阅读已交付全文正文
+- **GIVEN** Daily Issue 中有一篇标记为 Reader 全文的已核验文章
+- **WHEN** 用户在 Reader 中打开该文章
+- **THEN** 文章阅读面显示其正文段落并可连续滚动阅读；只有标题或摘要的内容不满足全文交付
+
+### Requirement: Reader 恢复上次阅读的文章和位置
+
+Reader SHALL 在用户离开 Reader 后返回时恢复上次打开的文章和已保存阅读位置。
+
+#### Scenario: PAT-RH-10 返回 Reader 恢复文章位置
+- **GIVEN** 用户在一篇已归档文章中阅读到中段，然后离开 Reader
+- **WHEN** 用户再次进入 Reader
+- **THEN** Reader 恢复此前打开的文章和对应阅读位置，用户可从该处继续阅读
+
+### Requirement: 离线阅读仅限允许本地缓存的内容
+
+Reader SHALL 允许离线打开已获准保存并已缓存正文的文章；缓存资格和外链候选 SHALL 清晰区分。
+
+#### Scenario: PAT-RH-11 离线阅读获准缓存的正文
+- **GIVEN** 本地已缓存一篇允许 Reader 保存的全文文章且设备离线
+- **WHEN** 用户从 Reader 历史打开该文章
+- **THEN** Reader 显示已缓存正文及阅读位置；未缓存或仅外链的候选不会被伪装成离线全文
+
+### Requirement: 全文交付与仅外链候选必须明确区分
+
+Reader SHALL 在每日清单和文章视图中区分可在应用内阅读的全文与只能跳转出版来源的候选。
+
+#### Scenario: PAT-RH-12 显示外链候选状态
+- **GIVEN** 某候选只有摘要或仅可从出版网站阅读
+- **WHEN** 用户查看 Reader 每日清单
+- **THEN** 候选显示为外链/摘要状态及实际可访问来源，不显示为 Reader 全文，也不计入完整 Issue 的目标篇数
+
+### Requirement: 单词选择优先复用本地词典和发音能力
+
+对单词选择，Reader SHALL 优先使用现有本地词典定义、IPA 和 Listen 能力，不得无条件把本地可查词条送入短语解释流程。
+
+#### Scenario: PAT-RH-13 选择单词查看本地释义
+- **GIVEN** 用户选中一个现有本地词典可查的单词
+- **WHEN** 用户调用 Reader 上下文 SayIt
+- **THEN** Reader 展示本地释义、现有 IPA 和 Listen 操作，且不发起短语/句子 interpretation；主 SayIt 工作区和会话上下文不变
+
+### Requirement: 短语或句子选择复用解释并携带必要文章上下文
+
+对短语或句子选择，Reader SHALL 调用现有 SayIt interpretation，并只传递理解所需的文章上下文；结果不得覆盖主 SayIt 工作区或会话上下文。
+
+#### Scenario: PAT-RH-14 选择上下文相关短语
+- **GIVEN** 用户选中一个需结合所在句子理解的短语或句子
+- **WHEN** 用户调用 Reader 上下文 SayIt
+- **THEN** SayIt 使用选中文本和必要的相邻文章语境返回 interpretation；关闭结果后原文章位置及主工作区状态不变
