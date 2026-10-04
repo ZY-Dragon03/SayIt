@@ -52,6 +52,32 @@ function pageFor(
   };
 }
 
+function pageWithLinkDenseSourceBlocks(
+  url: string,
+  title: string,
+  paragraphs: string[],
+  linkedParagraphIndexes: ReadonlySet<number>,
+): FetchedArticlePage {
+  const textBlocks = paragraphs.map((paragraph, index) => {
+    const body = linkedParagraphIndexes.has(index)
+      ? `<a href="/references/${index}">${paragraph}</a>`
+      : paragraph;
+    return `<div class="GridItem"><p class="ArticleParagraph">${body}</p></div>`;
+  }).join("");
+  const html = `<!doctype html><html lang="en"><head>
+    <title>${title} | Reuters</title>
+    <meta property="og:site_name" content="Reuters">
+    </head><body><main><article><h1>${title}</h1>
+    <div data-component="text-block"><div class="Grid">${textBlocks}</div></div>
+    </article></main></body></html>`;
+  return {
+    statusCode: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from(html),
+    finalUrl: url,
+  };
+}
+
 function preferenceFor(body: string, count = 2): EditorialPreferences {
   return preferencesForBodies([body], count);
 }
@@ -87,6 +113,39 @@ function makeFetcher(pages: Map<string, FetchedArticlePage>, calls: string[] = [
 }
 
 describe("SayIt Reader Editorial Agent", () => {
+  it("rejects an incomplete Readability extraction when story paragraphs are omitted", async () => {
+    const url = "https://www.reuters.com/world/analysis/synthetic-continuity-case";
+    const title = "Synthetic report on finance and economic evidence";
+    const paragraphs = Array.from({ length: 47 }, (_, index) => [
+      `Researchers measured how independent teams described changes in finance and local economic markets during study ${index + 1}.`,
+      "The report compares current evidence with regional records and published forecasts for readers.",
+      "Editors said these findings could shape public policy decisions through the coming year.",
+    ].join(" "));
+    const omittedIndexes = new Set([13, 19, 20, 21, 22, 26, 27, 31, 34, 37, 41, 43, 45, 46]);
+    const sourceBody = paragraphs.join("\n\n");
+    const preferences = preferencesForTopic(sourceBody, "Finance");
+    const result = await collectEditorial(preferences, {
+      search: async () => [{ url, title, snippet: "A finance and economy report" }],
+      fetchArticle: makeFetcher(new Map([[url, pageWithLinkDenseSourceBlocks(url, title, paragraphs, omittedIndexes)]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.articles).toHaveLength(0);
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.candidates[0]?.contentStatus).toBe("SUMMARY");
+    expect(result.trace.candidates.some(
+      (candidate) => candidate.url === url && candidate.outcome === "REJECTED" && /incomplete|omitted|coverage/iu.test(candidate.reason),
+    )).toBe(true);
+
+    const completeResult = await collectEditorial(preferences, {
+      search: async () => [{ url, title, snippet: "A finance and economy report" }],
+      fetchArticle: makeFetcher(new Map([[url, pageWithLinkDenseSourceBlocks(url, title, paragraphs, new Set())]])),
+      maxArticleChecks: 1,
+    });
+    expect(completeResult.status).toBe("COMPLETE");
+    expect(completeResult.articles[0]?.paragraphCount).toBe(47);
+  });
+
   it("discovers from preference-generated queries, replaces failures, and meets issue constraints", async () => {
     const bodyOne = articleBody("the central bank vote");
     const bodyTwo = articleBody("the Federal Reserve decision", true);

@@ -684,6 +684,35 @@ function paragraphsFromReadability(content: string): string[] {
     .filter((paragraph) => paragraph.length >= 20);
 }
 
+function sourceArticleParagraphs(document: Document): string[] {
+  const semanticRoots = [...document.querySelectorAll('[itemprop~="articleBody"], article')];
+  const roots = semanticRoots.length > 0
+    ? semanticRoots
+    : [...document.querySelectorAll("main, [role='main']")];
+  const paragraphSets = roots.map((root) => [...root.querySelectorAll("p")]
+    .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
+    .filter((paragraph) => paragraph.length >= 20));
+  return paragraphSets
+    .sort((left, right) => right.join(" ").length - left.join(" ").length)[0] ?? [];
+}
+
+function missingSourceParagraphs(sourceParagraphs: string[], extractedParagraphs: string[]): number {
+  if (sourceParagraphs.length === 0) return 0;
+  const extractedText = normalizeWhitespace(extractedParagraphs.join(" ")).toLowerCase();
+  let cursor = 0;
+  let missing = 0;
+  for (const paragraph of sourceParagraphs) {
+    const normalized = normalizeWhitespace(paragraph).toLowerCase();
+    const index = extractedText.indexOf(normalized, cursor);
+    if (index < 0) {
+      missing += 1;
+      continue;
+    }
+    cursor = index + normalized.length;
+  }
+  return missing;
+}
+
 function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   article: EditorialArticle | null;
   body: string;
@@ -755,6 +784,13 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   }
   const paragraphs = paragraphsFromReadability(parsedArticle.content);
   const body = paragraphs.join("\n\n");
+  const sourceParagraphs = sourceArticleParagraphs(document);
+  const omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
+  if (omittedParagraphCount > 0) {
+    const reason = `Readability omitted ${omittedParagraphCount} of ${sourceParagraphs.length} meaningful paragraphs from the semantic article body; the extracted text is incomplete.`;
+    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
+    return { article: null, body, summary, reason };
+  }
   const failedPage = pageFailure(document, body, title);
   if (failedPage) {
     const summary = makeCandidateSummary(source, /subscriber|sign-in|paywall/iu.test(failedPage) ? "EXTERNAL_ONLY" : "UNAVAILABLE", failedPage, page.statusCode);
