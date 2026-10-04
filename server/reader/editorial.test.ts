@@ -52,6 +52,33 @@ function pageFor(
   };
 }
 
+function indexPageWithArticleMetadata(
+  url: string,
+  title: string,
+  body: string,
+  linkedHeadlines: string[],
+  publisher = new URL(url).hostname.replace(/^www\./u, "").split(".")[0],
+): FetchedArticlePage {
+  const cards = linkedHeadlines.map((headline, index) =>
+    `<h3><a href="/technology/story-${index}">${headline}</a></h3>`,
+  ).join("");
+  const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+  const html = `<!doctype html><html lang="en"><head>
+    <title>${title} | ${publisher}</title>
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="${publisher}">
+    </head><body><main role="main" itemscope itemtype="https://schema.org/NewsArticle">
+    <h1>${title}</h1><section aria-label="Editorial index">${cards}</section>
+    <div class="collection-introduction">${paragraphs}</div>
+    </main></body></html>`;
+  return {
+    statusCode: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from(html),
+    finalUrl: url,
+  };
+}
+
 function pageWithLinkDenseSourceBlocks(
   url: string,
   title: string,
@@ -113,6 +140,44 @@ function makeFetcher(pages: Map<string, FetchedArticlePage>, calls: string[] = [
 }
 
 describe("SayIt Reader Editorial Agent", () => {
+  it("rejects a semantic editorial index while keeping a standalone editorial article eligible", async () => {
+    const indexUrl = "https://www.reuters.com/technology/technology+tone/editorials";
+    const indexTitle = "Technology + Editorials";
+    const indexBody = articleBody("technology editorial coverage and independent analysis");
+    const preferences = preferencesForTopic(indexBody, "Technology");
+    const indexPage = indexPageWithArticleMetadata(indexUrl, indexTitle, indexBody, [
+      "Editors examine technology policy and public debate",
+      "Independent writers discuss changing digital markets",
+      "Researchers review the latest computing decisions",
+    ], "Reuters");
+    const indexResult = await collectEditorial(preferences, {
+      search: async () => [{ url: indexUrl, title: indexTitle, snippet: "Technology + Editorials" }],
+      fetchArticle: makeFetcher(new Map([[indexUrl, indexPage]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(indexResult.status).toBe("NOT_DELIVERED");
+    expect(indexResult.articles).toHaveLength(0);
+    expect(indexResult.trace.candidates.some(
+      (candidate) => candidate.url === indexUrl && candidate.outcome === "REJECTED" && /category|listing|index/iu.test(candidate.reason),
+    )).toBe(true);
+
+    const articleUrl = "https://www.reuters.com/technology/2026/10/04/independent-editorial-analysis";
+    const articleTitle = "Why technology reporting needs independent editorial analysis";
+    const articleText = articleBody("technology reporting and independent editorial analysis");
+    const articleResult = await collectEditorial(preferencesForTopic(articleText, "Technology"), {
+      search: async () => [{ url: articleUrl, title: articleTitle, snippet: "Independent editorial analysis" }],
+      fetchArticle: makeFetcher(new Map([[articleUrl, pageFor(articleUrl, articleTitle, articleText, "Reuters")]])),
+      maxArticleChecks: 1,
+    });
+    expect(articleResult.status).toBe("COMPLETE");
+    expect(articleResult.articles[0]).toMatchObject({
+      title: articleTitle,
+      originalUrl: articleUrl,
+      contentStatus: "FULL_TEXT",
+    });
+  });
+
   it("fails retryably only when every preference-generated search query fails", async () => {
     const search = vi.fn(async () => { throw new Error("offline search transport"); });
     const result = collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {

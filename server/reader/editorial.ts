@@ -552,12 +552,44 @@ function isEstablishedEditorialHost(host: string | null): boolean {
   );
 }
 
+function isCollectionPageType(value: unknown): boolean {
+  const types = Array.isArray(value) ? value : [value];
+  return types.some(
+    (type) => typeof type === "string" && /(?:^|[/#])(?:CollectionPage|SearchResultsPage)$/iu.test(type.trim()),
+  );
+}
+
+function hasCollectionPageSemantics(document: Document): boolean {
+  const microdata = [...document.querySelectorAll("[itemtype]")].some((element) =>
+    (element.getAttribute("itemtype") ?? "").split(/\s+/u).some((type) => isCollectionPageType(type)),
+  );
+  if (microdata) return true;
+
+  const visit = (value: unknown, depth = 0): boolean => {
+    if (depth > 8 || !value || typeof value !== "object") return false;
+    if (Array.isArray(value)) return value.some((item) => visit(item, depth + 1));
+    const record = value as Record<string, unknown>;
+    if (isCollectionPageType(record["@type"])) return true;
+    return Object.values(record).some((item) => visit(item, depth + 1));
+  };
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    try {
+      if (visit(JSON.parse(script.textContent ?? ""))) return true;
+    } catch {
+      // Malformed structured data cannot establish a collection page.
+    }
+  }
+  return false;
+}
+
 function isCategoryOrListingPage(
   document: Document,
   readableContent: string,
   pageUrl: string,
   title: string,
 ): boolean {
+  if (hasCollectionPageSemantics(document)) return true;
+
   const rawHeadings = [...document.querySelectorAll("h2, h3")];
   const rawLinkedStoryHeadings = rawHeadings.filter(
     (heading) => heading.querySelector("a[href]") || heading.parentElement?.matches("a[href]"),
@@ -598,13 +630,20 @@ function isCategoryOrListingPage(
     "archives",
     "search",
     "latest",
+    "editorials",
+    "index",
+    "indexes",
+    "indices",
   ]);
   if (!pathSegments.some((segment) => sectionSegments.has(segment))) return false;
 
   const titleWords = wordTokens(title).map((word) => word.toLowerCase());
   const finalPathWords = wordTokens(pathSegments.at(-1)?.replace(/[-_]+/gu, " ") ?? "")
     .map((word) => word.toLowerCase());
-  const genericPageTerms = new Set(["news", "latest", "articles", "stories", "topics", "category", "archive", "section", "search"]);
+  const genericPageTerms = new Set([
+    "news", "latest", "articles", "stories", "topics", "category", "archive", "section", "search",
+    "editorials", "index", "indexes", "indices",
+  ]);
   const genericTitle =
     titleWords.length > 0 &&
     titleWords.length <= 4 &&
