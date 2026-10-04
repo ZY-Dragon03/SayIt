@@ -73,6 +73,11 @@ let requestedProgress: ArticleProgress | null = null;
 let readerParagraphs: string[] = [];
 let deferProgressWrite = false;
 let completeDeferredProgressWrite: (() => void) | null = null;
+let requestSequence: string[] = [];
+let progressAtRegenerate: ArticleProgress | null = null;
+let regeneratedArticle: typeof article | null = null;
+let regeneratedIssue: typeof issue | null = null;
+let regeneratedProgress: ArticleProgress | null = null;
 
 const interpretationResult: SayItResult = {
   schema_version: "1",
@@ -97,13 +102,29 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+function storeReaderProgress(progress: ArticleProgress): void {
+  storedProgress = progress;
+  if (
+    progress.issueId === issue.id &&
+    progress.articleId === article.id &&
+    progress.edition === issue.edition
+  ) {
+    article.readState =
+      progress.scrollRatio >= 0.98
+        ? "READ"
+        : progress.scrollRatio > 0.01 || progress.firstVisibleParagraph > 0
+          ? "IN_PROGRESS"
+          : "UNREAD";
+  }
+}
+
 function createFetchMock() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/reader/preferences") return jsonResponse({ preferences });
     if (url === "/api/reader/issues/today") {
       return jsonResponse({
-        issue,
+        issue: regeneratedIssue ?? issue,
         occurrence: {
           id: "occurrence-2026-10-04",
           localDate: issue.localDate,
@@ -120,28 +141,77 @@ function createFetchMock() {
         attempts: [],
       });
     }
-    if (url.startsWith("/api/reader/issues/archive")) return jsonResponse({ issues: [issue] });
+    if (url.startsWith("/api/reader/issues/archive")) {
+      return jsonResponse({ issues: [regeneratedIssue ?? issue] });
+    }
     if (url.startsWith("/api/reader/articles/")) {
+      if (url.includes("article-edition-2")) {
+        return jsonResponse({
+          article: regeneratedArticle,
+          paragraphs: readerParagraphs,
+          progress: regeneratedProgress,
+        });
+      }
       return jsonResponse({
         article,
         paragraphs: readerParagraphs,
         progress: storedProgress,
       });
     }
+    if (url === "/api/reader/run" && init?.method === "POST") {
+      requestSequence.push("run");
+      const body = JSON.parse(String(init.body)) as { trigger: string; confirmRegenerate?: boolean };
+      if (body.trigger !== "regenerate" || body.confirmRegenerate !== true) {
+        throw new Error("The Regenerate test expected an explicitly confirmed Regenerate request.");
+      }
+      progressAtRegenerate = storedProgress;
+      regeneratedArticle = {
+        ...article,
+        id: "article-edition-2",
+        readState: progressAtRegenerate?.firstVisibleParagraph ? "IN_PROGRESS" : "UNREAD",
+      };
+      regeneratedIssue = {
+        ...issue,
+        edition: 2,
+        priorEditions: [1],
+        articles: [regeneratedArticle],
+      };
+      regeneratedProgress = progressAtRegenerate
+        ? { ...progressAtRegenerate, articleId: regeneratedArticle.id, edition: 2 }
+        : null;
+      return jsonResponse({
+        schema_version: "1",
+        attempt: {
+          id: "attempt-regenerate",
+          issueId: issue.id,
+          edition: 2,
+          state: "SUCCEEDED",
+          trigger: "regenerate",
+          startedAt: "2026-10-04T10:00:00.000Z",
+          completedAt: "2026-10-04T10:00:01.000Z",
+          retryable: false,
+          failureReason: null,
+          deliveredCount: 1,
+          traceId: "trace-regenerate",
+        },
+        issue: regeneratedIssue,
+      });
+    }
     if (url === "/api/retrieve") return jsonResponse(interpretationResult);
     if (url === "/api/reader/progress" && init?.method === "PUT") {
+      requestSequence.push("progress");
       const nextProgress = JSON.parse(String(init.body)) as ArticleProgress;
       requestedProgress = nextProgress;
       if (deferProgressWrite) {
         deferProgressWrite = false;
         await new Promise<void>((resolve) => {
           completeDeferredProgressWrite = () => {
-            storedProgress = nextProgress;
+            storeReaderProgress(nextProgress);
             resolve();
           };
         });
       } else {
-        storedProgress = nextProgress;
+        storeReaderProgress(nextProgress);
       }
       return jsonResponse({ schema_version: "1", progress: storedProgress });
     }
@@ -173,6 +243,8 @@ describe("Reader workspace", () => {
   let fetchMock: ReturnType<typeof createFetchMock>;
   let props: ReaderWorkspaceProps;
   let originalReaderRectDescriptor: PropertyDescriptor | undefined;
+  let originalInnerHeightDescriptor: PropertyDescriptor | undefined;
+  let originalScrollYDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -184,12 +256,21 @@ describe("Reader workspace", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     storedProgress = null;
     requestedProgress = null;
+    article.readState = "UNREAD";
     readerParagraphs = [
       "The policy shifted after the latest economic data arrived.",
       "The bank held rates steady after the vote. Traders adjusted their forecasts.",
     ];
     deferProgressWrite = false;
     completeDeferredProgressWrite = null;
+    requestSequence = [];
+    progressAtRegenerate = null;
+    regeneratedArticle = null;
+    regeneratedIssue = null;
+    regeneratedProgress = null;
+    originalReaderRectDescriptor = undefined;
+    originalInnerHeightDescriptor = undefined;
+    originalScrollYDescriptor = undefined;
     window.localStorage.clear();
     props = baseProps();
   });
@@ -201,6 +282,16 @@ describe("Reader workspace", () => {
       Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", originalReaderRectDescriptor);
     } else {
       delete (HTMLElement.prototype as Partial<HTMLElement>).getBoundingClientRect;
+    }
+    if (originalInnerHeightDescriptor) {
+      Object.defineProperty(window, "innerHeight", originalInnerHeightDescriptor);
+    } else {
+      Reflect.deleteProperty(window, "innerHeight");
+    }
+    if (originalScrollYDescriptor) {
+      Object.defineProperty(window, "scrollY", originalScrollYDescriptor);
+    } else {
+      Reflect.deleteProperty(window, "scrollY");
     }
     vi.unstubAllGlobals();
     window.localStorage.clear();
@@ -245,7 +336,8 @@ describe("Reader workspace", () => {
     await act(async () => openArticle?.click());
     await flush();
 
-    const body = container.querySelector<HTMLElement>(".reader-article-body")!;
+    originalInnerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    originalScrollYDescriptor = Object.getOwnPropertyDescriptor(window, "scrollY");
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
     Object.defineProperty(window, "scrollY", { configurable: true, value: 2549 });
     originalReaderRectDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
@@ -332,6 +424,107 @@ describe("Reader workspace", () => {
       | ScrollToOptions
       | undefined;
     expect(restoration?.top).toBeGreaterThan(2000);
+  });
+
+  it("saves the latest old-edition position before confirmed Regenerate carries progress", async () => {
+    readerParagraphs = Array.from({ length: 16 }, (_, index) => `Article paragraph ${index}.`);
+    storedProgress = {
+      issueId: issue.id,
+      articleId: article.id,
+      edition: 1,
+      scrollRatio: 0,
+      scrollTop: 0,
+      firstVisibleParagraph: 0,
+      paragraphOffset: 0,
+    };
+    props = { ...props, active: true };
+    await render();
+    await flush();
+
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+
+    originalInnerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    originalScrollYDescriptor = Object.getOwnPropertyDescriptor(window, "scrollY");
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 2100 });
+    originalReaderRectDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        if (this.classList.contains("reader-article-body")) {
+          const top = 200 - window.scrollY;
+          const height = 800 + 1900 / 0.5508;
+          return { top, bottom: top + height, height, left: 0, right: 700, width: 700, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+        }
+        const paragraphIndex = this.dataset.readerParagraph;
+        if (paragraphIndex !== undefined) {
+          const top = 148 + Number(paragraphIndex) * 160 - window.scrollY;
+          return { top, bottom: top + 80, height: 80, left: 0, right: 700, width: 700, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+        }
+        return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      },
+    });
+    await act(async () => window.dispatchEvent(new Event("scroll")));
+
+    const backButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "Back to reading list",
+    );
+    await act(async () => backButton?.click());
+    await flush();
+    const todayButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Today",
+    );
+    await act(async () => todayButton?.click());
+    await flush();
+
+    const regenerateButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Regenerate",
+    );
+    await act(async () => regenerateButton?.click());
+    await flush();
+    const confirmButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Confirm Regenerate",
+    );
+    deferProgressWrite = true;
+    await act(async () => confirmButton?.click());
+    await flush();
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 550)));
+
+    expect(completeDeferredProgressWrite).toBeTruthy();
+    const sequenceBeforeProgressWriteCompletes = [...requestSequence];
+    await act(async () => completeDeferredProgressWrite?.());
+    await flush();
+
+    expect(sequenceBeforeProgressWriteCompletes).toEqual(["progress"]);
+    expect(requestSequence).toEqual(["progress", "run"]);
+    expect(progressAtRegenerate).toMatchObject({
+      issueId: issue.id,
+      articleId: article.id,
+      edition: 1,
+      scrollTop: 2100,
+      firstVisibleParagraph: 13,
+    });
+    expect(progressAtRegenerate?.scrollRatio).toBeCloseTo(0.5508, 4);
+    expect(storedProgress).toMatchObject({
+      articleId: article.id,
+      edition: 1,
+      firstVisibleParagraph: 13,
+    });
+    expect(article.readState).toBe("IN_PROGRESS");
+    expect(regeneratedIssue?.edition).toBe(2);
+    expect(regeneratedArticle?.originalUrl).toBe(article.originalUrl);
+    expect(regeneratedArticle?.readState).toBe("IN_PROGRESS");
+    expect(regeneratedProgress).toMatchObject({
+      issueId: issue.id,
+      articleId: "article-edition-2",
+      edition: 2,
+      firstVisibleParagraph: 13,
+      scrollTop: 2100,
+    });
   });
 
   it("uses the local dictionary, IPA, and Listen path for a known word", async () => {

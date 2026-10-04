@@ -607,6 +607,7 @@ export function ReaderWorkspace({
     setRegenerating(trigger === "regenerate");
     setShowRegenerateConfirmation(false);
     try {
+      if (trigger === "regenerate") await flushProgressWrites();
       const { attempt, issue } = await startReaderRun(trigger);
       setAttempts((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)]);
       setActiveAttempt(isActiveAttempt(attempt) ? attempt : null);
