@@ -455,6 +455,69 @@ function pageFailure(document: Document, bodyText: string, title: string): strin
   return null;
 }
 
+function isCategoryOrListingPage(
+  document: Document,
+  readableContent: string,
+  pageUrl: string,
+  title: string,
+  structured: ReturnType<typeof extractStructuredArticle>,
+): boolean {
+  const readableDocument = new JSDOM(readableContent).window.document;
+  const linkedStoryHeadings = [...readableDocument.querySelectorAll("h2, h3")].filter(
+    (heading) => heading.querySelector("a[href]") || heading.parentElement?.matches("a[href]"),
+  ).length;
+  if (linkedStoryHeadings >= 4) return true;
+
+  const ogType = normalizeWhitespace(
+    document.querySelector<HTMLMetaElement>('meta[property="og:type"]')?.content ?? "",
+  ).toLowerCase();
+  const hasArticleMetadata =
+    ogType === "article" ||
+    Boolean(structured.headline || structured.articleBody) ||
+    Boolean(
+      document.querySelector(
+        'meta[name="citation_publication_date"], meta[property="article:published_time"]',
+      ),
+    );
+  if (hasArticleMetadata) return false;
+
+  let pathSegments: string[] = [];
+  try {
+    pathSegments = new URL(pageUrl).pathname
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => decodeURIComponent(segment).toLowerCase());
+  } catch {
+    return false;
+  }
+  const sectionSegments = new Set([
+    "news",
+    "topic",
+    "topics",
+    "category",
+    "categories",
+    "section",
+    "sections",
+    "tag",
+    "tags",
+    "archive",
+    "archives",
+    "search",
+    "latest",
+  ]);
+  if (!pathSegments.some((segment) => sectionSegments.has(segment))) return false;
+
+  const titleWords = wordTokens(title).map((word) => word.toLowerCase());
+  const finalPathWords = wordTokens(pathSegments.at(-1)?.replace(/[-_]+/gu, " ") ?? "")
+    .map((word) => word.toLowerCase());
+  const genericPageTerms = new Set(["news", "latest", "articles", "stories", "topics", "category", "archive", "section", "search"]);
+  const genericTitle =
+    titleWords.length > 0 &&
+    titleWords.length <= 4 &&
+    (titleWords.some((word) => genericPageTerms.has(word)) || titleWords.length <= 2);
+  return genericTitle && finalPathWords.some((word) => titleWords.includes(word));
+}
+
 function topicEvidence(topics: string[], title: string, body: string): { topics: string[]; evidence: string[] } {
   const searchable = `${title} ${body}`.toLowerCase();
   const matched: string[] = [];
@@ -592,6 +655,20 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     return { article: null, body: "", summary, reason: "The page did not expose readable article paragraphs." };
   }
   const title = normalizeWhitespace(parsedArticle.title || structured.headline || source.title);
+  if (isCategoryOrListingPage(document, parsedArticle.content, page.finalUrl, title, structured)) {
+    const summary = makeCandidateSummary(
+      source,
+      "SUMMARY",
+      "The source is a category or story listing, not an individual article.",
+      page.statusCode,
+    );
+    return {
+      article: null,
+      body: "",
+      summary,
+      reason: "The source is a category or story listing, not an individual article.",
+    };
+  }
   const paragraphs = paragraphsFromReadability(parsedArticle.content);
   const body = paragraphs.join("\n\n");
   const failedPage = pageFailure(document, body, title);

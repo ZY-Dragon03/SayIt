@@ -1,130 +1,76 @@
-export type ReaderDifficulty = "Easy" | "Intermediate" | "Advanced";
-export type ReaderIssueStatus = "COMPLETE" | "PARTIAL" | "NOT_DELIVERED";
-export type ReaderContentStatus =
-  | "FULL_TEXT"
-  | "EXTERNAL_ONLY"
-  | "SUMMARY"
-  | "UNAVAILABLE";
+import type { z } from "zod";
+import {
+  archiveResponseSchema,
+  articleResponseSchema,
+  articleSummarySchema,
+  dailyIssueSchema,
+  issueEditionResponseSchema,
+  getPreferencesResponseSchema,
+  putProgressRequestSchema,
+  putProgressResponseSchema,
+  readerDifficultySchema,
+  readerPreferencesSchema,
+  readingProgressSchema,
+  runResponseSchema,
+  todayResponseSchema,
+} from "../shared/reader-contract";
+import type {
+  ArticleContentStatus,
+  ArticleReadState,
+  ArticleSummary,
+  CachePermission,
+  DailyIssue as ContractDailyIssue,
+  IssueActual,
+  IssueStatus,
+  Occurrence,
+  ReaderDifficulty as ContractReaderDifficulty,
+  ReaderPreferences as ContractReaderPreferences,
+  RunAttempt,
+  RunAttemptState,
+  RunAttemptTrigger,
+} from "../shared/reader-contract";
 
-export interface ReaderPreferences {
-  topics: string[];
-  dailyArticleCount: number;
-  difficulty: ReaderDifficulty;
-  readingBudgetMinutes: number;
-  collectionTime: string;
-  timezone: string;
-}
-
+export type ReaderDifficulty = ContractReaderDifficulty;
+export type ReaderIssueStatus = IssueStatus;
+export type ReaderContentStatus = ArticleContentStatus;
+export type ReaderReadState = ArticleReadState;
+export type ReaderCachePermission = CachePermission;
+export type ReaderPreferences = ContractReaderPreferences;
 export type ReaderIssueTarget = ReaderPreferences;
-
-export interface ReaderIssueActual {
-  count: number;
-  topics: string[];
-  difficulty: ReaderDifficulty;
-  readingMinutes: number;
-}
-
-export interface ReaderArticleSummary {
-  id: string;
-  title: string;
-  originalPublication: string;
-  originalUrl: string;
-  accessiblePublication: string;
-  accessibleUrl: string;
-  contentStatus: ReaderContentStatus;
-  wordCount: number;
-  fkglWordCount: number;
-  sentenceCount: number;
-  syllableCount: number;
-  readingMinutes: number;
-  fkgl: number;
-  readState: string;
-  cachePermission: "PERMITTED" | "NOT_PERMITTED" | "UNKNOWN";
-  topics: string[];
-  difficulty: ReaderDifficulty;
-  paragraphCount: number;
-}
+export type ReaderIssueActual = IssueActual;
+export type ReaderArticleSummary = ArticleSummary;
+export type DailyIssue = ContractDailyIssue;
+export type AttemptState = RunAttemptState;
+export type AttemptTrigger = RunAttemptTrigger;
+export type ReaderRunAttempt = RunAttempt;
+export type { RunAttempt };
 
 export interface PriorEditionSummary {
   edition: number;
 }
 
-export interface DailyIssue {
-  id: string;
-  localDate: string;
-  timezone: string;
-  edition: number;
-  status: ReaderIssueStatus;
-  target: ReaderIssueTarget;
-  actual: ReaderIssueActual;
-  unmetConstraints: string[];
-  articles: ReaderArticleSummary[];
-  createdAt?: string;
-  updatedAt?: string;
-  priorEditions: number[];
-}
+export type TodayIssueResponse = z.infer<typeof todayResponseSchema>;
+export type ReaderArchiveResponse = z.infer<typeof archiveResponseSchema>;
+export type ReaderEditionResponse = z.infer<typeof issueEditionResponseSchema>;
+export type ReaderArticleResponse = z.infer<typeof articleResponseSchema>;
+export type RunResponse = z.infer<typeof runResponseSchema>;
+export type ReaderPreferencesResponse = z.infer<typeof getPreferencesResponseSchema>;
+export type ReaderProgressRequest = z.infer<typeof putProgressRequestSchema>;
+export type ReaderProgressResponse = z.infer<typeof putProgressResponseSchema>;
 
-export interface Occurrence {
-  id: string;
-  localDate: string;
-  timezone: string;
-  localTime: string;
-  scheduledAt: string;
-  status:
-    | "WAITING"
-    | "RUNNING"
-    | "RETRY_WAIT"
-    | "COMPLETED"
-    | "ALREADY_FULFILLED"
-    | "EXHAUSTED"
-    | "MISSED";
-  scheduledAttemptCount: number;
-  maxScheduledAttempts: number;
-  nextAttemptAt: string | null;
-  lastAttemptId: string | null;
-  updatedAt: string;
-}
+export type ArticleProgress = Pick<
+  z.infer<typeof readingProgressSchema>,
+  | "issueId"
+  | "articleId"
+  | "edition"
+  | "scrollRatio"
+  | "scrollTop"
+  | "firstVisibleParagraph"
+  | "paragraphOffset"
+>;
 
-export type AttemptState = "RUNNING" | "SUCCEEDED" | "FAILED";
-export type AttemptTrigger = "manual" | "scheduled" | "catch-up" | "regenerate";
-
-export interface RunAttempt {
-  id: string;
-  issueId: string;
-  edition: number;
-  state: AttemptState;
-  trigger: AttemptTrigger;
-  startedAt: string;
-  completedAt: string | null;
-  retryable: boolean;
-  failureReason: string | null;
-  deliveredCount: number;
-  traceId: string;
-}
-
-export interface TodayIssueResponse {
-  issue: DailyIssue | null;
-  occurrence: Occurrence | null;
-  attempts: RunAttempt[];
-}
-
-export interface ArticleProgress {
-  issueId: string;
-  articleId: string;
-  edition: number;
-  scrollRatio: number;
-  scrollTop: number;
-  firstVisibleParagraph: number;
-  paragraphOffset: number;
-}
-
-export interface ReaderArticleResponse {
-  article: ReaderArticleSummary;
-  paragraphs: string[] | null;
-  progress: ArticleProgress | null;
-}
-
-export interface RunResponse {
-  attempt: RunAttempt;
-  issue: DailyIssue;
-}
+export type ReaderContractIssue = z.infer<typeof dailyIssueSchema>;
+export type ReaderContractPreferences = z.infer<typeof readerPreferencesSchema>;
+export type ReaderContractDifficulty = z.infer<typeof readerDifficultySchema>;
+export type ReaderContractArticle = z.infer<typeof articleSummarySchema>;
+export type ReaderOccurrence = Occurrence;

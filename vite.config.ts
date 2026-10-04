@@ -2,6 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { createRetrieveHandler } from "./server/api";
 import { createDeepSeekProvider } from "./server/provider";
+import { readerServicePlugin } from "./server/reader/vite-plugin";
 
 interface ApiPluginOptions {
   apiKey?: string;
@@ -29,6 +30,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
+      ...(mode === "development" ? [readerServicePlugin()] : []),
       sayItApiPlugin({
         apiKey: env.DEEPSEEK_API_KEY,
         model: env.DEEPSEEK_MODEL,
@@ -36,5 +38,10 @@ export default defineConfig(({ mode }) => {
         diagnostics: mode === "development",
       }),
     ],
+    server: {
+      host: "127.0.0.1",
+      port: 5173,
+      strictPort: true,
+    },
   };
 });

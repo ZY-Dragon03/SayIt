@@ -16,7 +16,7 @@
 
 - [x] 3.1 Add versioned Reader preference, schedule occurrence, attempt, Daily Issue edition, candidate, and reading-progress records without changing SayIt history or Saved formats.
 - [x] 3.2 Add local Reader service APIs for preferences, issues/archive, run status, Regenerate, and article content with safe local-only binding, validation, timeouts, and error states.
-- [ ] 3.3 Implement one occurrence per local date, plan-time waiting, current-day-only startup catch-up, historical MISSED recording, bounded retry, DST behavior, and service/UI independence.
+- [x] 3.3 Implement one occurrence per local date, plan-time waiting, current-day-only startup catch-up, historical MISSED recording, bounded retry, DST behavior, and service/UI independence.
 - [x] 3.4 Verify Manual, scheduled, and catch-up attempts merge into one dated Issue; complete Issues suppress scheduled discovery; partial Issues can be completed; Regenerate preserves prior editions and progress.
 
 ## 4. Editorial Agent Discovery and Curation
@@ -30,15 +30,15 @@
 ## 5. Reader Workspace and SayIt Reuse
 
 - [x] 5.1 Add default-off Reader activation and deactivation while preserving the mounted SayIt workspace and its input, result, context, saved data, and history.
-- [ ] 5.2 Add persistent preference editing and quiet daily-issue/archive views with complete/partial/failure states and source attribution.
-- [ ] 5.3 Deliver readable article bodies in-app; display external-only candidates honestly; implement word lookup through the local dictionary/IPA/Listen path and phrase/sentence interpretation with necessary article context.
-- [ ] 5.4 Persist article selection, reading position, progress, issue editions, and only explicitly cache-permitted full text; restore after Reader restart and support offline access to eligible cached content.
+- [x] 5.2 Add persistent preference editing and quiet daily-issue/archive views with complete/partial/failure states and source attribution.
+- [x] 5.3 Deliver readable article bodies in-app; display external-only candidates honestly; implement word lookup through the local dictionary/IPA/Listen path and phrase/sentence interpretation with necessary article context.
+- [x] 5.4 Persist article selection, reading position, progress, issue editions, and only explicitly cache-permitted full text; restore after Reader restart and support offline access to eligible cached content.
 - [x] 5.5 Confirm Reader SayIt actions preserve the primary SayIt workspace and successful interpretation is recorded in existing SayIt interaction history.
 
 ## 6. Integration and Engineering Verification
 
-- [ ] 6.1 Integrate service and Reader UI into one candidate without changing frozen acceptance meanings.
-- [ ] 6.2 Run focused storage, scheduler/clock, discovery, extraction, curation, API, and UI tests plus the full project test and build commands.
+- [x] 6.1 Integrate service and Reader UI into one candidate without changing frozen acceptance meanings.
+- [x] 6.2 Run focused storage, scheduler/clock, discovery, extraction, curation, API, and UI tests plus the full project test and build commands.
 - [ ] 6.3 Exercise restart, offline, failure recovery, source attribution, duplicate/viewpoint, data isolation, and Regenerate flows on the integrated candidate.
 
 ## 7. Product Acceptance

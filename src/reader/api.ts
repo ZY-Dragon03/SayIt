@@ -1,8 +1,11 @@
 import type {
-  ArticleProgress,
-  DailyIssue,
+  ReaderArchiveResponse,
   ReaderArticleResponse,
+  ReaderEditionResponse,
   ReaderPreferences,
+  ReaderPreferencesResponse,
+  ReaderProgressRequest,
+  ReaderProgressResponse,
   RunAttempt,
   RunResponse,
   TodayIssueResponse,
@@ -29,13 +32,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export function getReaderPreferences(): Promise<{ preferences: ReaderPreferences }> {
+export function getReaderPreferences(): Promise<ReaderPreferencesResponse> {
   return requestJson("/api/reader/preferences");
 }
 
 export function putReaderPreferences(
   preferences: ReaderPreferences,
-): Promise<{ preferences: ReaderPreferences }> {
+): Promise<ReaderPreferencesResponse> {
   return requestJson("/api/reader/preferences", {
     method: "PUT",
     body: JSON.stringify({ preferences }),
@@ -46,7 +49,7 @@ export function getTodayIssue(): Promise<TodayIssueResponse> {
   return requestJson("/api/reader/issues/today");
 }
 
-export function getReaderArchive(limit = 60): Promise<{ issues: DailyIssue[] }> {
+export function getReaderArchive(limit = 60): Promise<ReaderArchiveResponse> {
   const boundedLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
   return requestJson(`/api/reader/issues/archive?limit=${boundedLimit}`);
 }
@@ -54,7 +57,7 @@ export function getReaderArchive(limit = 60): Promise<{ issues: DailyIssue[] }> 
 export function getReaderEdition(
   issueId: string,
   edition: number,
-): Promise<{ issue: DailyIssue }> {
+): Promise<ReaderEditionResponse> {
   return requestJson(
     `/api/reader/issues/${encodeURIComponent(issueId)}/editions/${encodeURIComponent(String(edition))}`,
   );
@@ -87,9 +90,8 @@ export function getReaderArticle(
 }
 
 export function putReaderProgress(
-  progress: Omit<ArticleProgress, "issueId" | "articleId" | "edition"> &
-    Pick<ArticleProgress, "issueId" | "articleId" | "edition">,
-): Promise<{ progress: ArticleProgress }> {
+  progress: ReaderProgressRequest,
+): Promise<ReaderProgressResponse> {
   return requestJson("/api/reader/progress", {
     method: "PUT",
     body: JSON.stringify(progress),

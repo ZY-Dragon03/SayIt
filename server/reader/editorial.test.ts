@@ -216,4 +216,32 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.unmetConstraints.some((constraint) => constraint.includes("Article count"))).toBe(true);
     expect(result.articles.every((article) => article.contentStatus === "FULL_TEXT")).toBe(true);
   });
+
+  it("rejects a readable topic index page instead of delivering it as an article", async () => {
+    const url = "https://www.sciencedaily.com/news/matter_energy/technology";
+    const body = articleBody("technology reporting and computing");
+    const fixture = pageFor(url, "Technology News", body, "ScienceDaily");
+    fixture.body = Buffer.from(
+      fixture.body
+        .toString("utf8")
+        .replace("<meta property=\"og:site_name\"", "<meta property=\"og:type\" content=\"website\"><meta property=\"og:site_name\""),
+    );
+    const metrics = readingMetrics(body);
+    const result = await collectEditorial({
+      topics: ["Technology"],
+      dailyArticleCount: 1,
+      difficulty: metrics.difficulty ?? "Intermediate",
+      readingBudgetMinutes: metrics.readingMinutes / 0.85,
+    }, {
+      search: async () => [{ url, title: "Technology News", snippet: "Latest technology news and reporting" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.articles).toHaveLength(0);
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.trace.candidates.some(
+      (candidate) => candidate.url === url && candidate.outcome === "REJECTED" && /index|category|listing/iu.test(candidate.reason),
+    )).toBe(true);
+  });
 });

@@ -418,7 +418,7 @@ export function ReaderWorkspace({
       }
     } catch (error) {
       setArticleError(error instanceof Error ? error.message : "The article could not be opened.");
-      setArticleResponse({ article: summary, paragraphs: null, progress: null });
+      setArticleResponse({ schema_version: "1", article: summary, paragraphs: null, progress: null });
       setProgress(null);
       lastProgressRef.current = null;
     } finally {
@@ -770,6 +770,7 @@ export function ReaderWorkspace({
   );
   const articleTitle = articleResponse?.article.title ?? selectedArticle?.title ?? "Article";
   const articleStatus = articleResponse?.article.contentStatus ?? selectedArticle?.contentStatus;
+  const articleFkgl = articleResponse?.article.fkgl ?? selectedArticle?.fkgl ?? null;
   const articleProgressRatio = progress?.scrollRatio ?? 0;
 
   return (
@@ -1034,9 +1035,9 @@ export function ReaderWorkspace({
                   <span>
                     FKGL inputs: {articleResponse?.article.fkglWordCount ?? selectedArticle.fkglWordCount} words · {articleResponse?.article.sentenceCount ?? selectedArticle.sentenceCount} sentences · {articleResponse?.article.syllableCount ?? selectedArticle.syllableCount} syllables
                   </span>
-                  {typeof (articleResponse?.article.fkgl ?? selectedArticle.fkgl) === "number" && (
+                  {typeof articleFkgl === "number" && (
                     <span>
-                      FK grade {(articleResponse?.article.fkgl ?? selectedArticle.fkgl)?.toFixed(1)} · {articleResponse?.article.difficulty ?? selectedArticle.difficulty ?? difficultyForGrade(articleResponse?.article.fkgl ?? selectedArticle.fkgl)} · estimated
+                      FK grade {articleFkgl.toFixed(1)} · {articleResponse?.article.difficulty ?? selectedArticle.difficulty ?? difficultyForGrade(articleFkgl)} · estimated
                     </span>
                   )}
                   <span>{cachePermissionLabel(articleResponse?.article.cachePermission ?? selectedArticle.cachePermission)}</span>
