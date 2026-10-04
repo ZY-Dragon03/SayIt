@@ -106,6 +106,62 @@ const MAX_SEARCH_BYTES = 2 * 1024 * 1024;
 const MAX_RESULTS_PER_QUERY = 12;
 const MAX_QUERIES = 12;
 const MAX_SHINGLE_CANDIDATES = 36;
+/**
+ * First-party publisher roots with an established editorial operation. This is
+ * deliberately a small source-quality gate: article URLs are still discovered
+ * dynamically from the user's preferences, but readable text from other hosts
+ * is not promoted to verified FULL_TEXT based on readability or metadata alone.
+ */
+const ESTABLISHED_EDITORIAL_HOST_ROOTS = [
+  "theguardian.com",
+  "theconversation.com",
+  "apnews.com",
+  "reuters.com",
+  "bbc.com",
+  "bbc.co.uk",
+  "npr.org",
+  "nature.com",
+  "sciencedaily.com",
+  "arstechnica.com",
+  "economist.com",
+  "ft.com",
+  "nytimes.com",
+  "washingtonpost.com",
+  "scientificamerican.com",
+  "aljazeera.com",
+  "cnbc.com",
+  "theverge.com",
+  "foreignaffairs.com",
+];
+const PREFERENCE_SEARCH_HOST_ROOTS = [
+  "theguardian.com",
+  "theconversation.com",
+  "apnews.com",
+  "reuters.com",
+  "bbc.com",
+  "npr.org",
+];
+const ESTABLISHED_EDITORIAL_PUBLISHER_NAMES: Record<string, string> = {
+  "theguardian.com": "The Guardian",
+  "theconversation.com": "The Conversation",
+  "apnews.com": "Associated Press",
+  "reuters.com": "Reuters",
+  "bbc.com": "BBC",
+  "bbc.co.uk": "BBC",
+  "npr.org": "NPR",
+  "nature.com": "Nature",
+  "sciencedaily.com": "ScienceDaily",
+  "arstechnica.com": "Ars Technica",
+  "economist.com": "The Economist",
+  "ft.com": "Financial Times",
+  "nytimes.com": "The New York Times",
+  "washingtonpost.com": "The Washington Post",
+  "scientificamerican.com": "Scientific American",
+  "aljazeera.com": "Al Jazeera",
+  "cnbc.com": "CNBC",
+  "theverge.com": "The Verge",
+  "foreignaffairs.com": "Foreign Affairs",
+};
 const ENGLISH_MARKERS = new Set([
   "a", "about", "after", "all", "an", "and", "are", "as", "at", "be", "been",
   "but", "by", "can", "could", "for", "from", "had", "has", "have", "he", "her",
@@ -194,6 +250,10 @@ export function readingMetrics(body: string): {
 }
 
 function displayPublication(hostname: string): string {
+  const knownPublisher = Object.entries(ESTABLISHED_EDITORIAL_PUBLISHER_NAMES).find(
+    ([root]) => hostname === root || hostname.endsWith(`.${root}`),
+  )?.[1];
+  if (knownPublisher) return knownPublisher;
   const labels = hostname.toLowerCase().replace(/^www\./u, "").split(".");
   const compoundTlds = new Set(["co.uk", "com.au", "co.nz", "com.br", "co.jp", "com.sg"]);
   const suffix = labels.slice(-2).join(".");
@@ -227,12 +287,27 @@ function normalizeUrl(value: string): string | null {
 }
 
 function queryVariants(topics: string[]): string[] {
-  const variants: string[] = [];
-  for (let index = 0; index < QUERY_VARIANTS.length; index += 1) {
+  const general = topics.map((topic) => `${topic} ${QUERY_VARIANTS[0]}`).slice(0, MAX_QUERIES);
+  const targeted = PREFERENCE_SEARCH_HOST_ROOTS
+    .slice(0, Math.min(PREFERENCE_SEARCH_HOST_ROOTS.length, MAX_QUERIES - general.length))
+    .map((root, index) => {
+      const topic = topics[index % topics.length]!;
+      const variant = QUERY_VARIANTS[(index + 1) % QUERY_VARIANTS.length]!;
+      return `site:${root} ${topic} ${variant}`;
+    });
+  for (let variantIndex = 1; variantIndex < QUERY_VARIANTS.length && general.length + targeted.length < MAX_QUERIES; variantIndex += 1) {
     for (const topic of topics) {
-      variants.push(`${topic} ${QUERY_VARIANTS[index]}`);
-      if (variants.length === MAX_QUERIES) return variants;
+      if (general.length + targeted.length >= MAX_QUERIES) break;
+      general.push(`${topic} ${QUERY_VARIANTS[variantIndex]}`);
     }
+  }
+  const variants: string[] = [];
+  for (let index = 0; variants.length < MAX_QUERIES; index += 1) {
+    const broad = general[index];
+    const trusted = targeted[index];
+    if (broad) variants.push(broad);
+    if (trusted && variants.length < MAX_QUERIES) variants.push(trusted);
+    if (!broad && !trusted) break;
   }
   return [...new Set(variants)].slice(0, MAX_QUERIES);
 }
@@ -453,6 +528,13 @@ function pageFailure(document: Document, bodyText: string, title: string): strin
     return "The source article is no longer available.";
   }
   return null;
+}
+
+function isEstablishedEditorialHost(host: string | null): boolean {
+  if (!host) return false;
+  return ESTABLISHED_EDITORIAL_HOST_ROOTS.some(
+    (root) => host === root || host.endsWith(`.${root}`),
+  );
 }
 
 function isCategoryOrListingPage(
@@ -697,6 +779,25 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   const originalHost = hostOf(sourceUrl);
   const originalPublication = normalizeWhitespace(source.publication ?? "") || (originalHost ? displayPublication(originalHost) : "Unverified source");
   const accessiblePublication = metadata.publisher ?? metadata.siteName ?? (finalHost ? displayPublication(finalHost) : originalPublication);
+  if (!isEstablishedEditorialHost(originalHost) || !isEstablishedEditorialHost(finalHost)) {
+    const unverifiedHosts = [
+      !isEstablishedEditorialHost(originalHost) ? `original host ${originalHost ?? "unknown"}` : null,
+      !isEstablishedEditorialHost(finalHost) ? `accessible host ${finalHost ?? "unknown"}` : null,
+    ].filter((item): item is string => item !== null);
+    const reason = `Unverified host(s) for this article: ${unverifiedHosts.join(", ")}. Full text is delivered only from the curated established editorial publisher list, so this page remains external-only.`;
+    const summary = makeCandidateSummary(source, "EXTERNAL_ONLY", reason, page.statusCode);
+    return {
+      article: null,
+      body: "",
+      summary: {
+        ...summary,
+        title,
+        accessiblePublication,
+        accessibleUrl,
+      },
+      reason,
+    };
+  }
   const bodyHash = hash(paragraphs.join("\n\n").toLowerCase());
   const article: EditorialArticle = {
     id: hash(sourceUrl).slice(0, 24),

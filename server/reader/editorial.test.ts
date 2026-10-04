@@ -67,6 +67,16 @@ function preferencesForBodies(bodies: string[], count = bodies.length): Editoria
   };
 }
 
+function preferencesForTopic(body: string, topic: string): EditorialPreferences {
+  const metrics = readingMetrics(body);
+  return {
+    topics: [topic],
+    dailyArticleCount: 1,
+    difficulty: metrics.difficulty ?? "Intermediate",
+    readingBudgetMinutes: metrics.readingMinutes / 0.85,
+  };
+}
+
 function makeFetcher(pages: Map<string, FetchedArticlePage>, calls: string[] = []): EditorialArticleFetcher {
   return async (url) => {
     calls.push(url);
@@ -81,7 +91,7 @@ describe("SayIt Reader Editorial Agent", () => {
     const bodyOne = articleBody("the central bank vote");
     const bodyTwo = articleBody("the Federal Reserve decision", true);
     const first = "https://reuters.com/federal-reserve-decision";
-    const second = "https://marketjournal.com/analysis/rates";
+    const second = "https://economist.com/analysis/rates";
     const inaccessible = "https://blockednews.com/story";
     const summary = "https://briefnews.com/summary";
     const vanished = "https://gonenews.com/article";
@@ -101,7 +111,7 @@ describe("SayIt Reader Editorial Agent", () => {
       [summary, pageFor(summary, "Finance policy summary", "The finance summary gives a short overview of the Federal Reserve decision.")],
       [vanished, { ...pageFor(vanished, "Finance article missing", bodyOne), statusCode: 404 }],
       [first, pageFor(first, "Finance: Federal Reserve decision", bodyOne, "Reuters")],
-      [second, pageFor(second, "Finance analysis of interest rates", bodyTwo, "Market Journal")],
+      [second, pageFor(second, "Finance analysis of interest rates", bodyTwo, "The Economist")],
     ]);
     const fetchCalls: string[] = [];
     const preferences = preferencesForBodies([bodyOne, bodyTwo]);
@@ -114,6 +124,7 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(searches.length).toBeGreaterThan(0);
     expect(searches.every((query) => query.toLowerCase().includes("finance"))).toBe(true);
     expect(searches.some((query) => /in-depth|analysis|reporting/u.test(query))).toBe(true);
+    expect(searches.some((query) => /site:(?:theguardian\.com|theconversation\.com|apnews\.com|reuters\.com|bbc\.com|npr\.org)/u.test(query))).toBe(true);
     expect(fetchCalls).toContain(first);
     expect(fetchCalls).toContain(second);
     expect(result.status).toBe("COMPLETE");
@@ -133,13 +144,13 @@ describe("SayIt Reader Editorial Agent", () => {
     const reporting = articleBody("the Federal Reserve announcement");
     const independent = articleBody("the Federal Reserve announcement", true);
     const urls = [
-      "https://wirenews.com/fed-decision",
-      "https://mirrornews.com/fed-decision-copy",
+      "https://apnews.com/fed-decision",
+      "https://reuters.com/fed-decision-copy",
       "https://economist.com/fed-policy-analysis",
     ];
     const pages = new Map<string, FetchedArticlePage>([
-      [urls[0], pageFor(urls[0], "Federal Reserve decision changes finance outlook", reporting, "Wire News")],
-      [urls[1], pageFor(urls[1], "Federal Reserve decision changes finance outlook", reporting, "Mirror News")],
+      [urls[0], pageFor(urls[0], "Federal Reserve decision changes finance outlook", reporting, "Associated Press")],
+      [urls[1], pageFor(urls[1], "Federal Reserve decision changes finance outlook", reporting, "Reuters")],
       [urls[2], pageFor(urls[2], "Independent finance analysis of Federal Reserve policy", independent, "Economist Review")],
     ]);
     const result = await collectEditorial(preferencesForBodies([reporting, independent]), {
@@ -151,19 +162,19 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.status).toBe("COMPLETE");
     expect(result.articles).toHaveLength(2);
     expect(result.trace.candidates.some((candidate) => candidate.url === urls[1] && candidate.outcome === "DUPLICATE")).toBe(true);
-    expect(result.articles.map((article) => article.originalPublication)).toContain("Economist");
+    expect(result.articles.map((article) => article.originalPublication)).toContain("The Economist");
     expect(shingleJaccard(reporting, independent)).toBeLessThan(0.85);
   });
 
   it("re-fetches full text without discovery and preserves original versus accessible attribution", async () => {
-    const originalUrl = "https://originaljournal.com/finance/fed-story";
-    const redirectedUrl = "https://archivejournal.com/finance/fed-story";
+    const originalUrl = "https://reuters.com/finance/fed-story";
+    const redirectedUrl = "https://theguardian.com/finance/fed-story";
     const body = articleBody("the Federal Reserve decision");
-    const redirected = pageFor(redirectedUrl, "Finance report on the Federal Reserve decision", body, "Archive Journal");
+    const redirected = pageFor(redirectedUrl, "Finance report on the Federal Reserve decision", body, "The Guardian");
     const reference = {
       id: "stored-article-id",
       title: "Finance report on the Federal Reserve decision",
-      originalPublication: "Original Journal",
+      originalPublication: "Reuters",
       originalUrl,
       accessiblePublication: "Old Archive",
       accessibleUrl: "https://old-archive.com/story",
@@ -176,9 +187,9 @@ describe("SayIt Reader Editorial Agent", () => {
 
     expect(article?.contentStatus).toBe("FULL_TEXT");
     expect(article?.id).toBe(reference.id);
-    expect(article?.originalPublication).toBe("Original Journal");
+    expect(article?.originalPublication).toBe("Reuters");
     expect(article?.originalUrl).toBe(originalUrl);
-    expect(article?.accessiblePublication).toBe("Archive Journal");
+    expect(article?.accessiblePublication).toBe("The Guardian");
     expect(article?.accessibleUrl).toBe(redirectedUrl);
     expect(article?.paragraphs?.length).toBeGreaterThanOrEqual(3);
     expect(reason).toContain("revalidated");
@@ -199,9 +210,9 @@ describe("SayIt Reader Editorial Agent", () => {
 
   it("returns a partial issue rather than weakening constraints when sources disappear", async () => {
     const body = articleBody("the Federal Reserve decision");
-    const first = "https://onenews.com/finance";
+    const first = "https://reuters.com/finance/report";
     const disappeared = "https://gonenews.com/finance";
-    const pages = new Map([[first, pageFor(first, "Finance report Federal Reserve decision", body, "One Journal")] as const]);
+    const pages = new Map([[first, pageFor(first, "Finance report Federal Reserve decision", body, "Reuters")] as const]);
     const result = await collectEditorial(preferenceFor(body), {
       search: async () => [
         { url: first, title: "Finance report Federal Reserve decision", snippet: "" },
@@ -215,6 +226,107 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.articles).toHaveLength(1);
     expect(result.unmetConstraints.some((constraint) => constraint.includes("Article count"))).toBe(true);
     expect(result.articles.every((article) => article.contentStatus === "FULL_TEXT")).toBe(true);
+  });
+
+  it("keeps a readable InfoStream Global page external-only when its host is not established", async () => {
+    const url = "https://infostreamglobal.com/tech-reporting-ensuring-2026-media-credibility";
+    const title = "Tech Reporting: Ensuring 2026 Media Credibility";
+    const body = articleBody("technology reporting and digital media credibility");
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async (query) => {
+        expect(query.toLowerCase()).toContain("technology");
+        return [{ url, title, snippet: "Technology reporting in 2026" }];
+      },
+      fetchArticle: makeFetcher(new Map([[url, pageFor(url, title, body, "InfoStream Global")]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.articles).toHaveLength(0);
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.candidates[0]).toMatchObject({
+      originalPublication: "Infostreamglobal",
+      originalUrl: url,
+      accessiblePublication: "InfoStream Global",
+      accessibleUrl: url,
+      contentStatus: "EXTERNAL_ONLY",
+      paragraphCount: 0,
+    });
+    expect(result.candidates[0]?.paragraphs).toBeUndefined();
+    expect(result.trace.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url,
+        outcome: "REJECTED",
+        reason: expect.stringContaining("curated established editorial publisher list"),
+      }),
+    ]));
+  });
+
+  it("accepts a dynamically discovered Guardian article path under its established publisher root", async () => {
+    const url = "https://www.theguardian.com/technology/2026/10/04/ai-explainer-reporting";
+    const title = "How technology reporting explains a changing industry";
+    const body = articleBody("technology reporting and computing");
+    const searches: string[] = [];
+    const fetchCalls: string[] = [];
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async (query) => {
+        searches.push(query);
+        return [{ url, title, snippet: "A technology explainer" }];
+      },
+      fetchArticle: makeFetcher(new Map([[url, pageFor(url, title, body, "The Guardian")]]), fetchCalls),
+      maxArticleChecks: 1,
+    });
+
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.every((query) => query.toLowerCase().includes("technology"))).toBe(true);
+    expect(fetchCalls).toContain(url);
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles[0]).toMatchObject({
+      originalPublication: "The Guardian",
+      originalUrl: url,
+      accessiblePublication: "The Guardian",
+      accessibleUrl: url,
+      contentStatus: "FULL_TEXT",
+    });
+  });
+
+  it("allows a non-RSS arbitrary article path under an established publisher root", async () => {
+    const url = "https://www.reuters.com/world/longform/offbeat-path/2026/10/04/example";
+    const title = "Technology analysis from an independently discovered article path";
+    const body = articleBody("technology computing industry reporting");
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "Technology analysis" }],
+      fetchArticle: makeFetcher(new Map([[url, pageFor(url, title, body, "Reuters")]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(new URL(url).pathname).not.toMatch(/(?:^|\/)(?:rss|feed)(?:\/|$)/iu);
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles[0]).toMatchObject({
+      originalPublication: "Reuters",
+      originalUrl: url,
+      contentStatus: "FULL_TEXT",
+    });
+  });
+
+  it("keeps a broad dynamic search query for every saved topic at the 12-topic limit", async () => {
+    const topics = [
+      "Politics", "Economy", "Finance", "Geopolitics", "Technology", "Science",
+      "Health", "Environment", "Business", "Arts", "Education", "Energy",
+    ];
+    const result = await collectEditorial({
+      topics,
+      dailyArticleCount: 1,
+      difficulty: "Intermediate",
+      readingBudgetMinutes: 20,
+    }, {
+      search: async () => [],
+      fetchArticle: async () => { throw new Error("No source should be fetched without search results."); },
+    });
+
+    expect(result.trace.queries).toHaveLength(12);
+    for (const topic of topics) {
+      expect(result.trace.queries.some((query) => query.startsWith(`${topic} `))).toBe(true);
+    }
   });
 
   it("rejects a readable topic index page instead of delivering it as an article", async () => {
