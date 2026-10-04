@@ -542,26 +542,23 @@ function isCategoryOrListingPage(
   readableContent: string,
   pageUrl: string,
   title: string,
-  structured: ReturnType<typeof extractStructuredArticle>,
 ): boolean {
+  const rawHeadings = [...document.querySelectorAll("h2, h3")];
+  const rawLinkedStoryHeadings = rawHeadings.filter(
+    (heading) => heading.querySelector("a[href]") || heading.parentElement?.matches("a[href]"),
+  ).length;
+  const hasHeadlineHubLabel = rawHeadings.some((heading) =>
+    /^(?:top|latest|recent)\s+(?:headlines|stories|news)$/iu.test(
+      normalizeWhitespace(heading.textContent ?? ""),
+    ),
+  );
+  if (rawLinkedStoryHeadings >= 4 && hasHeadlineHubLabel) return true;
+
   const readableDocument = new JSDOM(readableContent).window.document;
   const linkedStoryHeadings = [...readableDocument.querySelectorAll("h2, h3")].filter(
     (heading) => heading.querySelector("a[href]") || heading.parentElement?.matches("a[href]"),
   ).length;
   if (linkedStoryHeadings >= 4) return true;
-
-  const ogType = normalizeWhitespace(
-    document.querySelector<HTMLMetaElement>('meta[property="og:type"]')?.content ?? "",
-  ).toLowerCase();
-  const hasArticleMetadata =
-    ogType === "article" ||
-    Boolean(structured.headline || structured.articleBody) ||
-    Boolean(
-      document.querySelector(
-        'meta[name="citation_publication_date"], meta[property="article:published_time"]',
-      ),
-    );
-  if (hasArticleMetadata) return false;
 
   let pathSegments: string[] = [];
   try {
@@ -597,7 +594,12 @@ function isCategoryOrListingPage(
     titleWords.length > 0 &&
     titleWords.length <= 4 &&
     (titleWords.some((word) => genericPageTerms.has(word)) || titleWords.length <= 2);
-  return genericTitle && finalPathWords.some((word) => titleWords.includes(word));
+  const genericHubTitleAndPath =
+    pathSegments.some((segment) => sectionSegments.has(segment)) &&
+    genericTitle &&
+    finalPathWords.some((word) => titleWords.includes(word));
+  if (genericHubTitleAndPath) return true;
+  return false;
 }
 
 function topicEvidence(topics: string[], title: string, body: string): { topics: string[]; evidence: string[] } {
@@ -737,7 +739,7 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     return { article: null, body: "", summary, reason: "The page did not expose readable article paragraphs." };
   }
   const title = normalizeWhitespace(parsedArticle.title || structured.headline || source.title);
-  if (isCategoryOrListingPage(document, parsedArticle.content, page.finalUrl, title, structured)) {
+  if (isCategoryOrListingPage(document, parsedArticle.content, page.finalUrl, title)) {
     const summary = makeCandidateSummary(
       source,
       "SUMMARY",

@@ -329,6 +329,104 @@ describe("SayIt Reader Editorial Agent", () => {
     }
   });
 
+  it("rejects the ScienceDaily technology hub when raw headline cards coexist with article metadata", async () => {
+    const url = "https://www.sciencedaily.com/news/matter_energy/technology";
+    const title = "Technology News";
+    const body = articleBody("technology reporting and computing");
+    const linkedCards = [
+      "Researchers explain a new computing discovery",
+      "Technology changes how scientists measure energy",
+      "New study examines artificial intelligence systems",
+      "Engineers report progress on a computer chip",
+      "Latest research explores data and digital systems",
+    ].map((headline, index) => `<h3><a href="/releases/2026/10/story-${index}.htm">${headline}</a></h3>`).join("");
+    const jsonLd = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "NewsArticle",
+      headline: title,
+      articleBody: body,
+      datePublished: "2026-10-01T12:00:00Z",
+      publisher: { "@type": "Organization", name: "ScienceDaily" },
+    });
+    const html = `<!doctype html><html lang="en"><head>
+      <title>${title} | ScienceDaily</title>
+      <meta property="og:type" content="article">
+      <meta property="og:site_name" content="ScienceDaily">
+      <meta property="article:published_time" content="2026-10-01T12:00:00Z">
+      <script type="application/ld+json">${jsonLd}</script>
+      </head><body><header><h1>${title}</h1></header>
+      <nav><h2>Top Headlines</h2>${linkedCards}</nav>
+      <aside><h2>Latest Headlines</h2>${linkedCards}</aside>
+      <main><article>${body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("")}</article></main>
+      </body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "Top Headlines and Latest Headlines in technology" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.articles).toHaveLength(0);
+    expect(result.status).toBe("NOT_DELIVERED");
+    expect(result.trace.candidates.some(
+      (candidate) => candidate.url === url && candidate.outcome === "REJECTED" && /category|listing|hub/iu.test(candidate.reason),
+    )).toBe(true);
+  });
+
+  it("keeps an individual ScienceDaily release eligible with article metadata and a specific title", async () => {
+    const url = "https://www.sciencedaily.com/releases/2026/10/261004123456.htm";
+    const title = "New computing method advances technology research";
+    const body = articleBody("technology computing research");
+    const related = [
+      "A related technology research discovery",
+      "Researchers examine a new computer system",
+      "Science team reports a digital measurement technique",
+    ].map((headline, index) => `<h3><a href="/releases/2026/10/related-${index}.htm">${headline}</a></h3>`).join("");
+    const jsonLd = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "NewsArticle",
+      headline: title,
+      articleBody: body,
+      datePublished: "2026-10-04T12:00:00Z",
+      publisher: { "@type": "Organization", name: "ScienceDaily" },
+    });
+    const html = `<!doctype html><html lang="en"><head>
+      <title>${title} | ScienceDaily</title>
+      <meta property="og:type" content="article">
+      <meta property="og:site_name" content="ScienceDaily">
+      <meta property="article:published_time" content="2026-10-04T12:00:00Z">
+      <script type="application/ld+json">${jsonLd}</script>
+      </head><body><main><article><h1>${title}</h1>
+      ${body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("")}
+      </article><aside><h2>Related Headlines</h2>${related}</aside></main></body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "A new technology research article" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles).toHaveLength(1);
+    expect(result.articles[0]).toMatchObject({
+      title,
+      originalPublication: "ScienceDaily",
+      originalUrl: url,
+      accessibleUrl: url,
+      contentStatus: "FULL_TEXT",
+    });
+  });
+
   it("rejects a readable topic index page instead of delivering it as an article", async () => {
     const url = "https://www.sciencedaily.com/news/matter_energy/technology";
     const body = articleBody("technology reporting and computing");
