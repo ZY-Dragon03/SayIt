@@ -282,8 +282,27 @@ export function ReaderWorkspace({
   const selectedArticleRef = useRef<ReaderArticleSummary | null>(null);
   const selectedExpressionForRetryRef = useRef<ReaderSelection | null>(null);
   const progressTimerRef = useRef<number | null>(null);
+  const progressWriteRef = useRef<Promise<void>>(Promise.resolve());
   const restorePendingRef = useRef(false);
   const wasActiveRef = useRef(false);
+
+  const enqueueProgressWrite = useCallback((nextProgress: ArticleProgress) => {
+    const nextWrite = progressWriteRef.current
+      .catch(() => undefined)
+      .then(() => putReaderProgress(nextProgress))
+      .then(() => undefined);
+    progressWriteRef.current = nextWrite;
+    return nextWrite;
+  }, []);
+
+  const flushProgressWrites = useCallback(() => {
+    if (progressTimerRef.current !== null) {
+      window.clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    const pending = lastProgressRef.current;
+    return pending ? enqueueProgressWrite(pending) : progressWriteRef.current;
+  }, [enqueueProgressWrite]);
 
   useEffect(() => {
     selectedIssueRef.current = selectedIssue;
@@ -372,18 +391,13 @@ export function ReaderWorkspace({
     if (!active) {
       if (wasActiveRef.current) {
         wasActiveRef.current = false;
-        if (progressTimerRef.current !== null) {
-          window.clearTimeout(progressTimerRef.current);
-          progressTimerRef.current = null;
-        }
-        const pending = lastProgressRef.current;
-        if (pending) void putReaderProgress(pending).catch(() => undefined);
+        void flushProgressWrites().catch(() => undefined);
       }
       return;
     }
     wasActiveRef.current = true;
     void refreshWorkspace(true);
-  }, [active, refreshWorkspace]);
+  }, [active, flushProgressWrites, refreshWorkspace]);
 
   const loadArticle = useCallback(async (issue: DailyIssue, summary: ReaderArticleSummary) => {
     setSelectedIssue(issue);
@@ -404,6 +418,7 @@ export function ReaderWorkspace({
       article: summary,
     });
     try {
+      await flushProgressWrites().catch(() => undefined);
       const response = await getReaderArticle(summary.id, issue.edition);
       setArticleResponse(response);
       setProgress(response.progress);
@@ -424,7 +439,7 @@ export function ReaderWorkspace({
     } finally {
       setArticleLoading(false);
     }
-  }, []);
+  }, [flushProgressWrites]);
 
   useEffect(() => {
     if (!active || !activeAttempt || !isActiveAttempt(activeAttempt)) return;
@@ -484,11 +499,11 @@ export function ReaderWorkspace({
     }
     progressTimerRef.current = window.setTimeout(() => {
       progressTimerRef.current = null;
-      void putReaderProgress(nextProgress).catch((error) => {
+      void enqueueProgressWrite(nextProgress).catch((error) => {
         setWorkspaceError(error instanceof Error ? error.message : "Reading position could not be saved.");
       });
     }, PROGRESS_SAVE_DELAY_MS);
-  }, []);
+  }, [enqueueProgressWrite]);
 
   const captureProgress = useCallback(() => {
     const issue = selectedIssueRef.current;

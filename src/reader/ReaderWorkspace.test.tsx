@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SayItResult } from "../shared/contract";
 import { ReaderWorkspace, type ReaderWorkspaceProps } from "./ReaderWorkspace";
+import type { ArticleProgress } from "./types";
 
 vi.mock("../lib/local-dictionary", () => ({
   prefetchDictionary: vi.fn().mockResolvedValue({}),
@@ -67,6 +68,12 @@ const issue = {
   priorEditions: [] as number[],
 };
 
+let storedProgress: ArticleProgress | null = null;
+let requestedProgress: ArticleProgress | null = null;
+let readerParagraphs: string[] = [];
+let deferProgressWrite = false;
+let completeDeferredProgressWrite: (() => void) | null = null;
+
 const interpretationResult: SayItResult = {
   schema_version: "1",
   mode: "interpret",
@@ -117,16 +124,26 @@ function createFetchMock() {
     if (url.startsWith("/api/reader/articles/")) {
       return jsonResponse({
         article,
-        paragraphs: [
-          "The policy shifted after the latest economic data arrived.",
-          "The bank held rates steady after the vote. Traders adjusted their forecasts.",
-        ],
-        progress: null,
+        paragraphs: readerParagraphs,
+        progress: storedProgress,
       });
     }
     if (url === "/api/retrieve") return jsonResponse(interpretationResult);
     if (url === "/api/reader/progress" && init?.method === "PUT") {
-      return jsonResponse({ progress: JSON.parse(String(init.body)) });
+      const nextProgress = JSON.parse(String(init.body)) as ArticleProgress;
+      requestedProgress = nextProgress;
+      if (deferProgressWrite) {
+        deferProgressWrite = false;
+        await new Promise<void>((resolve) => {
+          completeDeferredProgressWrite = () => {
+            storedProgress = nextProgress;
+            resolve();
+          };
+        });
+      } else {
+        storedProgress = nextProgress;
+      }
+      return jsonResponse({ schema_version: "1", progress: storedProgress });
     }
     throw new Error(`Unexpected test fetch: ${url}`);
   });
@@ -155,6 +172,7 @@ describe("Reader workspace", () => {
   let root: Root;
   let fetchMock: ReturnType<typeof createFetchMock>;
   let props: ReaderWorkspaceProps;
+  let originalReaderRectDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -164,6 +182,14 @@ describe("Reader workspace", () => {
     fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("scrollTo", vi.fn());
+    storedProgress = null;
+    requestedProgress = null;
+    readerParagraphs = [
+      "The policy shifted after the latest economic data arrived.",
+      "The bank held rates steady after the vote. Traders adjusted their forecasts.",
+    ];
+    deferProgressWrite = false;
+    completeDeferredProgressWrite = null;
     window.localStorage.clear();
     props = baseProps();
   });
@@ -171,6 +197,11 @@ describe("Reader workspace", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    if (originalReaderRectDescriptor) {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", originalReaderRectDescriptor);
+    } else {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).getBoundingClientRect;
+    }
     vi.unstubAllGlobals();
     window.localStorage.clear();
   });
@@ -200,6 +231,107 @@ describe("Reader workspace", () => {
     expect(container.textContent).toContain("Today");
     expect(container.textContent).toContain("1.6 min · estimated");
     expect(fetchMock).toHaveBeenCalledWith("/api/reader/preferences", expect.anything());
+  });
+
+  it("waits for the final progress write before restoring the last article on Reader re-entry", async () => {
+    readerParagraphs = Array.from({ length: 16 }, (_, index) => `Article paragraph ${index}.`);
+    props = { ...props, active: true };
+    await render();
+    await flush();
+
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+
+    const body = container.querySelector<HTMLElement>(".reader-article-body")!;
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 2549 });
+    originalReaderRectDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        if (this.classList.contains("reader-article-body")) {
+          const top = 200 - window.scrollY;
+          return {
+            top,
+            bottom: top + 4398,
+            height: 4398,
+            left: 0,
+            right: 700,
+            width: 700,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        const paragraphIndex = this.dataset.readerParagraph;
+        if (paragraphIndex !== undefined) {
+          const top = 277 + Number(paragraphIndex) * 160 - window.scrollY;
+          return {
+            top,
+            bottom: top + 80,
+            height: 80,
+            left: 0,
+            right: 700,
+            width: 700,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return {
+          top: 0,
+          bottom: 0,
+          height: 0,
+          left: 0,
+          right: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      },
+    });
+    await act(async () => window.dispatchEvent(new Event("scroll")));
+    const backButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "Back to reading list",
+    );
+    await act(async () => backButton?.click());
+    await flush();
+
+    // Returning to the list clamps the document scroll. Simulate the final exit save
+    // still being in flight when the user reopens Reader.
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 297 });
+    deferProgressWrite = true;
+    props = { ...props, active: false };
+    await render();
+    await flush();
+    expect(completeDeferredProgressWrite).toBeTruthy();
+    expect(requestedProgress?.firstVisibleParagraph).toBe(15);
+
+    const articleReadsBeforeReentry = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith("/api/reader/articles/"),
+    ).length;
+    props = { ...props, active: true };
+    await render();
+    await flush();
+    const readsWhileProgressSaveIsPending = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith("/api/reader/articles/"),
+    ).length;
+
+    await act(async () => completeDeferredProgressWrite?.());
+    await flush();
+
+    expect(readsWhileProgressSaveIsPending).toBe(articleReadsBeforeReentry);
+    expect(storedProgress?.scrollRatio).toBeCloseTo(0.6529, 4);
+    expect(storedProgress?.scrollTop).toBe(2549);
+    expect(storedProgress?.firstVisibleParagraph).toBe(15);
+    const restoration = vi.mocked(window.scrollTo).mock.calls.slice(-1)[0]?.[0] as
+      | ScrollToOptions
+      | undefined;
+    expect(restoration?.top).toBeGreaterThan(2000);
   });
 
   it("uses the local dictionary, IPA, and Listen path for a known word", async () => {
