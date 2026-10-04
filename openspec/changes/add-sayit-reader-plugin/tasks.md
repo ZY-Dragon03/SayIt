@@ -14,17 +14,17 @@
 
 ## 3. Local Collection Service and Persistence
 
-- [ ] 3.1 Add versioned Reader preference, schedule occurrence, attempt, Daily Issue edition, candidate, and reading-progress records without changing SayIt history or Saved formats.
-- [ ] 3.2 Add local Reader service APIs for preferences, issues/archive, run status, Regenerate, and article content with safe local-only binding, validation, timeouts, and error states.
+- [x] 3.1 Add versioned Reader preference, schedule occurrence, attempt, Daily Issue edition, candidate, and reading-progress records without changing SayIt history or Saved formats.
+- [x] 3.2 Add local Reader service APIs for preferences, issues/archive, run status, Regenerate, and article content with safe local-only binding, validation, timeouts, and error states.
 - [ ] 3.3 Implement one occurrence per local date, plan-time waiting, current-day-only startup catch-up, historical MISSED recording, bounded retry, DST behavior, and service/UI independence.
-- [ ] 3.4 Verify Manual, scheduled, and catch-up attempts merge into one dated Issue; complete Issues suppress scheduled discovery; partial Issues can be completed; Regenerate preserves prior editions and progress.
+- [x] 3.4 Verify Manual, scheduled, and catch-up attempts merge into one dated Issue; complete Issues suppress scheduled discovery; partial Issues can be completed; Regenerate preserves prior editions and progress.
 
 ## 4. Editorial Agent Discovery and Curation
 
-- [ ] 4.1 Generate dynamic online queries from saved preferences and record query/candidate/decision traces; no complete preloaded article URL list may be supplied to the Agent.
-- [ ] 4.2 Fetch public accessible originals safely; extract and verify readable English body text; distinguish original publication from accessible version; reject summaries, login/paywall responses, disappeared pages, and unverified copies.
-- [ ] 4.3 Deduplicate identical, syndicated, mirrored, and near-duplicate text without rejecting independent reporting or distinct analysis about the same event.
-- [ ] 4.4 Compute the visible 200-words-per-minute reading estimate and Flesch–Kincaid difficulty score; curate exact count, topics, difficulty, and 70%–100% time target, otherwise return explicit PARTIAL/NOT_DELIVERED.
+- [x] 4.1 Generate dynamic online queries from saved preferences and record query/candidate/decision traces; no complete preloaded article URL list may be supplied to the Agent.
+- [x] 4.2 Fetch public accessible originals safely; extract and verify readable English body text; distinguish original publication from accessible version; reject summaries, login/paywall responses, disappeared pages, and unverified copies.
+- [x] 4.3 Deduplicate identical, syndicated, mirrored, and near-duplicate text without rejecting independent reporting or distinct analysis about the same event.
+- [x] 4.4 Compute the visible 200-words-per-minute reading estimate and Flesch–Kincaid difficulty score; curate exact count, topics, difficulty, and 70%–100% time target, otherwise return explicit PARTIAL/NOT_DELIVERED.
 - [ ] 4.5 Run and preserve evidence from a real network-based Editorial Agent collection using preferences only as discovery input.
 
 ## 5. Reader Workspace and SayIt Reuse
