@@ -41,6 +41,7 @@ import {
   type PronunciationPreferences,
 } from "./lib/pronunciation";
 import { getIPA, getIPACacheKey } from "./lib/ipa";
+import { ReaderWorkspace } from "./reader/ReaderWorkspace";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -170,6 +171,7 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [readerActive, setReaderActive] = useState(false);
   const [pronunciationPreferences, setPronunciationPreferences] =
     useState<PronunciationPreferences>(loadPronunciationPreferences);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
@@ -406,7 +408,7 @@ function App() {
       setCopiedLabel(label);
       window.setTimeout(() => setCopiedLabel(null), 1600);
     } catch {
-      setError("Clipboard access is unavailable.");
+      showNotice("Clipboard access is unavailable.");
     }
   };
 
@@ -489,6 +491,38 @@ function App() {
     setHistoryDrawerOpen(false);
   };
 
+  const handleReaderSuccessfulSayIt = (value: string, readerResult: SayItResult) => {
+    if (readerResult.status !== "success") return;
+    const historyRepository =
+      historyRepositoryRef.current ?? new LocalHistoryRepository();
+    historyRepositoryRef.current = historyRepository;
+    try {
+      historyRepository.append(value, readerResult);
+      setHistoryItems(historyRepository.list());
+    } catch {
+      showNotice("This Reader result could not be added to local history.");
+    }
+  };
+
+  const handleSaveReaderResult = (value: string, readerResult: SayItResult): boolean => {
+    if (!isSuccessfulResult(readerResult) || !repositoryRef.current) {
+      return false;
+    }
+    try {
+      repositoryRef.current.save(value, readerResult);
+      setSavedItems(repositoryRef.current.list());
+      showNotice("Saved locally");
+      return true;
+    } catch (storageError) {
+      showNotice(
+        storageError instanceof StorageError
+          ? storageError.message
+          : "Could not save this expression locally.",
+      );
+      return false;
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -499,10 +533,25 @@ function App() {
           <div className="brand-name">SayIt</div>
         </div>
         <div className="topbar-actions">
-          <PronunciationControls
-            preferences={pronunciationPreferences}
-            onChange={updatePronunciationPreferences}
-          />
+          {!readerActive && (
+            <PronunciationControls
+              preferences={pronunciationPreferences}
+              onChange={updatePronunciationPreferences}
+            />
+          )}
+          <button
+            className={`reader-mode-toggle ${readerActive ? "is-active" : ""}`}
+            type="button"
+            aria-pressed={readerActive}
+            aria-label={readerActive ? "Close Reader and return to SayIt" : "Open SayIt Reader"}
+            onClick={() => {
+              setDrawerOpen(false);
+              setHistoryDrawerOpen(false);
+              setReaderActive((current) => !current);
+            }}
+          >
+            {readerActive ? "SayIt" : "Reader"}
+          </button>
           <button
             className="icon-button"
             type="button"
@@ -512,7 +561,7 @@ function App() {
           >
             {theme === "dark" ? "☼" : "☾"}
           </button>
-          <button
+          {!readerActive && <button
             className={`icon-button utility-action ${historyDrawerOpen ? "is-active" : ""}`}
             type="button"
             title={`History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
@@ -527,8 +576,8 @@ function App() {
             {historyItems.length > 0 && (
               <span className="saved-count">{historyItems.length}</span>
             )}
-          </button>
-          <button
+          </button>}
+          {!readerActive && <button
             className={`icon-button utility-action ${drawerOpen ? "is-active" : ""}`}
             type="button"
             title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
@@ -543,11 +592,11 @@ function App() {
             {savedItems.length > 0 && (
               <span className="saved-count">{savedItems.length}</span>
             )}
-          </button>
+          </button>}
         </div>
       </header>
 
-      <main className="main-content">
+      <main className="main-content" hidden={readerActive}>
         <section className="hero-copy" aria-labelledby="page-title">
           <h1 id="page-title">What are you trying to say?</h1>
           <p>Find the words, or make sense of an expression.</p>
@@ -649,6 +698,34 @@ function App() {
           )}
         </section>
       </main>
+
+      <ReaderWorkspace
+        active={readerActive}
+        pronunciationAccent={pronunciationPreferences.accent}
+        copiedLabel={copiedLabel}
+        speakingKey={speakingKey}
+        pronunciationErrorKey={pronunciationErrorKey}
+        pronunciationError={pronunciationError}
+        onCopy={handleCopy}
+        onSpeak={handleSpeak}
+        onSuccessfulSayIt={handleReaderSuccessfulSayIt}
+        onSaveRetrieval={handleSaveReaderResult}
+        renderSayItResult={(readerResult, readerInput, isSaved, onSave, readerIpaByKey, onRetry) => (
+          <ResultView
+            result={readerResult}
+            isSaved={isSaved}
+            copiedLabel={copiedLabel}
+            onCopy={handleCopy}
+            onSave={onSave}
+            onRetry={onRetry}
+            onSpeak={handleSpeak}
+            speakingKey={speakingKey}
+            pronunciationErrorKey={pronunciationErrorKey}
+            pronunciationAccent={pronunciationPreferences.accent}
+            ipaByKey={readerIpaByKey}
+          />
+        )}
+      />
 
       {notice && <div className="toast" role="status">{notice}</div>}
 

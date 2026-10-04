@@ -29,11 +29,11 @@
 
 ## 5. Reader Workspace and SayIt Reuse
 
-- [ ] 5.1 Add default-off Reader activation and deactivation while preserving the mounted SayIt workspace and its input, result, context, saved data, and history.
+- [x] 5.1 Add default-off Reader activation and deactivation while preserving the mounted SayIt workspace and its input, result, context, saved data, and history.
 - [ ] 5.2 Add persistent preference editing and quiet daily-issue/archive views with complete/partial/failure states and source attribution.
 - [ ] 5.3 Deliver readable article bodies in-app; display external-only candidates honestly; implement word lookup through the local dictionary/IPA/Listen path and phrase/sentence interpretation with necessary article context.
 - [ ] 5.4 Persist article selection, reading position, progress, issue editions, and only explicitly cache-permitted full text; restore after Reader restart and support offline access to eligible cached content.
-- [ ] 5.5 Confirm Reader SayIt actions preserve the primary SayIt workspace and successful interpretation is recorded in existing SayIt interaction history.
+- [x] 5.5 Confirm Reader SayIt actions preserve the primary SayIt workspace and successful interpretation is recorded in existing SayIt interaction history.
 
 ## 6. Integration and Engineering Verification
 
