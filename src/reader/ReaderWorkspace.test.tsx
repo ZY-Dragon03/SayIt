@@ -72,6 +72,7 @@ let storedProgress: ArticleProgress | null = null;
 let requestedProgress: ArticleProgress | null = null;
 let readerParagraphs: string[] = [];
 let deferProgressWrite = false;
+let failProgressWrite = false;
 let completeDeferredProgressWrite: (() => void) | null = null;
 let requestSequence: string[] = [];
 let progressAtRegenerate: ArticleProgress | null = null;
@@ -202,6 +203,9 @@ function createFetchMock() {
       requestSequence.push("progress");
       const nextProgress = JSON.parse(String(init.body)) as ArticleProgress;
       requestedProgress = nextProgress;
+      if (failProgressWrite) {
+        return jsonResponse({ error: { message: "Reading position save failed." } }, 503);
+      }
       if (deferProgressWrite) {
         deferProgressWrite = false;
         await new Promise<void>((resolve) => {
@@ -262,6 +266,7 @@ describe("Reader workspace", () => {
       "The bank held rates steady after the vote. Traders adjusted their forecasts.",
     ];
     deferProgressWrite = false;
+    failProgressWrite = false;
     completeDeferredProgressWrite = null;
     requestSequence = [];
     progressAtRegenerate = null;
@@ -473,7 +478,14 @@ describe("Reader workspace", () => {
     const backButton = [...container.querySelectorAll("button")].find((button) =>
       button.getAttribute("aria-label") === "Back to reading list",
     );
-    await act(async () => backButton?.click());
+    await act(async () => {
+      backButton?.click();
+      // The browser may emit a scroll event after the article has been removed
+      // from view but before passive effect cleanup detaches its old listener.
+      // Such a stale callback must not replace the final article position with 0.
+      Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+      window.dispatchEvent(new Event("scroll"));
+    });
     await flush();
     const todayButton = [...container.querySelectorAll("button")].find((button) =>
       button.textContent?.trim() === "Today",
@@ -525,6 +537,55 @@ describe("Reader workspace", () => {
       firstVisibleParagraph: 13,
       scrollTop: 2100,
     });
+  });
+
+  it("does not start confirmed Regenerate when the final progress flush fails", async () => {
+    storedProgress = {
+      issueId: issue.id,
+      articleId: article.id,
+      edition: 1,
+      scrollRatio: 0.5886,
+      scrollTop: 2549,
+      firstVisibleParagraph: 13,
+      paragraphOffset: 21,
+    };
+    props = { ...props, active: true };
+    await render();
+    await flush();
+
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+    const backButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "Back to reading list",
+    );
+    await act(async () => backButton?.click());
+    await flush();
+    const todayButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Today",
+    );
+    await act(async () => todayButton?.click());
+    await flush();
+
+    const regenerateButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Regenerate",
+    );
+    await act(async () => regenerateButton?.click());
+    await flush();
+    const confirmButton = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.trim() === "Confirm Regenerate",
+    );
+    failProgressWrite = true;
+    await act(async () => confirmButton?.click());
+    await flush();
+
+    expect(requestSequence).toEqual(["progress"]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/reader/run")).toBe(false);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "Reading position save failed.",
+    );
   });
 
   it("uses the local dictionary, IPA, and Listen path for a known word", async () => {

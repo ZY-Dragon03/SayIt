@@ -735,6 +735,7 @@ export function ReaderWorkspace({
 
   const closeArticle = () => {
     captureProgress();
+    selectedArticleRef.current = null;
     setSelectedArticle(null);
     setArticleResponse(null);
     setArticleError(null);
