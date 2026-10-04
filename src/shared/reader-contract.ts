@@ -204,20 +204,26 @@ export type ReadingProgress = z.infer<typeof readingProgressSchema>;
 
 export const getPreferencesResponseSchema = z
   .object({ preferences: readerPreferencesSchema })
+  .extend({ schema_version: z.literal("1") })
   .strict();
-export const putPreferencesRequestSchema = getPreferencesResponseSchema;
+export const putPreferencesRequestSchema = z
+  .object({ preferences: readerPreferencesSchema })
+  .strict();
 export const todayResponseSchema = z
   .object({
     issue: dailyIssueSchema.nullable(),
     occurrence: occurrenceSchema.nullable(),
     attempts: z.array(runAttemptSchema),
   })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 export const archiveResponseSchema = z
   .object({ issues: z.array(dailyIssueSchema) })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 export const issueEditionResponseSchema = z
   .object({ issue: dailyIssueSchema })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 
 export const runRequestSchema = z
@@ -249,6 +255,7 @@ export const runResponseSchema = z
     attempt: runAttemptSchema,
     issue: dailyIssueSchema,
   })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 export const runStatusResponseSchema = runResponseSchema;
 
@@ -258,12 +265,17 @@ export const articleResponseSchema = z
     paragraphs: z.array(z.string().min(1)).min(1).nullable(),
     progress: readingProgressSchema.nullable(),
   })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 
 export const putProgressRequestSchema = readingProgressSchema
   .omit({ updatedAt: true, readState: true })
   .strict();
 export type PutProgressRequest = z.infer<typeof putProgressRequestSchema>;
+export const putProgressResponseSchema = z
+  .object({ progress: readingProgressSchema })
+  .extend({ schema_version: z.literal("1") })
+  .strict();
 
 export const readerApiErrorSchema = z
   .object({
@@ -275,5 +287,6 @@ export const readerApiErrorSchema = z
       })
       .strict(),
   })
+  .extend({ schema_version: z.literal("1") })
   .strict();
 export type ReaderApiError = z.infer<typeof readerApiErrorSchema>;
