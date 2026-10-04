@@ -1,6 +1,6 @@
 # Design
 
-> **产品契约状态：冻结 v1.0。** 冻结依据为 Product Owner 对 A–D 的明确批准和对本变更直接实施的授权。产品验收含义以三份 delta specs 中的 49 个 PAT 为准；后续技术选型不得改变其含义。Git 冻结 commit identity 在本规格提交后通过 annotated tag 记录。
+> **产品契约状态：冻结 v1.0。** 冻结依据为 Product Owner 对 A–D 的明确批准和对本变更直接实施的授权。产品验收含义以三份 delta specs 中的 49 个 PAT 为准；后续技术选型不得改变其含义。冻结记录：annotated tag sayit-reader-product-contract-v1.0 指向产品契约 commit a432b1b00ff1c5c8a733ca45801109948f4e4f62；tag annotation 也记录此完整 SHA。
 
 ## Context
 

@@ -4,7 +4,7 @@
 
 - [x] 1.1 Reconcile product decisions A–D across proposal, design, and all delta specs; retain F1–F10 and preserve valid original PAT meanings.
 - [x] 1.2 Verify the complete 49-case set: PAT-RM-01–06, PAT-RC-01–28, PAT-RH-01–15; every case has an observable action and result.
-- [ ] 1.3 Run strict OpenSpec validation, commit the reconciled contract, and create an annotated v1.0 freeze tag that records the contract commit SHA.
+- [x] 1.3 Run strict OpenSpec validation, commit the reconciled contract, and create an annotated v1.0 freeze tag that records the contract commit SHA.
 
 ## 2. Implementation, Acceptance, and Feasibility Plans
 
