@@ -8,6 +8,7 @@ build/
 coverage/
 .vite/
 *.tsbuildinfo
+.worktrees/
 
 # Environment files and secrets
 .env
