@@ -768,12 +768,17 @@ function sourceArticleParagraphs(
   verifiedStandaloneArticleRoot: boolean,
 ): SourceArticleParagraphs {
   const articleBodyRoots = [...document.querySelectorAll('[itemprop~="articleBody"]')];
+  const publisherBodyRoots = verifiedStandaloneArticleRoot
+    ? [...document.querySelectorAll('article [data-gu-name="body"]')]
+    : [];
   const articleRoots = [...document.querySelectorAll("article")];
   const roots = articleBodyRoots.length > 0
     ? articleBodyRoots
-    : articleRoots.length > 0
-      ? articleRoots
-      : [...document.querySelectorAll("main, [role='main']")];
+    : publisherBodyRoots.length > 0
+      ? publisherBodyRoots
+      : articleRoots.length > 0
+        ? articleRoots
+        : [...document.querySelectorAll("main, [role='main']")];
   const paragraphSets = roots.map((root) => [...root.querySelectorAll("p")]
     .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
     .filter((paragraph) => paragraph.length >= 20));
@@ -785,7 +790,7 @@ function sourceArticleParagraphs(
   return {
     paragraphs,
     verifiedBodyBoundary:
-      articleBodyRoots.length > 0 || structuredBodyMatchesSource || verifiedStandaloneArticleRoot,
+      articleBodyRoots.length > 0 || publisherBodyRoots.length > 0 || structuredBodyMatchesSource || verifiedStandaloneArticleRoot,
   };
 }
 

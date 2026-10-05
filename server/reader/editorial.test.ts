@@ -143,6 +143,36 @@ function pageWithSemanticBodyAndReadabilityOmissions(
   };
 }
 
+function pageWithPublisherBodyBoundary(
+  url: string,
+  title: string,
+  bodyParagraphs: string[],
+  options: {
+    readabilityOmittedIndexes?: ReadonlySet<number>;
+    articleLevelParagraphs?: string[];
+  } = {},
+): FetchedArticlePage {
+  const body = bodyParagraphs.map((paragraph, index) =>
+    `<p${options.readabilityOmittedIndexes?.has(index) ? ' class="comment"' : ""}>${paragraph}</p>`,
+  ).join("");
+  const articleLevel = (options.articleLevelParagraphs ?? [])
+    .map((paragraph) => `<p>${paragraph}</p>`)
+    .join("");
+  const html = `<!doctype html><html lang="en"><head>
+    <title>${title} | The Guardian</title>
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="The Guardian">
+    </head><body><main><article><h1>${title}</h1>${articleLevel}
+    <div data-gu-name="body">${body}</div>
+    </article></main></body></html>`;
+  return {
+    statusCode: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from(html),
+    finalUrl: url,
+  };
+}
+
 function preferenceFor(body: string, count = 2): EditorialPreferences {
   return preferencesForBodies([body], count);
 }
@@ -326,6 +356,45 @@ describe("SayIt Reader Editorial Agent", () => {
     });
     expect(completeResult.status).toBe("COMPLETE");
     expect(completeResult.articles[0]?.paragraphCount).toBe(47);
+  });
+
+  it("rejects a Guardian article when article-level text hides a missing paragraph inside its body boundary", async () => {
+    const url = "https://www.theguardian.com/technology/2026/sep/14/synthetic-body-boundary";
+    const title = "Guardian report examines finance and regional technology investment";
+    const paragraphs = Array.from({ length: 30 }, (_, index) => [
+      `Researchers examined finance and regional investment during reporting study ${index + 1}, comparing public records with company statements and local economic data.`,
+      "The article explains how officials, businesses, and households responded as technology markets changed across several months.",
+      "Independent evidence helps readers distinguish confirmed developments from forecasts about prices, employment, and future growth.",
+    ].join(" "));
+    const articleLevelParagraphs = [
+      "A navigation note describes related coverage from the publication and points readers toward other stories about technology and business.",
+      "An article introduction summarizes the section and discusses how finance reporting fits among several recent developments.",
+    ];
+    const preferences = preferencesForTopic(paragraphs.join("\n\n"), "Finance");
+    const damaged = await collectEditorial(preferences, {
+      search: async () => [{ url, title, snippet: "A finance and technology report" }],
+      fetchArticle: makeFetcher(new Map([[url, pageWithPublisherBodyBoundary(url, title, paragraphs, {
+        readabilityOmittedIndexes: new Set([0]),
+        articleLevelParagraphs,
+      })]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(damaged.status).toBe("NOT_DELIVERED");
+    expect(damaged.articles).toHaveLength(0);
+    expect(damaged.candidates[0]?.contentStatus).toBe("SUMMARY");
+    expect(damaged.trace.candidates.some(
+      (candidate) => candidate.url === url && /incomplete|omitted|coverage/iu.test(candidate.reason),
+    )).toBe(true);
+
+    const complete = await collectEditorial(preferences, {
+      search: async () => [{ url, title, snippet: "A finance and technology report" }],
+      fetchArticle: makeFetcher(new Map([[url, pageWithPublisherBodyBoundary(url, title, paragraphs)]])),
+      maxArticleChecks: 1,
+    });
+    expect(complete.status).toBe("COMPLETE");
+    expect(complete.articles[0]?.contentStatus).toBe("FULL_TEXT");
+    expect(complete.articles[0]?.paragraphs).toEqual(paragraphs);
   });
 
   it("reconstructs small Readability omissions from verified semantic article bodies", async () => {
