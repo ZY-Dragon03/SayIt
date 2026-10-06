@@ -157,7 +157,17 @@ Judge topic fit, relevance, editorial value, analysis depth, novelty, and overla
 
 Only APPROVE candidates that fit at least one configured topic and offer useful editorial value. matched_topics must use exact strings from saved preferences. A concise rationale must point to evidence present in that candidate's title or bounded excerpts. Do not invent facts.
 
-Return exactly one JSON object matching this contract. Include every supplied candidate ID exactly once. Never return URLs, new sources, publisher facts, access/full-text judgments, reading metrics, difficulty overrides, or issue completion claims. Do not return chain-of-thought, markdown, or extra fields.`;
+Response contract (strict and case-sensitive):
+- Return one JSON object with exactly two top-level keys: "contract_version" and "decisions".
+- "contract_version" must equal "reader-editorial-curation.v1".
+- "decisions" must be an array containing exactly one object for every supplied item in candidates[], with no missing, duplicate, or invented IDs. The input ID is candidates[].id; copy its exact value to output key "candidate_id". Do not use output key "id".
+- Every decisions[] object must have exactly these keys and no others: "candidate_id", "decision", "topic_fit", "matched_topics", "relevance", "editorial_value", "analysis_depth", "novelty", "overlap", "contribution_type", and "rationale".
+- Use these exact, case-sensitive values: decision is "APPROVE" or "REJECT" (uppercase); topic_fit is "NO", "PARTIAL", or "YES"; relevance, editorial_value, analysis_depth, and novelty are each "low", "medium", or "high"; overlap is "none", "some", or "substantial"; contribution_type is "reporting", "analysis", "explanation", or "perspective".
+- matched_topics must be an array of 0 to 12 distinct exact strings from preferences.topics; use [] when none fit. For APPROVE, topic_fit must be YES, matched_topics must be non-empty, and editorial_value cannot be low.
+- rationale is a string of 8 to 280 characters and is grounded in that candidate's title or bounded evidence.
+- Do not add the transport's "type" key or any other field. Do not output a "candidate_id" different from the exact supplied candidates[].id.
+
+Never return URLs, new sources, publisher facts, access/full-text judgments, reading metrics, difficulty overrides, or issue completion claims. Do not return chain-of-thought, markdown, or extra fields.`;
 
 export class SemanticReviewError extends Error {
   readonly code = "reader_semantic_unavailable";
@@ -349,8 +359,8 @@ export async function reviewSemanticCandidates(
     try {
       baseRuntime.requestCount = 2;
       const repaired = await configuredClient.completeJson({
-        systemPrompt: `${SYSTEM_PROMPT}\nThe previous response failed the strict semantic contract. Return a corrected object only.`,
-        userContent: `${requestContent}\n\nThe previous response failed the strict semantic contract. Re-evaluate the same candidates and return a corrected object only.`,
+        systemPrompt: `${SYSTEM_PROMPT}\nThe previous response failed the strict response schema stated above. Re-read its exact keys and allowed values, then return one corrected JSON object only.`,
+        userContent: `${requestContent}\n\nThe previous response failed the strict response schema in the system instructions. Re-evaluate the same candidates and return one corrected JSON object only.`,
         timeoutMs: SEMANTIC_TIMEOUT_MS,
         maxOutputTokens: SEMANTIC_MAX_OUTPUT_TOKENS,
       });

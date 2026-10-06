@@ -136,7 +136,7 @@ describe("Reader semantic editorial contract", () => {
     expect(payload.candidates).toHaveLength(MAX_SEMANTIC_CANDIDATES);
   });
 
-  it("uses at most one structure repair with the same candidate set", async () => {
+  it("repeats the strict response schema on its single repair request", async () => {
     const client = completionClient(["not json", response([decision("candidate-1")])]);
 
     const reviewed = await reviewSemanticCandidates(input, client);
@@ -148,6 +148,31 @@ describe("Reader semantic editorial contract", () => {
     expect(ids(first!)).toEqual(["candidate-1"]);
     expect(ids(second!)).toEqual(["candidate-1"]);
     expect(second?.userContent).not.toContain("not json");
+    for (const request of [first!, second!]) {
+      const prompt = request.systemPrompt;
+      for (const field of [
+        "contract_version", "decisions", "candidate_id", "decision", "topic_fit", "matched_topics",
+        "relevance", "editorial_value", "analysis_depth", "novelty", "overlap", "contribution_type", "rationale",
+      ]) {
+        expect(prompt).toContain('"' + field + '"');
+      }
+      expect(prompt).toContain('"reader-editorial-curation.v1"');
+      expect(prompt).toContain("exactly one object for every supplied item in candidates[]");
+      expect(prompt).toContain('Return one JSON object with exactly two top-level keys: "contract_version" and "decisions"');
+      expect(prompt).toContain('"decisions" must be an array containing exactly one object for every supplied item in candidates[]');
+      expect(prompt).toContain("Every decisions[] object must have exactly these keys and no others");
+      expect(prompt).toContain('matched_topics must be an array of 0 to 12 distinct exact strings from preferences.topics');
+      expect(prompt).toContain('rationale is a string of 8 to 280 characters');
+      expect(prompt).toContain('For APPROVE, topic_fit must be YES, matched_topics must be non-empty, and editorial_value cannot be low');
+      expect(prompt).toContain('The input ID is candidates[].id; copy its exact value to output key "candidate_id"');
+      expect(prompt).toContain('decision is "APPROVE" or "REJECT" (uppercase)');
+      expect(prompt).toContain('topic_fit is "NO", "PARTIAL", or "YES"');
+      expect(prompt).toContain('relevance, editorial_value, analysis_depth, and novelty are each "low", "medium", or "high"');
+      expect(prompt).toContain('overlap is "none", "some", or "substantial"');
+      expect(prompt).toContain('contribution_type is "reporting", "analysis", "explanation", or "perspective"');
+      expect(prompt).toContain("Do not add the transport's \"type\" key or any other field");
+    }
+    expect(second?.systemPrompt).toContain("failed the strict response schema stated above");
   });
 
   it.each([
