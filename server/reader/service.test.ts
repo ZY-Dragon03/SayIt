@@ -2,8 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReaderPreferences } from "../../src/shared/reader-contract";
+import type { ReaderPreferences, ReaderSemanticRuntimeTrace } from "../../src/shared/reader-contract";
 import { collectEditorial } from "./editorial";
+import { EditorialCollectionError } from "./editorial";
+import type { JsonCompletionClient } from "../provider";
 import { ReaderStore } from "./store";
 import {
   ReaderService,
@@ -111,6 +113,7 @@ function makeService(
   store: ReaderStore,
   now: () => Date,
   collect: EditorialCollector,
+  semanticClient?: JsonCompletionClient,
 ) {
   const timers = fakeTimers();
   return {
@@ -119,6 +122,7 @@ function makeService(
       store,
       now,
       collect,
+      semanticClient,
       setTimer: timers.setTimer,
       clearTimer: timers.clearTimer,
       reopenArticle: async () => ({ article: null, reason: "offline" }),
@@ -245,6 +249,138 @@ describe("Reader collection lifecycle", () => {
     expect(today.issue?.articles).toEqual(issueAfterProgress.articles);
     expect(store.snapshot().progress).toContainEqual(progress);
     expect(today.occurrence).toMatchObject({ status: "RETRY_WAIT", scheduledAttemptCount: 1 });
+    await service.stop();
+  });
+
+  it("persists semantic failure status, trace, and same-day context while preserving issue and progress", async () => {
+    let current = new Date("2026-10-04T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    await store.update((state) => {
+      state.preferences = defaultPreferences({ dailyArticleCount: 2, readingBudgetMinutes: 20 });
+    });
+    const priorEditorial = {
+      contractVersion: "reader-editorial-curation.v1" as const,
+      decision: "APPROVE" as const,
+      topicFit: "YES" as const,
+      matchedTopics: ["Technology"],
+      relevance: "high" as const,
+      editorialValue: "high" as const,
+      analysisDepth: "medium" as const,
+      novelty: "high" as const,
+      overlap: "none" as const,
+      contributionType: "analysis" as const,
+      rationale: "It explains regional evidence about the energy market.",
+    };
+    const priorProvenance = {
+      publisherIdentity: "Example News",
+      publisherIdentitySources: ["open_graph_site_name" as const],
+      canonicalRelationship: "original_url" as const,
+      standaloneArticleVerified: true as const,
+      titleAgreementVerified: true as const,
+      bodyCompletenessVerified: true as const,
+    };
+    const semanticRuntime: ReaderSemanticRuntimeTrace = {
+      contractVersion: "reader-editorial-curation.v1",
+      status: "PROVIDER_ERROR",
+      provider: "DeepSeek",
+      model: "deepseek-flash",
+      candidateIds: ["candidate-next"],
+      inputSha256: "c".repeat(64),
+      requestIds: ["request-semantic-1"],
+      requestCount: 1,
+      elapsedMs: 23,
+      reason: "Semantic provider failed (provider_timeout).",
+      decisions: [],
+    };
+    const failureTrace = {
+      queries: ["Technology reporting and analysis"],
+      candidates: [{
+        url: "https://newspaper.example/technology/report",
+        publication: "Newspaper Example",
+        outcome: "REJECTED" as const,
+        reason: "Semantic review failed (PROVIDER_ERROR); this candidate was not eligible for delivery.",
+        statusCode: 200,
+        articleId: "candidate-next",
+      }],
+      decisions: ["Semantic review failed (PROVIDER_ERROR)."],
+      semantic: semanticRuntime,
+    };
+    const editorialFailure = new EditorialCollectionError(
+      "reader_semantic_unavailable",
+      "Semantic provider failed (provider_timeout).",
+      true,
+      failureTrace,
+    );
+    let secondCollectorOptions: Parameters<EditorialCollector>[1] | undefined;
+    const collect = vi.fn<EditorialCollector>()
+      .mockResolvedValueOnce(collection([article({ editorial: priorEditorial, provenance: priorProvenance })]))
+      .mockImplementationOnce(async (_preferences, options) => {
+        secondCollectorOptions = options;
+        throw editorialFailure;
+      });
+    const semanticClient: JsonCompletionClient = {
+      completeJson: vi.fn(async () => ({
+        provider: "DeepSeek",
+        model: "deepseek-flash",
+        requestId: "unused-test-client",
+        content: "{}",
+      })),
+    };
+    const { service } = makeService(store, now, collect, semanticClient);
+
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    const savedIssue = service.today().issue!;
+    const savedArticle = savedIssue.articles.find((candidate) => candidate.contentStatus === "FULL_TEXT")!;
+    expect(savedArticle).toMatchObject({
+      editorial: { rationale: priorEditorial.rationale, contributionType: "analysis" },
+      provenance: { publisherIdentity: "Example News" },
+    });
+    const progress = await service.saveProgress({
+      issueId: savedIssue.id,
+      articleId: savedArticle.id,
+      edition: savedIssue.edition,
+      scrollRatio: 0.42,
+      scrollTop: 480,
+      firstVisibleParagraph: 2,
+      paragraphOffset: 19,
+    });
+    const preservedIssue = service.today().issue!;
+
+    current = new Date("2026-10-04T18:00:00.000Z");
+    await service.pulse();
+    await service.waitForIdle();
+
+    const today = service.today();
+    expect(today.attempts[1]).toMatchObject({
+      state: "FAILED",
+      retryable: true,
+      semanticRuntimeStatus: "PROVIDER_ERROR",
+      semanticFailureReason: "Semantic provider failed (provider_timeout).",
+    });
+    expect(today.issue).toEqual(preservedIssue);
+    expect(store.snapshot().progress).toContainEqual(progress);
+    expect(secondCollectorOptions?.semanticClient).toBe(semanticClient);
+    expect(secondCollectorOptions?.alreadyDelivered).toEqual([{
+      title: savedArticle.title,
+      publication: savedArticle.originalPublication,
+      topics: ["Technology"],
+      wordCount: savedArticle.wordCount,
+      readingMinutes: savedArticle.readingMinutes,
+      difficulty: "Intermediate",
+      contributionType: "analysis",
+    }]);
+    expect(store.snapshot().traces.at(-1)).toMatchObject({
+      id: today.attempts[1]?.traceId,
+      semantic: {
+        status: "PROVIDER_ERROR",
+        reason: "Semantic provider failed (provider_timeout).",
+      },
+      candidates: [{ outcome: "REJECTED", articleId: "candidate-next" }],
+    });
+    expect(semanticClient.completeJson).not.toHaveBeenCalled();
     await service.stop();
   });
 

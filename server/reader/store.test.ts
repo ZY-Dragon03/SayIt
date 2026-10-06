@@ -118,6 +118,87 @@ describe("Reader versioned local store", () => {
     ).rejects.toBeInstanceOf(ReaderStoreError);
   });
 
+  it("persists editorial rationale and provenance across restart while reading historical records", async () => {
+    const directory = await createDirectory();
+    const store = new ReaderStore({ directory });
+    await store.initialize();
+    const accepted = {
+      ...article("NOT_PERMITTED"),
+      provenance: {
+        publisherIdentity: "Example News",
+        publisherIdentitySources: ["open_graph_site_name" as const],
+        canonicalRelationship: "original_url" as const,
+        standaloneArticleVerified: true as const,
+        titleAgreementVerified: true as const,
+        bodyCompletenessVerified: true as const,
+      },
+      editorial: {
+        contractVersion: "reader-editorial-curation.v1" as const,
+        decision: "APPROVE" as const,
+        topicFit: "YES" as const,
+        matchedTopics: ["Technology"],
+        relevance: "high" as const,
+        editorialValue: "high" as const,
+        analysisDepth: "medium" as const,
+        novelty: "high" as const,
+        overlap: "none" as const,
+        contributionType: "analysis" as const,
+        rationale: "It explains how regional evidence changes the energy market.",
+      },
+    };
+    const semantic = {
+      contractVersion: "reader-editorial-curation.v1" as const,
+      status: "SUCCEEDED" as const,
+      provider: "DeepSeek",
+      model: "deepseek-flash",
+      candidateIds: ["candidate-1"],
+      inputSha256: "a".repeat(64),
+      requestIds: ["request-1"],
+      requestCount: 1,
+      elapsedMs: 100,
+      reason: null,
+      decisions: [{ candidateId: "candidate-1", editorial: accepted.editorial }],
+    };
+    await store.update((state) => {
+      state.issues.push(issue(accepted));
+      state.traces.push({
+        id: "trace:editorial-1",
+        issueId: "issue-2026-10-04-Asia-Shanghai",
+        edition: 1,
+        createdAt: "2026-10-04T00:00:00.000Z",
+        queries: [],
+        candidates: [],
+        decisions: [],
+        semantic,
+      });
+    });
+
+    const reopened = new ReaderStore({ directory });
+    await reopened.initialize();
+    expect(reopened.snapshot().issues[0]?.articles[0]).toMatchObject({
+      editorial: { rationale: accepted.editorial.rationale, contributionType: "analysis" },
+      provenance: { publisherIdentity: "Example News", canonicalRelationship: "original_url" },
+    });
+    expect(reopened.snapshot().traces[0]?.semantic).toMatchObject({
+      contractVersion: "reader-editorial-curation.v1",
+      status: "SUCCEEDED",
+      decisions: [{ editorial: { rationale: accepted.editorial.rationale } }],
+    });
+
+    const persisted = JSON.parse(await readFile(path.join(directory, "reader-state.json"), "utf8"));
+    delete persisted.state.issues[0].articles[0].editorial;
+    delete persisted.state.issues[0].articles[0].provenance;
+    delete persisted.state.traces[0].semantic;
+    await writeFile(path.join(directory, "reader-state.json"), JSON.stringify(persisted), "utf8");
+    const historical = new ReaderStore({ directory });
+    await historical.initialize();
+    expect(historical.snapshot().issues[0]?.articles[0]).toMatchObject({
+      id: "article-test-1",
+      contentStatus: "FULL_TEXT",
+    });
+    expect(historical.snapshot().traces[0]).not.toHaveProperty("semantic");
+  });
+
   it("preserves a corrupt state file and fails closed instead of overwriting it", async () => {
     const directory = await createDirectory();
     const file = path.join(directory, "reader-state.json");

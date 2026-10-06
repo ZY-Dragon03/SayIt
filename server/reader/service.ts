@@ -6,16 +6,24 @@ import {
   readerPreferencesSchema,
   readingProgressSchema,
   runAttemptSchema,
+  readerSemanticRuntimeTraceSchema,
   type ArticleSummary,
   type DailyIssue,
   type Occurrence,
   type ReaderPreferences,
+  type ReaderSemanticRuntimeTrace,
   type ReadingProgress,
   type RunAttempt,
   type RunAttemptTrigger,
 } from "../../src/shared/reader-contract";
 import { safeFetchArticle, type SafeHttpResponse } from "./safe-fetch";
-import { collectEditorial, readArticleFullText } from "./editorial";
+import {
+  collectEditorial,
+  EditorialCollectionError,
+  readArticleFullText,
+} from "./editorial";
+import type { JsonCompletionClient } from "../provider";
+import type { SemanticExistingArticleInput } from "./semantic";
 import { addLocalDays, localDateTime, resolveScheduledTime } from "./time";
 import { ReaderStore, type ReaderTrace } from "./store";
 
@@ -35,6 +43,7 @@ export interface EditorialTraceInput {
     articleId?: string | null;
   }>;
   decisions: string[];
+  semantic?: ReaderSemanticRuntimeTrace;
 }
 
 export interface EditorialCollectionResult {
@@ -56,6 +65,8 @@ export interface EditorialCollectorOptions {
   now?: () => Date;
   maxArticleChecks?: number;
   signal?: AbortSignal;
+  semanticClient?: JsonCompletionClient;
+  alreadyDelivered?: SemanticExistingArticleInput[];
 }
 
 export type EditorialCollector = (
@@ -87,6 +98,7 @@ export interface ReaderServiceOptions {
   setTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   fetchArticle?: EditorialCollectorOptions["fetchArticle"];
+  semanticClient?: JsonCompletionClient;
 }
 
 export class ReaderServiceError extends Error {
@@ -184,6 +196,7 @@ function safeErrorText(error: unknown): { message: string; retryable: boolean } 
       const retryableMessages: Record<string, string> = {
         reader_discovery_unavailable: "All preference-based discovery searches failed before returning results.",
         reader_source_unavailable: "All discovered source requests failed transiently before returning usable content.",
+        reader_semantic_unavailable: "Semantic editorial review was unavailable before any new article could be delivered.",
       };
       if (typeof candidate.code === "string" && retryableMessages[candidate.code]) {
         return { message: retryableMessages[candidate.code]!, retryable: true };
@@ -276,6 +289,7 @@ function toStoredTrace(
       articleId: typeof item.articleId === "string" ? item.articleId.slice(0, 128) : null,
     })),
     decisions: input.decisions.slice(0, 100).map((item) => safeTraceText(item, 500)),
+    ...(input.semantic ? { semantic: readerSemanticRuntimeTraceSchema.parse(input.semantic) } : {}),
   };
 }
 
@@ -341,6 +355,7 @@ export class ReaderService {
   private readonly setTimer: NonNullable<ReaderServiceOptions["setTimer"]>;
   private readonly clearTimer: NonNullable<ReaderServiceOptions["clearTimer"]>;
   private readonly fetchArticle: EditorialCollectorOptions["fetchArticle"];
+  private readonly semanticClient?: JsonCompletionClient;
   private readonly collector?: EditorialCollector;
   private readonly reopenArticle?: ArticleReopener;
   private readonly bodies = new Map<string, BodyRecord>();
@@ -355,6 +370,7 @@ export class ReaderService {
     this.setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
     this.fetchArticle = options.fetchArticle ?? ((url) => safeFetchArticle(url));
+    this.semanticClient = options.semanticClient;
     this.collector = options.collect ?? collectEditorial;
     this.reopenArticle = options.reopenArticle ?? readArticleFullText;
   }
@@ -792,6 +808,8 @@ export class ReaderService {
         fetchArticle: (url, signal) => this.fetchArticle(url, signal),
         now: this.now,
         signal: controller.signal,
+        semanticClient: this.semanticClient,
+        alreadyDelivered: this.alreadyDeliveredContext(started.issue),
       });
       const now = this.now();
       const trace = toStoredTrace(
@@ -856,6 +874,10 @@ export class ReaderService {
         attempt.completedAt = now.toISOString();
         attempt.retryable = false;
         attempt.failureReason = null;
+        if (result.trace.semantic) {
+          attempt.semanticRuntimeStatus = result.trace.semantic.status;
+          attempt.semanticFailureReason = result.trace.semantic.reason;
+        }
         attempt.deliveredCount = replacement.actual.count;
         state.traces.push(trace);
         if (state.traces.length > 1000) state.traces.splice(0, state.traces.length - 1000);
@@ -915,6 +937,17 @@ export class ReaderService {
       attempt.completedAt = now.toISOString();
       attempt.retryable = reason.retryable;
       attempt.failureReason = reason.message;
+      if (error instanceof EditorialCollectionError && error.trace?.semantic) {
+        attempt.semanticRuntimeStatus = error.trace.semantic.status;
+        attempt.semanticFailureReason = error.trace.semantic.reason;
+        state.traces.push(toStoredTrace(
+          error.trace,
+          started.attempt.traceId,
+          started.issue,
+          now,
+        ));
+        if (state.traces.length > 1000) state.traces.splice(0, state.traces.length - 1000);
+      }
       const occurrence = state.occurrences.find(
         (item) =>
           item.localDate === started.issue.localDate &&
@@ -935,6 +968,24 @@ export class ReaderService {
         occurrence.updatedAt = now.toISOString();
       }
     });
+  }
+
+  private alreadyDeliveredContext(issue: DailyIssue): SemanticExistingArticleInput[] {
+    const current = this.store.snapshot().issues.find(
+      (candidate) => candidate.id === issue.id && candidate.edition === issue.edition,
+    ) ?? issue;
+    return current.articles
+      .filter((article) => isFullText(article))
+      .slice(0, 12)
+      .map((article) => ({
+        title: article.title,
+        publication: article.originalPublication,
+        topics: article.topics.slice(0, 12),
+        wordCount: article.wordCount,
+        readingMinutes: article.readingMinutes,
+        difficulty: article.difficulty,
+        ...(article.editorial ? { contributionType: article.editorial.contributionType } : {}),
+      }));
   }
 
   private carryProgress(

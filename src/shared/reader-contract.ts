@@ -75,6 +75,51 @@ export const cachePermissionSchema = z.enum([
 ]);
 export type CachePermission = z.infer<typeof cachePermissionSchema>;
 
+export const readerSemanticRuntimeStatusSchema = z.enum([
+  "SUCCEEDED",
+  "CONFIG_MISSING",
+  "PROVIDER_ERROR",
+  "INVALID_RESPONSE",
+]);
+export type ReaderSemanticRuntimeStatus = z.infer<typeof readerSemanticRuntimeStatusSchema>;
+
+export const readerEditorialDecisionSchema = z
+  .object({
+    contractVersion: z.literal("reader-editorial-curation.v1"),
+    decision: z.enum(["APPROVE", "REJECT"]),
+    topicFit: z.enum(["NO", "PARTIAL", "YES"]),
+    matchedTopics: z.array(z.string().min(1).max(64)).max(12),
+    relevance: z.enum(["low", "medium", "high"]),
+    editorialValue: z.enum(["low", "medium", "high"]),
+    analysisDepth: z.enum(["low", "medium", "high"]),
+    novelty: z.enum(["low", "medium", "high"]),
+    overlap: z.enum(["none", "some", "substantial"]),
+    contributionType: z.enum(["reporting", "analysis", "explanation", "perspective"]),
+    rationale: z.string().min(8).max(280),
+  })
+  .strict();
+export type ReaderEditorialDecision = z.infer<typeof readerEditorialDecisionSchema>;
+
+export const readerSemanticRuntimeTraceSchema = z
+  .object({
+    contractVersion: z.literal("reader-editorial-curation.v1"),
+    status: readerSemanticRuntimeStatusSchema,
+    provider: z.string().min(1).max(120),
+    model: z.string().min(1).max(120),
+    candidateIds: z.array(z.string().min(1).max(128)).max(12),
+    inputSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+    requestIds: z.array(z.string().min(1).max(160)).max(2),
+    requestCount: z.number().int().min(0).max(2),
+    elapsedMs: z.number().int().nonnegative().max(60_000),
+    reason: z.string().max(300).nullable(),
+    decisions: z.array(z.object({
+      candidateId: z.string().min(1).max(128),
+      editorial: readerEditorialDecisionSchema,
+    }).strict()).max(12),
+  })
+  .strict();
+export type ReaderSemanticRuntimeTrace = z.infer<typeof readerSemanticRuntimeTraceSchema>;
+
 export const articleSummarySchema = z
   .object({
     id: z.string().min(1).max(128),
@@ -95,6 +140,23 @@ export const articleSummarySchema = z
     topics: z.array(z.string().min(1).max(64)),
     difficulty: readerDifficultySchema.nullable(),
     paragraphCount: z.number().int().nonnegative(),
+    provenance: z
+      .object({
+        publisherIdentity: z.string().min(1).max(160),
+        publisherIdentitySources: z.array(z.enum([
+          "structured_publisher",
+          "citation_publication_title",
+          "article_publisher",
+          "open_graph_site_name",
+        ])).min(1).max(4),
+        canonicalRelationship: z.enum(["original_url", "accessible_url"]),
+        standaloneArticleVerified: z.literal(true),
+        titleAgreementVerified: z.literal(true),
+        bodyCompletenessVerified: z.literal(true),
+      })
+      .strict()
+      .optional(),
+    editorial: readerEditorialDecisionSchema.optional(),
   })
   .strict();
 export type ArticleSummary = z.infer<typeof articleSummarySchema>;
@@ -155,6 +217,8 @@ export const runAttemptSchema = z
     failureReason: z.string().max(500).nullable(),
     deliveredCount: z.number().int().nonnegative(),
     traceId: z.string().min(1).max(128),
+    semanticRuntimeStatus: readerSemanticRuntimeStatusSchema.optional(),
+    semanticFailureReason: z.string().max(300).nullable().optional(),
   })
   .strict();
 export type RunAttempt = z.infer<typeof runAttemptSchema>;

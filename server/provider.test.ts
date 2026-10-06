@@ -90,6 +90,7 @@ describe("DeepSeekProvider", () => {
     expect(JSON.parse(String(init.body)).response_format).toEqual({
       type: "json_object",
     });
+    expect(JSON.parse(String(init.body)).max_tokens).toBe(700);
   });
 
   it("returns an interpretation result and includes bounded session context", async () => {
@@ -234,5 +235,53 @@ describe("DeepSeekProvider", () => {
       code: "configuration_error",
       retryable: false,
     } satisfies Partial<ProviderError>);
+  });
+
+  it("exposes the same JSON transport with explicit bounded budgets", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => modelPayload('{"ok":true}'),
+      headers: new Headers({ "x-request-id": "request-123" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DeepSeekProvider({
+      apiKey: "server-only-test-key",
+      model: "deepseek-test-model",
+      baseUrl: "https://example.test",
+    });
+
+    const response = await provider.completeJson({
+      systemPrompt: "Judge the bounded input.",
+      userContent: "Article evidence only.",
+      timeoutMs: 30_000,
+      maxOutputTokens: 4_096,
+    });
+
+    expect(response).toEqual({
+      content: '{"ok":true}',
+      provider: "DeepSeek",
+      model: "deepseek-test-model",
+      requestId: "request-123",
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: "deepseek-test-model",
+      max_tokens: 4_096,
+      response_format: { type: "json_object" },
+    });
+  });
+
+  it("rejects structured requests outside the fixed budget without calling the provider", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DeepSeekProvider({ apiKey: "server-only-test-key" });
+
+    await expect(provider.completeJson({
+      systemPrompt: "bounded",
+      userContent: "bounded",
+      timeoutMs: 30_001,
+    })).rejects.toMatchObject({ code: "configuration_error", retryable: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
