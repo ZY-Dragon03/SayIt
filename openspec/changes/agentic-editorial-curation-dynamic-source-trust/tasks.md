@@ -5,7 +5,7 @@
 - [x] 1.1 在 PR #1 后的 main 基线创建独立 V1.1 change，确认旧 V1 契约与证据只读。
 - [x] 1.2 PM 定义 V11-F1–F6、10 项增量 PAT 与 17 项已知受影响 V1 回归，关闭最小产品默认行为。
 - [x] 1.3 严格校验 OpenSpec；PM 写入冻结 revision 与 artifact identity，见 freeze.md 和 contract-manifest.json。
-- [ ] 1.4 执行主机提交冻结工件并在 execution.md 记录 Git identity 后开始实现。
+- [x] 1.4 执行主机提交冻结工件并在 execution.md 记录 Git identity 后开始实现。
 
 ## 2. Implementation Plan and Feasibility Gate
 
