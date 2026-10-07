@@ -576,4 +576,37 @@ describe("Reader collection lifecycle", () => {
     expect(service.today().attempts).toHaveLength(1);
     await service.stop();
   });
+
+  it("keeps rejected and external candidates out of the delivered Daily Issue", async () => {
+    const now = () => new Date("2026-10-04T09:00:00.000Z");
+    const store = await createStore(now);
+    const delivered = article();
+    const external = article({
+      id: "external-candidate",
+      title: "External candidate",
+      originalUrl: "https://news.example/external",
+      accessibleUrl: "https://news.example/external",
+      contentStatus: "EXTERNAL_ONLY",
+      wordCount: 0,
+      readingMinutes: 0,
+      fkgl: null,
+      paragraphs: undefined,
+      bodyHash: undefined,
+    });
+    const collect = vi.fn(async () => {
+      const result = collection([delivered]);
+      result.candidates = [external];
+      return result;
+    });
+    const { service } = makeService(store, now, collect);
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    const issue = service.today().issue!;
+    expect(issue.actual.count).toBe(1);
+    expect(issue.articles).toHaveLength(1);
+    expect(issue.articles[0]?.contentStatus).toBe("FULL_TEXT");
+    expect(issue.articles.some((item) => item.title === "External candidate")).toBe(false);
+    await service.stop();
+  });
 });

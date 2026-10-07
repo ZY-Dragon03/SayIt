@@ -148,10 +148,10 @@ function safeExternalUrl(value: string | null | undefined): string | null {
   }
 }
 
-function issueStatusLabel(status: DailyIssue["status"] | null): string {
-  if (status === "COMPLETE") return "Complete";
-  if (status === "PARTIAL") return "Partial";
-  return "Not delivered";
+function readProgressLabel(state: ReaderArticleSummary["readState"]): string {
+  if (state === "READ") return "read";
+  if (state === "IN_PROGRESS") return "in progress";
+  return "unread";
 }
 
 function formatReadingMinutes(minutes: number | null | undefined): string {
@@ -173,12 +173,6 @@ function formatDate(value: string): string {
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(date);
-}
-
-function issueSummary(issue: DailyIssue | null): string {
-  if (!issue) return "No Daily Issue has been delivered for today.";
-  const timeText = `${issue.actual.readingMinutes.toFixed(1)} min of ${issue.target.readingBudgetMinutes} min`;
-  return `${issue.actual.count} of ${issue.target.dailyArticleCount} articles · ${timeText}`;
 }
 
 function findSelectionDetails(articleBody: HTMLElement): ReaderSelection | null {
@@ -761,9 +755,6 @@ export function ReaderWorkspace({
     }
     return [...byDate.values()].sort((a, b) => b.localDate.localeCompare(a.localDate));
   }, [archiveIssues, todayIssue]);
-  const olderArchiveIssues = uniqueArchiveIssues.filter(
-    (issue) => issue.localDate !== todayIssue?.localDate,
-  );
 
   const selectedSourceUrl = safeExternalUrl(
     selectedArticle?.accessibleUrl || selectedArticle?.originalUrl,
@@ -788,65 +779,54 @@ export function ReaderWorkspace({
           <>
             <div className="reader-heading-row">
               <div>
-                <p className="reader-eyebrow">Your English reading</p>
                 <h1>{selectedIssue ? formatDate(selectedIssue.localDate) : "Today"}</h1>
-                <p className="reader-muted">
-                  {selectedIssue
-                    ? `Daily Issue · edition ${selectedIssue.edition}`
-                    : "A small collection, chosen for your preferences."}
-                </p>
               </div>
               <div className="reader-run-actions">
                 {selectedIssue ? (
-                  <button type="button" className="reader-secondary-button" onClick={() => setSelectedIssue(null)}>
+                  <button type="button" className="reader-text-button" onClick={() => setSelectedIssue(null)}>
                     Today
                   </button>
-                ) : (
-                  <>
-                    {todayIssue?.status !== "COMPLETE" && (
-                      <button
-                        type="button"
-                        className="reader-primary-button"
-                        disabled={regenerating || Boolean(activeAttempt)}
-                        onClick={() => void beginRun("manual")}
-                      >
-                        {activeAttempt ? "Collecting…" : "Run now"}
-                      </button>
-                    )}
-                    {todayIssue?.status === "COMPLETE" && (
-                      <div className="reader-overflow">
+                ) : todayIssue?.status === "COMPLETE" ? (
+                  <div className="reader-overflow">
+                    <button
+                      type="button"
+                      className={`icon-button utility-action ${issueMenuOpen ? "is-active" : ""}`}
+                      aria-label="Issue actions"
+                      aria-haspopup="menu"
+                      aria-expanded={issueMenuOpen}
+                      disabled={regenerating || Boolean(activeAttempt)}
+                      onClick={() => setIssueMenuOpen((open) => !open)}
+                    >
+                      <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="currentColor">
+                        <circle cx="3.25" cy="8" r="1.15" />
+                        <circle cx="8" cy="8" r="1.15" />
+                        <circle cx="12.75" cy="8" r="1.15" />
+                      </svg>
+                    </button>
+                    {issueMenuOpen && (
+                      <div className="reader-overflow-menu" role="menu" aria-label="Issue actions">
                         <button
                           type="button"
-                          className={`icon-button utility-action ${issueMenuOpen ? "is-active" : ""}`}
-                          aria-label="Issue actions"
-                          aria-haspopup="menu"
-                          aria-expanded={issueMenuOpen}
-                          disabled={regenerating || Boolean(activeAttempt)}
-                          onClick={() => setIssueMenuOpen((open) => !open)}
+                          role="menuitem"
+                          onClick={() => {
+                            setIssueMenuOpen(false);
+                            setShowRegenerateConfirmation(true);
+                          }}
                         >
-                          <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="currentColor">
-                            <circle cx="3.25" cy="8" r="1.15" />
-                            <circle cx="8" cy="8" r="1.15" />
-                            <circle cx="12.75" cy="8" r="1.15" />
-                          </svg>
+                          Regenerate
                         </button>
-                        {issueMenuOpen && (
-                          <div className="reader-overflow-menu" role="menu" aria-label="Issue actions">
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                setIssueMenuOpen(false);
-                                setShowRegenerateConfirmation(true);
-                              }}
-                            >
-                              Regenerate
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
-                  </>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="reader-text-button"
+                    disabled={regenerating || Boolean(activeAttempt)}
+                    onClick={() => void beginRun("manual")}
+                  >
+                    {activeAttempt ? "Collecting…" : "Collect now"}
+                  </button>
                 )}
               </div>
             </div>
@@ -868,32 +848,31 @@ export function ReaderWorkspace({
               </div>
             )}
 
-            <div className="reader-issue-summary" aria-live="polite">
-              <span className={`reader-status reader-status--${(displayedIssue?.status ?? "NOT_DELIVERED").toLowerCase()}`}>
-                {issueStatusLabel(displayedIssue?.status ?? null)}
-              </span>
-              <span>{issueSummary(displayedIssue)}</span>
-              {activeAttempt && <span className="reader-occurrence-state">Collecting</span>}
-            </div>
+            {displayedIssue && displayedIssue.status !== "COMPLETE" && (
+              <p className="reader-quiet-status">
+                {displayedIssue.actual.count} of {displayedIssue.target.dailyArticleCount} ready
+              </p>
+            )}
+            {activeAttempt && <p className="reader-quiet-status">Collecting</p>}
 
             {workspaceLoading ? (
               <div className="reader-empty-state" role="status">Loading today’s reading…</div>
-            ) : displayedIssue && displayedIssue.articles.length > 0 ? (
+            ) : displayedIssue && displayedIssue.articles.some((article) => article.contentStatus === "FULL_TEXT") ? (
               <ul className="reader-article-list" aria-label={`${displayedIssue.localDate} articles`}>
-                {displayedIssue.articles.map((article) => (
-                  <ArticleListItem
-                    key={article.id}
-                    article={article}
-                    issue={displayedIssue}
-                    onOpen={selectArticle}
-                  />
-                ))}
+                {displayedIssue.articles
+                  .filter((article) => article.contentStatus === "FULL_TEXT")
+                  .map((article) => (
+                    <ArticleListItem
+                      key={article.id}
+                      article={article}
+                      issue={displayedIssue}
+                      onOpen={selectArticle}
+                    />
+                  ))}
               </ul>
             ) : (
               <div className="reader-empty-state">
-                <span aria-hidden="true">✦</span>
-                <p>{displayedIssue ? "No verified full-text articles are in this issue." : "Your reading list will appear after the first collection."}</p>
-                {!displayedIssue && !workspaceLoading && <span>Use Run now to collect from your saved preferences.</span>}
+                <p>Nothing ready to read yet.</p>
               </div>
             )}
 
@@ -1157,13 +1136,30 @@ export function ReaderWorkspace({
                 ×
               </button>
             </div>
-            {olderArchiveIssues.length > 0 ? (
+            {uniqueArchiveIssues.length > 0 ? (
               <ul className="reader-archive-list">
-                {olderArchiveIssues.map((issue) => (
+                {uniqueArchiveIssues.map((issue) => (
                   <li key={`${issue.id}-${issue.edition}`}>
-                    <button type="button" className="reader-archive-date" onClick={() => selectArchiveIssue(issue)}>
+                    <button
+                      type="button"
+                      className="reader-archive-date"
+                      onClick={() => {
+                        if (issue.id === todayIssue?.id && issue.edition === todayIssue.edition) {
+                          setSelectedIssue(null);
+                          onCloseArchive?.();
+                          return;
+                        }
+                        selectArchiveIssue(issue);
+                      }}
+                    >
                       <span>{formatDate(issue.localDate)}</span>
-                      <span>{issue.articles.length} articles · {issueStatusLabel(issue.status)}</span>
+                      <span>
+                        {issue.articles.length > 0
+                          ? issue.articles
+                              .map((article) => `${article.title} · ${readProgressLabel(article.readState)}`)
+                              .join(" · ")
+                          : "No delivered articles"}
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -1211,42 +1207,23 @@ function ArticleListItem({
   issue: DailyIssue;
   onOpen: (issue: DailyIssue, article: ReaderArticleSummary) => void;
 }) {
-  const sourceUrl = safeExternalUrl(article.accessibleUrl || article.originalUrl);
   return (
     <li className="reader-article-list-item">
-      {article.contentStatus === "FULL_TEXT" ? (
-        <button className="reader-article-open" type="button" onClick={() => void onOpen(issue, article)}>
-          <ArticleSummary article={article} />
-        </button>
-      ) : (
-        <div className="reader-article-open reader-article-open--external">
-          <ArticleSummary article={article} />
-          {sourceUrl && (
-            <a className="reader-source-link" href={sourceUrl} target="_blank" rel="noopener noreferrer">
-              Open publisher <span aria-hidden="true">↗</span>
-            </a>
-          )}
-        </div>
-      )}
+      <button className="reader-article-open" type="button" onClick={() => void onOpen(issue, article)}>
+        <ArticleSummary article={article} />
+      </button>
     </li>
   );
 }
 
 function ArticleSummary({ article }: { article: ReaderArticleSummary }) {
-  const accessibleDiffers =
-    article.accessiblePublication &&
-    article.originalPublication &&
-    article.accessiblePublication.toLocaleLowerCase() !== article.originalPublication.toLocaleLowerCase();
   return (
     <>
       <span className="reader-article-title">{article.title}</span>
       <span className="reader-article-byline">
         {article.originalPublication || article.accessiblePublication || "Publisher unknown"}
-        {accessibleDiffers && ` · accessible via ${article.accessiblePublication}`}
-      </span>
-      <span className="reader-article-details">
-        <span>{formatReadingMinutes(article.readingMinutes)}</span>
-        {article.difficulty && <span>{article.difficulty}</span>}
+        {` · ${formatReadingMinutes(article.readingMinutes)}`}
+        {article.difficulty ? ` · ${article.difficulty}` : ""}
       </span>
     </>
   );

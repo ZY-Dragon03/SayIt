@@ -236,6 +236,12 @@ function isFullText(article: ArticleSummary): boolean {
   return article.contentStatus === "FULL_TEXT";
 }
 
+function deliveredReadingIssue(issue: DailyIssue): DailyIssue {
+  const articles = issue.articles.filter(isFullText);
+  if (articles.length === issue.articles.length) return issue;
+  return { ...issue, articles };
+}
+
 function isSuitable(article: ArticleSummary, preferences: ReaderPreferences): boolean {
   if (!isFullText(article) || article.fkgl === null || article.sentenceCount < 1) return false;
   if (!preferences.topics.some((topic) => article.topics.some((candidate) => sameTopic(topic, candidate)))) {
@@ -411,8 +417,9 @@ export class ReaderService {
   today() {
     const state = this.requireStore().snapshot();
     const date = localDateTime(this.now(), state.preferences.timezone).date;
+    const issue = currentIssue(state.issues, date, state.preferences.timezone);
     return {
-      issue: currentIssue(state.issues, date, state.preferences.timezone),
+      issue: issue ? deliveredReadingIssue(issue) : null,
       occurrence:
         state.occurrences.find(
           (item) => item.localDate === date && item.timezone === state.preferences.timezone,
@@ -433,15 +440,16 @@ export class ReaderService {
     }
     return [...latestByDate.values()]
       .sort((left, right) => right.localDate.localeCompare(left.localDate))
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(deliveredReadingIssue);
   }
 
   edition(issueId: string, edition: number): DailyIssue | null {
-    return (
+    const issue =
       this.requireStore().snapshot().issues.find(
-        (issue) => issue.id === issueId && issue.edition === edition,
-      ) ?? null
-    );
+        (item) => item.id === issueId && item.edition === edition,
+      ) ?? null;
+    return issue ? deliveredReadingIssue(issue) : null;
   }
 
   runStatus(attemptId: string): { attempt: RunAttempt; issue: DailyIssue } | null {
@@ -451,7 +459,7 @@ export class ReaderService {
     const issue =
       state.issues.find((item) => item.id === attempt.issueId && item.edition === attempt.edition) ??
       currentIssue(state.issues, this.today().issue?.localDate ?? "", this.getPreferences().timezone);
-    return issue ? { attempt, issue } : null;
+    return issue ? { attempt, issue: deliveredReadingIssue(issue) } : null;
   }
 
   async startManualRun(
@@ -852,21 +860,16 @@ export class ReaderService {
             bodyRecords.push({ summary, body: { paragraphs: candidate.paragraphs, bodyHash: candidate.bodyHash } });
           }
         }
-        const nonFullText = result.candidates
-          .filter((article) => !isFullText(article))
-          .slice(0, 20)
-          .map((article) => scopeSummary(article, issue.id, issue.edition));
-        const allArticles = [...selected, ...nonFullText];
         const fulfillment = issueFulfillment(
           started.preferences,
-          allArticles,
+          selected,
           result.unmetConstraints ?? [],
         );
         const replacement = dailyIssueSchema.parse({
           ...issue,
           target: started.preferences,
           ...fulfillment,
-          articles: allArticles,
+          articles: selected,
           updatedAt: now.toISOString(),
         });
         state.issues[issueIndex] = replacement;

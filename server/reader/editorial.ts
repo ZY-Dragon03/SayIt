@@ -410,11 +410,23 @@ function decodeChunkedSearchBody(raw: Buffer): Buffer {
   return Buffer.concat(parts);
 }
 
+function allowedSearchHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host.endsWith("duckduckgo.com") || host.endsWith("bing.com") || host.endsWith("google.com");
+}
+
+interface SearchHttpRequest {
+  method?: "GET" | "POST";
+  body?: string;
+  headers?: Record<string, string>;
+}
+
 function fetchSearchThroughProxy(
   target: URL,
   proxy: URL,
   signal: AbortSignal,
   redirects: number,
+  request?: SearchHttpRequest,
 ): Promise<Response> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -456,14 +468,19 @@ function fetchSearchThroughProxy(
       signal.addEventListener("abort", destroyBoth, { once: true });
       tlsSocket.setTimeout(SEARCH_TIMEOUT_MS, destroyBoth);
       tlsSocket.on("secureConnect", () => {
-        tlsSocket.write(
-          `GET ${target.pathname}${target.search} HTTP/1.1\r\n` +
-            `Host: ${target.hostname}\r\n` +
-            "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.1\r\n" +
-            "Accept-Encoding: identity\r\n" +
-            `User-Agent: ${SEARCH_USER_AGENT}\r\n` +
-            "Connection: close\r\n\r\n",
-        );
+        const method = request?.method ?? "GET";
+        const body = request?.body ?? "";
+        const headerLines = [
+          `${method} ${target.pathname}${target.search} HTTP/1.1`,
+          `Host: ${target.hostname}`,
+          "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.1",
+          "Accept-Encoding: identity",
+          `User-Agent: ${SEARCH_USER_AGENT}`,
+          ...Object.entries(request?.headers ?? {}).map(([name, value]) => `${name}: ${value}`),
+        ];
+        if (body) headerLines.push(`Content-Length: ${Buffer.byteLength(body)}`);
+        headerLines.push("Connection: close");
+        tlsSocket.write(`${headerLines.join("\r\n")}\r\n\r\n${body}`);
       });
       tlsSocket.on("data", (chunk: Buffer) => {
         received += chunk.byteLength;
@@ -481,7 +498,7 @@ function fetchSearchThroughProxy(
           const parsed = parseSearchHttpResponse(Buffer.concat(chunks));
           if (parsed.status >= 300 && parsed.status < 400 && parsed.location && redirects < 3) {
             const next = new URL(parsed.location, target);
-            if (next.protocol !== "https:" || !next.hostname.endsWith("duckduckgo.com")) {
+            if (next.protocol !== "https:" || !allowedSearchHost(next.hostname)) {
               fail(new Error(`Search provider returned HTTP ${parsed.status}.`));
               return;
             }
@@ -506,16 +523,22 @@ function fetchSearchThroughProxy(
   });
 }
 
-async function fetchSearchDocument(url: string, signal: AbortSignal): Promise<Response> {
+async function fetchSearchDocument(
+  url: string,
+  signal: AbortSignal,
+  request?: SearchHttpRequest,
+): Promise<Response> {
   const target = new URL(url);
   const proxy = httpsProxyFor(target.hostname);
-  if (proxy) return fetchSearchThroughProxy(target, proxy, signal, 0);
+  if (proxy) return fetchSearchThroughProxy(target, proxy, signal, 0, request);
   return fetch(url, {
-    method: "GET",
+    method: request?.method ?? "GET",
     headers: {
-      Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.1",
       "User-Agent": SEARCH_USER_AGENT,
+      ...request?.headers,
     },
+    body: request?.body,
     redirect: "follow",
     signal,
   });
@@ -606,9 +629,81 @@ async function searchBingNews(query: string, signal: AbortSignal): Promise<Searc
   return parseBingNewsRss(xml);
 }
 
+function articleCandidates(candidates: SearchCandidate[]): SearchCandidate[] {
+  return candidates.filter((candidate) => {
+    try {
+      const segments = new URL(candidate.url).pathname.replace(/\/+$/u, "").split("/").filter(Boolean);
+      return segments.length >= 2;
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function decodeGoogleNewsArticle(link: string, signal: AbortSignal): Promise<string | null> {
+  const id = new URL(link).pathname.split("/").pop();
+  if (!id) return null;
+  const page = await fetchSearchDocument(link, signal);
+  if (!page.ok) return null;
+  const html = await readBounded(page, MAX_SEARCH_BYTES);
+  const timestamp = html.match(/data-n-a-ts="(\d+)"/)?.[1];
+  const signature = html.match(/data-n-a-sg="([^"]+)"/)?.[1];
+  if (!timestamp || !signature) return null;
+  const inner = JSON.stringify([
+    "garturlreq",
+    [["X", "X", ["X", "X"], null, null, 1, 1, "US:en", null, 1, null, null, null, null, null, 0, 1], "X", "X", 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0],
+    id,
+    Number(timestamp),
+    signature,
+  ]);
+  const body = "f.req=" + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
+  const decoded = await fetchSearchDocument(
+    "https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je",
+    signal,
+    {
+      method: "POST",
+      body,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+        Referer: "https://news.google.com/",
+      },
+    },
+  );
+  if (!decoded.ok) return null;
+  const text = await readBounded(decoded, MAX_SEARCH_BYTES);
+  return text.match(/https:\/\/[^"\\]+/)?.[0] ?? null;
+}
+
+async function searchGoogleNews(query: string, signal: AbortSignal): Promise<SearchCandidate[]> {
+  const response = await fetchSearchDocument(
+    `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`,
+    signal,
+  );
+  if (!response.ok) throw new Error(`Search provider returned HTTP ${response.status}.`);
+  const xml = await readBounded(response, MAX_SEARCH_BYTES);
+  const items = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].slice(0, 3);
+  const candidates: SearchCandidate[] = [];
+  for (const match of items) {
+    if (signal.aborted) break;
+    const block = match[1] ?? "";
+    const title = normalizeWhitespace(decodeXmlEntities(block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""));
+    const link = decodeXmlEntities(block.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i)?.[1] ?? "").trim();
+    if (!title || !link) continue;
+    try {
+      const resolved = await decodeGoogleNewsArticle(link, signal);
+      const candidate = resolved ? candidateFromResolvedUrl(resolved, title, "") : null;
+      if (!candidate || !articleCandidates([candidate]).length) continue;
+      candidates.push(candidate);
+    } catch {
+      continue;
+    }
+  }
+  return candidates;
+}
+
 async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS + 13_000);
+  const timer = setTimeout(() => controller.abort(), 50_000);
   const relayAbort = () => controller.abort();
   signal?.addEventListener("abort", relayAbort, { once: true });
   try {
@@ -621,7 +716,7 @@ async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<Se
       );
       if (!response.ok) throw new Error(`Search provider returned HTTP ${response.status}.`);
       const html = await readBounded(response, MAX_SEARCH_BYTES);
-      discovered = parseDuckDuckGoResults(html);
+      discovered = articleCandidates(parseDuckDuckGoResults(html));
       if (discovered.length === 0 && searchPageIsChallenge(html)) {
         primaryError = new Error("Search provider returned a bot challenge instead of results.");
       }
@@ -630,7 +725,14 @@ async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<Se
     }
     if (discovered.length === 0) {
       try {
-        discovered = await searchBingNews(query, controller.signal);
+        discovered = articleCandidates(await searchBingNews(query, controller.signal));
+      } catch (error) {
+        if (!primaryError) primaryError = error instanceof Error ? error : new Error("Search provider could not be reached.");
+      }
+    }
+    if (discovered.length === 0) {
+      try {
+        discovered = await searchGoogleNews(query, controller.signal);
       } catch (error) {
         if (primaryError) throw primaryError;
         throw error;

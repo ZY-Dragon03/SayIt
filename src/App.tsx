@@ -532,45 +532,44 @@ function App() {
           <div className="brand-mark" aria-hidden="true">
             S
           </div>
-          <div className="brand-name">SayIt</div>
+          <div className="mode-switch" role="group" aria-label="Workspace">
+            <button
+              className={!readerActive ? "is-active" : ""}
+              type="button"
+              aria-pressed={!readerActive}
+              onClick={() => {
+                setDrawerOpen(false);
+                setHistoryDrawerOpen(false);
+                setReaderPreferencesOpen(false);
+                setReaderArchiveOpen(false);
+                setReaderActive(false);
+              }}
+            >
+              SayIt
+            </button>
+            <button
+              className={readerActive ? "is-active" : ""}
+              type="button"
+              aria-pressed={readerActive}
+              onClick={() => {
+                setDrawerOpen(false);
+                setHistoryDrawerOpen(false);
+                setReaderPreferencesOpen(false);
+                setReaderArchiveOpen(false);
+                setReaderActive(true);
+              }}
+            >
+              Reader
+            </button>
+          </div>
         </div>
-        <button
-          className={`reader-mode-toggle ${readerActive ? "is-active" : ""}`}
-          type="button"
-          aria-pressed={readerActive}
-          aria-label={readerActive ? "Close Reader and return to SayIt" : "Open SayIt Reader"}
-          onClick={() => {
-            setDrawerOpen(false);
-            setHistoryDrawerOpen(false);
-            setReaderPreferencesOpen(false);
-            setReaderArchiveOpen(false);
-            setReaderActive((current) => !current);
-          }}
-        >
-          {readerActive ? "SayIt" : "Reader"}
-        </button>
         <div className="topbar-actions">
-          {!readerActive && (
-            <PronunciationControls
-              preferences={pronunciationPreferences}
-              onChange={updatePronunciationPreferences}
-            />
-          )}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
-            {theme === "dark" ? "☼" : "☾"}
-          </button>
           <button
             className={`icon-button utility-action ${
               readerActive ? (readerArchiveOpen ? "is-active" : "") : historyDrawerOpen ? "is-active" : ""
             }`}
             type="button"
-            title={readerActive ? "History" : `History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
+            title={readerActive ? "Reader history" : `History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
             onClick={() => {
               if (readerActive) {
                 setReaderPreferencesOpen(false);
@@ -596,7 +595,7 @@ function App() {
             <button
               className={`icon-button utility-action ${readerPreferencesOpen ? "is-active" : ""}`}
               type="button"
-              title="Reading preferences"
+              title="Reader settings"
               aria-label="Open reading preferences"
               aria-expanded={readerPreferencesOpen}
               onClick={() => {
@@ -624,6 +623,15 @@ function App() {
               )}
             </button>
           )}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? "☼" : "☾"}
+          </button>
         </div>
       </header>
 
@@ -632,6 +640,10 @@ function App() {
           <h1 id="page-title">What are you trying to say?</h1>
           <p>Find the words, or make sense of an expression.</p>
         </section>
+        <PronunciationControls
+          preferences={pronunciationPreferences}
+          onChange={updatePronunciationPreferences}
+        />
 
         <form className="input-card" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="expression-input">
@@ -1708,9 +1720,11 @@ function HistoryIcon() {
 
 function GearIcon() {
   return (
-    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="2.25" />
-      <path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M12.6 3.4l-1.05 1.05M4.45 11.55l-1.05 1.05" />
+    <svg aria-hidden="true" className="settings-icon" viewBox="0 0 24 24">
+      <path
+        fill="currentColor"
+        d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
+      />
     </svg>
   );
 }

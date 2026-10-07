@@ -77,6 +77,49 @@
   gap: 9px;
 }
 
+.mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.mode-switch button {
+  min-width: 4.6rem;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mode-switch button:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.mode-switch button.is-active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.mode-switch button:focus-visible {
+  outline: 3px solid rgba(82, 103, 217, 0.28);
+  outline-offset: 2px;
+}
+
+.settings-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  stroke: none;
+}
+
 .brand-mark {
   display: grid;
   width: 30px;
@@ -251,7 +294,11 @@ summary:focus-visible {
 }
 
 .hero-copy {
-  margin-bottom: 22px;
+  margin-bottom: 14px;
+}
+
+.main-content .pronunciation-controls {
+  margin-bottom: 16px;
 }
 
 .eyebrow,
@@ -1234,14 +1281,10 @@ summary:focus-visible {
   outline-offset: 2px;
 }
 
-.reader-issue-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 9px;
-  min-height: 39px;
+.reader-quiet-status {
+  margin: -8px 0 18px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .reader-status {

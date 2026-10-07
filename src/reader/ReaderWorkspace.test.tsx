@@ -743,6 +743,5 @@ describe("Reader workspace", () => {
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/editions/1"))).toBe(true);
     expect(container.textContent).toContain("The first edition article");
-    expect(container.textContent).toContain("edition 1");
   });
 });
