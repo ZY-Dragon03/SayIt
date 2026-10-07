@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import http from "node:http";
+import tls from "node:tls";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 
@@ -353,57 +355,304 @@ async function readBounded(response: Response, maximum: number): Promise<string>
   return new TextDecoder().decode(content);
 }
 
+const SEARCH_USER_AGENT = "SayItReader/1.0 (local English reading workspace)";
+
+function proxyBypassesHost(hostname: string, env: NodeJS.ProcessEnv): boolean {
+  const raw = env.no_proxy || env.NO_PROXY;
+  if (!raw) return false;
+  const host = hostname.toLowerCase();
+  return raw.split(",").some((entry) => {
+    const pattern = entry.trim().toLowerCase();
+    if (!pattern) return false;
+    if (pattern === "*") return true;
+    const trimmed = pattern.replace(/^\*\./, ".");
+    if (trimmed.startsWith(".")) {
+      return host === trimmed.slice(1) || host.endsWith(trimmed);
+    }
+    return host === trimmed;
+  });
+}
+
+function httpsProxyFor(hostname: string, env: NodeJS.ProcessEnv = process.env): URL | undefined {
+  const value = env.https_proxy || env.HTTPS_PROXY;
+  if (!value || proxyBypassesHost(hostname, env)) return undefined;
+  let proxy: URL;
+  try {
+    proxy = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (proxy.protocol !== "http:") return undefined;
+  return proxy;
+}
+
+function parseSearchHttpResponse(raw: Buffer): { status: number; location?: string; body: Buffer } {
+  const headerEnd = raw.indexOf("\r\n\r\n");
+  if (headerEnd < 0) throw new Error("Search response was incomplete.");
+  const lines = raw.subarray(0, headerEnd).toString("latin1").split("\r\n");
+  const status = Number(lines[0]?.split(" ")[1] ?? 0);
+  const headers = new Map<string, string>();
+  for (const line of lines.slice(1)) {
+    const colon = line.indexOf(":");
+    if (colon < 0) continue;
+    headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+  }
+  let body = raw.subarray(headerEnd + 4);
+  if ((headers.get("transfer-encoding") ?? "").toLowerCase().includes("chunked")) {
+    body = decodeChunkedSearchBody(body);
+  } else if (headers.has("content-length")) {
+    const length = Number(headers.get("content-length"));
+    if (Number.isFinite(length) && length >= 0) body = body.subarray(0, length);
+  }
+  if (body.byteLength > MAX_SEARCH_BYTES) throw new Error("Search response exceeds the size limit.");
+  const location = headers.get("location");
+  return { status, body, ...(location ? { location } : {}) };
+}
+
+function decodeChunkedSearchBody(raw: Buffer): Buffer {
+  const parts: Buffer[] = [];
+  let offset = 0;
+  while (offset < raw.length) {
+    const lineEnd = raw.indexOf("\r\n", offset);
+    if (lineEnd < 0) break;
+    const size = Number.parseInt(raw.subarray(offset, lineEnd).toString("latin1").split(";")[0]?.trim() ?? "", 16);
+    if (!Number.isFinite(size)) throw new Error("Search response was incomplete.");
+    offset = lineEnd + 2;
+    if (size === 0) break;
+    parts.push(raw.subarray(offset, offset + size));
+    offset += size + 2;
+  }
+  return Buffer.concat(parts);
+}
+
+function fetchSearchThroughProxy(
+  target: URL,
+  proxy: URL,
+  signal: AbortSignal,
+  redirects: number,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("Search was aborted."));
+      return;
+    }
+    const connectReq = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port || 80),
+      method: "CONNECT",
+      path: `${target.hostname}:443`,
+      headers: { Host: `${target.hostname}:443` },
+    });
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      connectReq.destroy();
+      reject(error);
+    };
+    const onAbort = () => fail(new Error("Search was aborted."));
+    signal.addEventListener("abort", onAbort, { once: true });
+    connectReq.setTimeout(SEARCH_TIMEOUT_MS, () => fail(new Error("Search proxy timed out.")));
+    connectReq.on("error", fail);
+    connectReq.on("connect", (response, socket) => {
+      if (response.statusCode !== 200) {
+        socket.destroy();
+        fail(new Error(`Search proxy rejected the connection (HTTP ${response.statusCode ?? 0}).`));
+        return;
+      }
+      const tlsSocket = tls.connect({ socket, servername: target.hostname });
+      const chunks: Buffer[] = [];
+      let received = 0;
+      const destroyBoth = () => {
+        tlsSocket.destroy();
+        socket.destroy();
+      };
+      signal.addEventListener("abort", destroyBoth, { once: true });
+      tlsSocket.setTimeout(SEARCH_TIMEOUT_MS, destroyBoth);
+      tlsSocket.on("secureConnect", () => {
+        tlsSocket.write(
+          `GET ${target.pathname}${target.search} HTTP/1.1\r\n` +
+            `Host: ${target.hostname}\r\n` +
+            "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.1\r\n" +
+            "Accept-Encoding: identity\r\n" +
+            `User-Agent: ${SEARCH_USER_AGENT}\r\n` +
+            "Connection: close\r\n\r\n",
+        );
+      });
+      tlsSocket.on("data", (chunk: Buffer) => {
+        received += chunk.byteLength;
+        if (received > MAX_SEARCH_BYTES + 64 * 1024) {
+          destroyBoth();
+          fail(new Error("Search response exceeds the size limit."));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      tlsSocket.on("error", (error) => fail(error));
+      tlsSocket.on("end", () => {
+        if (settled) return;
+        try {
+          const parsed = parseSearchHttpResponse(Buffer.concat(chunks));
+          if (parsed.status >= 300 && parsed.status < 400 && parsed.location && redirects < 3) {
+            const next = new URL(parsed.location, target);
+            if (next.protocol !== "https:" || !next.hostname.endsWith("duckduckgo.com")) {
+              fail(new Error(`Search provider returned HTTP ${parsed.status}.`));
+              return;
+            }
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            resolve(fetchSearchThroughProxy(next, proxy, signal, redirects + 1));
+            return;
+          }
+          if (parsed.status < 200 || parsed.status >= 300) {
+            fail(new Error(`Search provider returned HTTP ${parsed.status}.`));
+            return;
+          }
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          resolve(new Response(new Uint8Array(parsed.body), { status: parsed.status }));
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error("Search response could not be read."));
+        }
+      });
+    });
+    connectReq.end();
+  });
+}
+
+async function fetchSearchDocument(url: string, signal: AbortSignal): Promise<Response> {
+  const target = new URL(url);
+  const proxy = httpsProxyFor(target.hostname);
+  if (proxy) return fetchSearchThroughProxy(target, proxy, signal, 0);
+  return fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+      "User-Agent": SEARCH_USER_AGENT,
+    },
+    redirect: "follow",
+    signal,
+  });
+}
+
+function candidateFromResolvedUrl(resolved: string, title: string, snippet: string): SearchCandidate | null {
+  const normalized = normalizeUrl(resolved);
+  if (!normalized || !title) return null;
+  return {
+    url: normalized,
+    title,
+    snippet,
+    // Search result breadcrumbs may contain path text or a display alias. Keep the
+    // discovered host as the original-source attribution and track redirects separately.
+    publication: hostOf(normalized) ? displayPublication(hostOf(normalized)!) : undefined,
+  };
+}
+
+function parseDuckDuckGoResults(html: string): SearchCandidate[] {
+  const document = new JSDOM(html).window.document;
+  const candidates: SearchCandidate[] = [];
+  for (const result of document.querySelectorAll<HTMLElement>(".result")) {
+    const anchor = result.querySelector<HTMLAnchorElement>("a.result__a");
+    const title = normalizeWhitespace(anchor?.textContent ?? "");
+    const href = anchor?.getAttribute("href");
+    const snippet = normalizeWhitespace(result.querySelector(".result__snippet")?.textContent ?? "");
+    if (!href || !title) continue;
+    let resolved: string;
+    try {
+      const link = new URL(href, "https://html.duckduckgo.com");
+      const wrapped = link.searchParams.get("uddg");
+      resolved = wrapped ? new URL(wrapped).toString() : link.toString();
+    } catch {
+      continue;
+    }
+    const candidate = candidateFromResolvedUrl(resolved, title, snippet);
+    if (!candidate) continue;
+    candidates.push(candidate);
+    if (candidates.length >= MAX_RESULTS_PER_QUERY) break;
+  }
+  return candidates;
+}
+
+function searchPageIsChallenge(html: string): boolean {
+  return /anomaly-modal|challenge-form|cc=botnet/i.test(html);
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;|&apos;/g, "'");
+}
+
+function parseBingNewsRss(xml: string): SearchCandidate[] {
+  const candidates: SearchCandidate[] = [];
+  for (const match of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+    const block = match[1] ?? "";
+    const title = normalizeWhitespace(decodeXmlEntities(block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""));
+    const rawLink = decodeXmlEntities(block.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i)?.[1] ?? "").trim();
+    const snippet = normalizeWhitespace(
+      decodeXmlEntities(block.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i)?.[1] ?? "").replace(/<[^>]+>/g, ""),
+    );
+    let resolved = "";
+    try {
+      resolved = new URL(rawLink).searchParams.get("url") ?? "";
+    } catch {
+      continue;
+    }
+    const candidate = candidateFromResolvedUrl(resolved, title, snippet);
+    if (!candidate) continue;
+    candidates.push(candidate);
+    if (candidates.length >= MAX_RESULTS_PER_QUERY) break;
+  }
+  return candidates;
+}
+
+async function searchBingNews(query: string, signal: AbortSignal): Promise<SearchCandidate[]> {
+  const response = await fetchSearchDocument(
+    `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`,
+    signal,
+  );
+  if (!response.ok) throw new Error(`Search provider returned HTTP ${response.status}.`);
+  const xml = await readBounded(response, MAX_SEARCH_BYTES);
+  return parseBingNewsRss(xml);
+}
+
 async function searchDuckDuckGo(query: string, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS + 13_000);
   const relayAbort = () => controller.abort();
   signal?.addEventListener("abort", relayAbort, { once: true });
   try {
-    const response = await fetch(
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      {
-        method: "GET",
-        headers: {
-          Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
-          "User-Agent": "SayItReader/1.0 (local English reading workspace)",
-        },
-        redirect: "follow",
-        signal: controller.signal,
-      },
-    );
-    if (!response.ok) throw new Error(`Search provider returned HTTP ${response.status}.`);
-    const html = await readBounded(response, MAX_SEARCH_BYTES);
-    const document = new JSDOM(html).window.document;
-    const candidates: SearchCandidate[] = [];
-    for (const result of document.querySelectorAll<HTMLElement>(".result")) {
-      const anchor = result.querySelector<HTMLAnchorElement>("a.result__a");
-      const title = normalizeWhitespace(anchor?.textContent ?? "");
-      const href = anchor?.getAttribute("href");
-      const snippet = normalizeWhitespace(
-        result.querySelector(".result__snippet")?.textContent ?? "",
+    let discovered: SearchCandidate[] = [];
+    let primaryError: Error | null = null;
+    try {
+      const response = await fetchSearchDocument(
+        `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+        controller.signal,
       );
-      if (!href || !title) continue;
-      let resolved: string;
-      try {
-        const link = new URL(href, "https://html.duckduckgo.com");
-        const wrapped = link.searchParams.get("uddg");
-        resolved = wrapped ? new URL(wrapped).toString() : link.toString();
-      } catch {
-        continue;
+      if (!response.ok) throw new Error(`Search provider returned HTTP ${response.status}.`);
+      const html = await readBounded(response, MAX_SEARCH_BYTES);
+      discovered = parseDuckDuckGoResults(html);
+      if (discovered.length === 0 && searchPageIsChallenge(html)) {
+        primaryError = new Error("Search provider returned a bot challenge instead of results.");
       }
-      const normalized = normalizeUrl(resolved);
-      if (!normalized) continue;
-      candidates.push({
-        url: normalized,
-        title,
-        snippet,
-        // Search result breadcrumbs may contain path text or a display alias. Keep the
-        // discovered host as the original-source attribution and track redirects separately.
-        publication: hostOf(normalized) ? displayPublication(hostOf(normalized)!) : undefined,
-      });
-      if (candidates.length >= MAX_RESULTS_PER_QUERY) break;
+    } catch (error) {
+      primaryError = error instanceof Error ? error : new Error("Search provider could not be reached.");
     }
-    return candidates;
+    if (discovered.length === 0) {
+      try {
+        discovered = await searchBingNews(query, controller.signal);
+      } catch (error) {
+        if (primaryError) throw primaryError;
+        throw error;
+      }
+    }
+    if (discovered.length === 0 && primaryError) throw primaryError;
+    return discovered;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", relayAbort);
