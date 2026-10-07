@@ -747,18 +747,53 @@ function hasVerifiedStandaloneArticleRoot(
   hasStructuredArticleType: boolean,
   declaredTitles: string[],
 ): boolean {
-  const roots = [...document.querySelectorAll("article")];
-  if (roots.length !== 1) return false;
   const openGraphType = normalizeWhitespace(
     document.querySelector<HTMLMetaElement>('meta[property="og:type"]')?.content ?? "",
   ).toLowerCase();
   if (openGraphType !== "article" && !hasStructuredArticleType) return false;
   const normalizedTitle = normalizeWhitespace(title).toLowerCase();
-  const headings = [...roots[0]!.querySelectorAll("h1")]
-    .map((heading) => normalizeWhitespace(heading.textContent ?? "").toLowerCase())
+  if (
+    declaredTitles.length === 0 ||
+    !declaredTitles.every((declared) => declared.toLowerCase() === normalizedTitle)
+  ) {
+    return false;
+  }
+  const roots = [...document.querySelectorAll("article")];
+  if (roots.length > 1) return false;
+  const normalizeHeading = (heading: Element) =>
+    normalizeWhitespace(heading.textContent ?? "").toLowerCase();
+  const headings = (roots.length === 1
+    ? [...roots[0]!.querySelectorAll("h1")]
+    : [...document.querySelectorAll("h1")])
+    .map(normalizeHeading)
     .filter(Boolean);
-  return headings.length === 1 && headings[0] === normalizedTitle && declaredTitles.length > 0 &&
-    declaredTitles.every((declared) => declared.toLowerCase() === normalizedTitle);
+  return headings.length === 1 && headings[0] === normalizedTitle;
+}
+
+function isMediaCredit(paragraph: string): boolean {
+  return paragraph.length <= 80 && /^(illustration|photo|photograph|image|caption)\s+by\b/iu.test(paragraph);
+}
+
+function storyParagraphs(root: ParentNode): string[] {
+  return [...root.querySelectorAll("p")]
+    .filter((paragraph) => !paragraph.closest("form, aside, nav, footer, [role='complementary']"))
+    .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
+    .filter((paragraph) => paragraph.length >= 20 && !isMediaCredit(paragraph));
+}
+
+function narrowFallbackContentRoot(root: Element): Element {
+  const heading = root.querySelector("h1");
+  if (!heading) return root;
+  let node: Element = heading;
+  while (node.parentElement && !/^(BODY|HTML)$/u.test(node.parentElement.tagName)) {
+    const parent = node.parentElement;
+    const currentCount = storyParagraphs(node).length;
+    const parentCount = storyParagraphs(parent).length;
+    const added = parentCount - currentCount;
+    if (currentCount >= 3 && added > 0 && added / parentCount > 0.12) break;
+    node = parent;
+  }
+  return node;
 }
 
 function sourceArticleParagraphs(
@@ -777,10 +812,8 @@ function sourceArticleParagraphs(
       ? publisherBodyRoots
       : articleRoots.length > 0
         ? articleRoots
-        : [...document.querySelectorAll("main, [role='main']")];
-  const paragraphSets = roots.map((root) => [...root.querySelectorAll("p")]
-    .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
-    .filter((paragraph) => paragraph.length >= 20));
+        : [...document.querySelectorAll("main, [role='main']")].map((root) => narrowFallbackContentRoot(root));
+  const paragraphSets = roots.map((root) => storyParagraphs(root));
   const paragraphs = paragraphSets
     .sort((left, right) => right.join(" ").length - left.join(" ").length)[0] ?? [];
   const structuredBodyMatchesSource = Boolean(
@@ -922,7 +955,8 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   if (!standaloneArticleVerified) {
     return fallbackForProvenance("Standalone article structure and title metadata do not agree.", title);
   }
-  let paragraphs = paragraphsFromReadability(parsedArticle.content);
+  let paragraphs = paragraphsFromReadability(parsedArticle.content)
+    .filter((paragraph) => !isMediaCredit(paragraph));
   const sourceBody = sourceArticleParagraphs(
     document,
     structured.articleBody,
@@ -936,14 +970,24 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   }
   let omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
   let recoveredParagraphCount = 0;
-  const readabilityParagraphsBelongToSourceBody = missingSourceParagraphs(paragraphs, sourceParagraphs) === 0;
+  const sourceText = normalizeWhitespace(sourceParagraphs.join(" ")).toLowerCase();
+  const extraneousParagraphs = paragraphs.filter((paragraph) => !sourceText.includes(normalizeWhitespace(paragraph).toLowerCase()));
+  if (paragraphs.length > 0 && extraneousParagraphs.length / paragraphs.length > 0.1) {
+    const reason = "Extracted paragraphs are incomplete or include material outside the verified article body.";
+    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
+    return { article: null, body: "", summary, reason };
+  }
+  if (extraneousParagraphs.length > 0) {
+    const extraneous = new Set(extraneousParagraphs);
+    paragraphs = paragraphs.filter((paragraph) => !extraneous.has(paragraph));
+    omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
+  }
   if (
     omittedParagraphCount > 0 &&
     sourceParagraphs.length > 0 &&
     sourceBody.verifiedBodyBoundary &&
     sourceBody.readabilityReconstructionAllowed &&
-    omittedParagraphCount / sourceParagraphs.length <= 0.1 &&
-    readabilityParagraphsBelongToSourceBody
+    omittedParagraphCount / sourceParagraphs.length <= 0.1
   ) {
     // Readability can discard real paragraphs because of publisher CSS classes such as
     // "comment" even when article-level metadata and one matching article root establish
@@ -954,11 +998,6 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     recoveredParagraphCount = omittedParagraphCount;
     paragraphs = reconstructedParagraphs;
     omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
-  }
-  if (!readabilityParagraphsBelongToSourceBody) {
-    const reason = "Extracted paragraphs are incomplete or include material outside the verified article body.";
-    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
-    return { article: null, body: "", summary, reason };
   }
   const body = paragraphs.join("\n\n");
   if (omittedParagraphCount > 0) {
@@ -1062,7 +1101,7 @@ function evaluateVerified(
     summary: withTopics,
     body: extracted.body,
     reason: topicalReason,
-    topicalEvidence: matched.evidence,
+    topicalEvidence: matched.topics,
     trace: {
       url: source.url,
       publication: withTopics.originalPublication,

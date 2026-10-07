@@ -1,0 +1,532 @@
+{
+  "observation": [
+    "PAT-V11-06",
+    "PAT-RC-07"
+  ],
+  "result": "PARTIAL_NO_UNLISTED_FULL_TEXT",
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "contract": "sayit-reader-v1.1-product-contract-r1",
+  "run": {
+    "trigger": "catch-up",
+    "state": "SUCCEEDED",
+    "issueId": "issue:2026-10-07:Asia%2FShanghai",
+    "edition": 1,
+    "attemptId": "attempt:962333ec-8416-4506-b59b-530643d41aa3",
+    "traceId": "trace:b46ad6d0-051b-4932-8b57-963109b6386b",
+    "startedAt": "2026-10-07T04:15:17.175Z",
+    "completedAt": "2026-10-07T04:15:59.813Z",
+    "savedPreferences": {
+      "topics": [
+        "Technology"
+      ],
+      "dailyArticleCount": 3,
+      "difficulty": "Intermediate",
+      "readingBudgetMinutes": 20,
+      "collectionTime": "08:00",
+      "timezone": "Asia/Shanghai"
+    },
+    "searchQueryCount": 4,
+    "candidateTraceCount": 40,
+    "uniqueDiscoveredCandidateCount": 36,
+    "fullTextVerifiedCount": 0,
+    "semanticDecisionCount": 0,
+    "deliveredCount": 0
+  },
+  "queryTrace": [
+    "Technology latest news in-depth article",
+    "Technology recent news analysis long-form article",
+    "Technology explainer reporting English article",
+    "Technology independent analysis reporting"
+  ],
+  "candidates": [
+    {
+      "url": "https://www.reuters.com/technology",
+      "host": "www.reuters.com",
+      "normalizedHost": "reuters.com",
+      "publication": "Reuters",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.cnbc.com/technology",
+      "host": "www.cnbc.com",
+      "normalizedHost": "cnbc.com",
+      "publication": "CNBC",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.npr.org/sections/technology",
+      "host": "www.npr.org",
+      "normalizedHost": "npr.org",
+      "publication": "NPR",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.nytimes.com/international/section/technology",
+      "host": "www.nytimes.com",
+      "normalizedHost": "nytimes.com",
+      "publication": "The New York Times",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.reuters.com/technology",
+      "host": "www.reuters.com",
+      "normalizedHost": "reuters.com",
+      "publication": "Reuters",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 401.",
+      "statusCode": 401,
+      "articleId": "3a00dc983d9a5cb1ca93ad1a",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.cnbc.com/technology",
+      "host": "www.cnbc.com",
+      "normalizedHost": "cnbc.com",
+      "publication": "CNBC",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "61e059fc6f6c4c1a10ff851f",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://apnews.com/technology",
+      "host": "apnews.com",
+      "normalizedHost": "apnews.com",
+      "publication": "Associated Press",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "47d75a33f3bd1ade880d38d0",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.npr.org/sections/technology",
+      "host": "www.npr.org",
+      "normalizedHost": "npr.org",
+      "publication": "NPR",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "cb6423f1f87b64f81404f7ae",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB",
+      "host": "news.google.com",
+      "normalizedHost": "news.google.com",
+      "publication": "Google",
+      "outcome": "REJECTED",
+      "reason": "The article page is too large.",
+      "statusCode": null,
+      "articleId": "4987b92dbd39c74d3227bba7",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.newscientist.com/subject/technology",
+      "host": "www.newscientist.com",
+      "normalizedHost": "newscientist.com",
+      "publication": "Newscientist",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "cf5f3f7474bcb0dac8d82190",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://techxplore.com/",
+      "host": "techxplore.com",
+      "normalizedHost": "techxplore.com",
+      "publication": "Techxplore",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "381048f96191891feaa51f64",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.sciencedaily.com/news/matter_energy/technology",
+      "host": "www.sciencedaily.com",
+      "normalizedHost": "sciencedaily.com",
+      "publication": "ScienceDaily",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "5414ee44c2758581777b629a",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.cbsnews.com/technology",
+      "host": "www.cbsnews.com",
+      "normalizedHost": "cbsnews.com",
+      "publication": "Cbsnews",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity metadata conflicts.",
+      "statusCode": 200,
+      "articleId": "ee565d54806801d8d9497f16",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB?hl=en-US&ceid=US:en",
+      "host": "news.google.com",
+      "normalizedHost": "news.google.com",
+      "publication": "Google",
+      "outcome": "REJECTED",
+      "reason": "The article page is too large.",
+      "statusCode": null,
+      "articleId": "b25e69178439db49169bae8c",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://techhq.com/",
+      "host": "techhq.com",
+      "normalizedHost": "techhq.com",
+      "publication": "Techhq",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "94492ce0a2b169b3e28f7e56",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.wsj.com/tech?page=1",
+      "host": "www.wsj.com",
+      "normalizedHost": "wsj.com",
+      "publication": "Wsj",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 401.",
+      "statusCode": 401,
+      "articleId": "e46898763ca65b3a8628d740",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nytimes.com/section/technology",
+      "host": "www.nytimes.com",
+      "normalizedHost": "nytimes.com",
+      "publication": "The New York Times",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "27aea438a63d2ec039cb72bf",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.forbes.com/sites/technology",
+      "host": "www.forbes.com",
+      "normalizedHost": "forbes.com",
+      "publication": "Forbes",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "e29446031ce1add76c111c09",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nytimes.com/international/section/technology",
+      "host": "www.nytimes.com",
+      "normalizedHost": "nytimes.com",
+      "publication": "The New York Times",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "b6a53910abd8d3cad9324a8a",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.pcmag.com/news/categories/computers-electronics",
+      "host": "www.pcmag.com",
+      "normalizedHost": "pcmag.com",
+      "publication": "Pcmag",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "00a22462bf6e9e8030d088e8",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://techcrunch.com/",
+      "host": "techcrunch.com",
+      "normalizedHost": "techcrunch.com",
+      "publication": "Techcrunch",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "b2f30b8ca0dd850e32cf1fa9",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://discoverinai.com/tech-reporting-mastering-tomorrows-breakthroughs",
+      "host": "discoverinai.com",
+      "normalizedHost": "discoverinai.com",
+      "publication": "Discoverinai",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "44a37257d208bae56b14d974",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://discoverinai.com/tech-reporting-in-2026-a-framework-for-breakthroughs",
+      "host": "discoverinai.com",
+      "normalizedHost": "discoverinai.com",
+      "publication": "Discoverinai",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "e090a377d35402bddbbb4025",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.numberanalytics.com/blog/the-art-of-technology-reporting",
+      "host": "www.numberanalytics.com",
+      "normalizedHost": "numberanalytics.com",
+      "publication": "Numberanalytics",
+      "outcome": "REJECTED",
+      "reason": "Readability omitted 6 of 32 meaningful paragraphs from the semantic article body; the extracted text is incomplete.",
+      "statusCode": 200,
+      "articleId": "3beb37e91847079930d5b70b",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://nytimes.pressreader.com/article/281590949954347",
+      "host": "nytimes.pressreader.com",
+      "normalizedHost": "nytimes.pressreader.com",
+      "publication": "Pressreader",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "66c1cc0200d5ecb8f601c2c5",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.telegraph.co.uk/technology",
+      "host": "www.telegraph.co.uk",
+      "normalizedHost": "telegraph.co.uk",
+      "publication": "Telegraph",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 402.",
+      "statusCode": 402,
+      "articleId": "252457290711582514d7f34f",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://digitalcontentnext.org/blog/2026/07/02/the-rise-of-explainers-as-an-audience-growth-strategy",
+      "host": "digitalcontentnext.org",
+      "normalizedHost": "digitalcontentnext.org",
+      "publication": "Digitalcontentnext",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "03a8bcb0864da02eb42335ca",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://learningenglish.voanews.com/a/how-technology-is-changing-investigative-reporting/6565671.html",
+      "host": "learningenglish.voanews.com",
+      "normalizedHost": "learningenglish.voanews.com",
+      "publication": "Voanews",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "9231e864e62f3dc5714dd9ed",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue",
+      "host": "www.technologyreview.com",
+      "normalizedHost": "technologyreview.com",
+      "publication": "Technologyreview",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "b4a8a140e104bbc4a088e0c9",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nytimes.com/2023/06/04/insider/why-we-write-explainers-an-explainer.html",
+      "host": "www.nytimes.com",
+      "normalizedHost": "nytimes.com",
+      "publication": "The New York Times",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "61007e6b966192c2eae81001",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://kindraworks.com/independent-technology-reporting-how-culture-health-and-business-shape-modern-an",
+      "host": "kindraworks.com",
+      "normalizedHost": "kindraworks.com",
+      "publication": "Kindraworks",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "e20bc43fcd2a757e90170a4d",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://chaskly.com/independent-reporting-and-practical-analysis-technologys-impact-on-business-heal",
+      "host": "chaskly.com",
+      "normalizedHost": "chaskly.com",
+      "publication": "Chaskly",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "7fdaf870f9cdfa561b008d42",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://savoryventure.com/independent-reporting-and-technology-how-analysis-shapes-business-health-and-cul",
+      "host": "savoryventure.com",
+      "normalizedHost": "savoryventure.com",
+      "publication": "Savoryventure",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "9f2cd7832cc10e0a40bdedc8",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://insiders.report/",
+      "host": "insiders.report",
+      "normalizedHost": "insiders.report",
+      "publication": "Insiders",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "9e67d64ba6bd499bdeab49ad",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://vervexo.com/technology-driven-transparency-how-independent-reporting-reshapes-business-healt",
+      "host": "vervexo.com",
+      "normalizedHost": "vervexo.com",
+      "publication": "Vervexo",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "15a84ea6725ba3c801803652",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://vervexo.com/the-imperatives-of-independent-tech-journalism-analysis-culture-and-sustainable",
+      "host": "vervexo.com",
+      "normalizedHost": "vervexo.com",
+      "publication": "Vervexo",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "15bc2009cfd0c9ad6a725804",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://wagrzaplay.com/independent-evaluation-the-week-in-technology-and-the-rise-of-practical-tools-fo",
+      "host": "wagrzaplay.com",
+      "normalizedHost": "wagrzaplay.com",
+      "publication": "Wagrzaplay",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "78429c5fa2b3ae88b6dc4066",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://tech-publisher.online/",
+      "host": "tech-publisher.online",
+      "normalizedHost": "tech-publisher.online",
+      "publication": "Tech Publisher",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "57025a908c7853f1d9fb4b23",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://felixreport.com/",
+      "host": "felixreport.com",
+      "normalizedHost": "felixreport.com",
+      "publication": "Felixreport",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "3a7a1239844f16a773bfcc63",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://creativestrategies.com/",
+      "host": "creativestrategies.com",
+      "normalizedHost": "creativestrategies.com",
+      "publication": "Creativestrategies",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "0d3b1e055355eacfeb116f36",
+      "publisherMapMatch": false
+    }
+  ],
+  "publisherNameNormalizationMap": {
+    "sourcePath": "server/reader/editorial.ts",
+    "sourceSha256": "d0bdf17cadf5b33041facdee4d39f259dcc8678cdacd461120437e8e6b149bf8",
+    "knownDomains": [
+      "theguardian.com",
+      "theconversation.com",
+      "apnews.com",
+      "reuters.com",
+      "bbc.com",
+      "bbc.co.uk",
+      "npr.org",
+      "nature.com",
+      "sciencedaily.com",
+      "arstechnica.com",
+      "economist.com",
+      "ft.com",
+      "nytimes.com",
+      "washingtonpost.com",
+      "scientificamerican.com",
+      "aljazeera.com",
+      "cnbc.com",
+      "theverge.com",
+      "foreignaffairs.com"
+    ],
+    "matchingRule": "hostname lowercased, optional leading www removed; equality only for determining whether visible host appears in name-normalization map"
+  },
+  "supersedesReceipt": {
+    "path": "pat-v11-06-live-default-catchup-nonfull-a33e7ff1.json",
+    "reason": "Its publisherMapMatch field compared raw www-prefixed hosts and must not be used for known-versus-unlisted classification."
+  },
+  "issueOutcome": {
+    "status": "NOT_DELIVERED",
+    "actual": {
+      "count": 0,
+      "topics": [],
+      "difficulty": null,
+      "readingMinutes": 0
+    },
+    "unmetConstraints": [
+      "Article count: 0/3 verified full-text articles.",
+      "Suitable supply was insufficient; unsuitable, unverified, or semantically rejected candidates were not used to fill the issue.",
+      "No semantic-approved full-text articles matched the configured Intermediate difficulty and selected topics.",
+      "Verified full-text article count is 0 of 3."
+    ],
+    "fullTextCount": 0,
+    "externalOrSummaryCount": 20
+  },
+  "limitation": "Real preference-based search and fetch completed, but no candidate was verified FULL_TEXT and no semantic decision occurred; this run alone is not PAT-V11-06/PAT-RC-07 acceptance."
+}

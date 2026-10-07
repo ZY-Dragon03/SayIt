@@ -719,6 +719,111 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(semanticClient.completeJson).not.toHaveBeenCalled();
   });
 
+  it("accepts a standalone article with a page-level h1 when no article element is present", async () => {
+    const url = "https://www.technologyreview.com/2026/09/28/1145197/example-technology-article";
+    const title = "Who is liable when autonomous technology systems fail in production";
+    const body = articleBody("technology liability and computing");
+    const publisher = "MIT Technology Review";
+    const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+      <link rel="canonical" href="${url}">
+      <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
+      <meta property="og:site_name" content="${publisher}">
+      </head><body><header><h1>${title}</h1></header><main>${paragraphs}</main></body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "A technology liability report" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles[0]).toMatchObject({
+      title,
+      contentStatus: "FULL_TEXT",
+      provenance: {
+        publisherIdentity: publisher,
+        standaloneArticleVerified: true,
+        titleAgreementVerified: true,
+        bodyCompletenessVerified: true,
+      },
+    });
+  });
+
+  it("keeps related modules and newsletter chrome out of a page-level article body", async () => {
+    const url = "https://www.technologyreview.com/2026/09/28/1145197/example-technology-article";
+    const title = "Who is liable when autonomous technology systems fail in production";
+    const body = articleBody("technology liability and computing");
+    const publisher = "MIT Technology Review";
+    const story = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const related = [
+      "Ten years after AlphaGo, a separate technology brief looks at research claims rather than this liability report.",
+      "Another short item says agents are not yet creative enough to carry out open-ended laboratory research.",
+      "A third related item says breathless capability claims fall apart quickly under independent scrutiny.",
+      "A fourth related item introduces new companies nipping at the heels of larger technology firms.",
+    ].map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+      <link rel="canonical" href="${url}">
+      <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
+      <meta property="og:site_name" content="${publisher}">
+      </head><body><main>
+        <div><header><h1>${title}</h1></header><p>Illustration by Rose Wong</p>${story}</div>
+        <div class="sidebar">${related}</div>
+        <form><p>Thank you for submitting your email!</p><p>It looks like something went wrong while saving newsletter preferences.</p></form>
+      </main></body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "A technology liability report" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    const delivered = result.articles[0]?.paragraphs?.join("\n\n") ?? "";
+    expect(delivered).not.toContain("Thank you for submitting your email");
+    expect(delivered).not.toContain("nipping at the heels");
+    expect(delivered).not.toContain("Illustration by Rose Wong");
+  });
+
+  it("sends configured topic labels to semantic review when keyword evidence is long", async () => {
+    const url = "https://www.example.com/technology/long-evidence";
+    const title = "How technology, software, chips, and computing changed the data center";
+    const body = articleBody("technology software artificial intelligence machine learning semiconductor chip computing cyber robot data center internet");
+    const seen: string[] = [];
+    const semanticClient: JsonCompletionClient = {
+      async completeJson(request) {
+        seen.push(request.userContent);
+        return testSemanticClient().completeJson(request);
+      },
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "Technology" }],
+      fetchArticle: makeFetcher(new Map([[url, pageFor(url, title, body, "Example Review")]])),
+      maxArticleChecks: 1,
+      semanticClient,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    const payload = /<semantic_review_input>\n([\s\S]*?)\n<\/semantic_review_input>/u.exec(seen[0] ?? "")?.[1];
+    const parsed = JSON.parse(payload ?? "{}") as { candidates: Array<{ topicalEvidence: string[] }> };
+    expect(parsed.candidates[0]?.topicalEvidence).toEqual(["Technology"]);
+    expect(parsed.candidates[0]?.topicalEvidence.every((item) => item.length <= 64)).toBe(true);
+  });
+
   it("accepts a dynamically discovered Guardian article path under its established publisher root", async () => {
     const url = "https://www.theguardian.com/technology/2026/10/04/ai-explainer-reporting";
     const title = "How technology reporting explains a changing industry";

@@ -1,0 +1,224 @@
+{
+  "candidate": {
+    "commit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+    "tree": "bb9175405b17741114f2a1e86e393891487f46b1",
+    "parent": "628aa110e59b5f77bcb5bcd4782acf0b1f959970",
+    "baseMain": "d80e13c327ac2a8672e0eee95584cb4333dd422b",
+    "contract": "sayit-reader-v1.1-product-contract-r1",
+    "contractAggregateSha256": "5d58710e6fd10df211f69db4cbcd91f035a0a71a874d918aa013861f2769692d",
+    "dirtyProductSourceAtFinalReadback": false,
+    "candidateGuard": "candidate-guard.ts"
+  },
+  "adjudicationTotals": {
+    "new": { "pass": 8, "fail": 0, "notRun": 2 },
+    "affectedV1": { "pass": 14, "fail": 0, "notRun": 3 },
+    "total": { "pass": 22, "fail": 0, "notRun": 5 }
+  },
+  "acceptedOptInRuns": [
+    {
+      "cases": ["PAT-V11-02", "PAT-V11-10", "PAT-RC-13", "PAT-RC-27"],
+      "command": "& .\\node_modules\\.bin\\vitest.cmd run --config artifacts/sayit-reader-v11/acceptance/vitest.acceptance.config.ts artifacts/sayit-reader-v11/acceptance/candidate-observations.acceptance.ts artifacts/sayit-reader-v11/acceptance/pat-v11-10-rc13.acceptance.ts",
+      "result": "PASS; 2 files, 3 tests",
+      "candidateGuardRan": true,
+      "receipt": "pat-v11-10-rc13-a33e7ff1-bb917540-2026-10-07T04-33-31-109Z.json",
+      "receiptSha256": "C917226B52C0982D1357F55C68375509C4C55AB3B55FAEE8905240685F1ED74E",
+      "directAssertionSource": "candidate-observations.acceptance.ts"
+    },
+    {
+      "cases": ["PAT-V11-09", "PAT-RC-18"],
+      "command": "& .\\node_modules\\.bin\\vitest.cmd run --config artifacts/sayit-reader-v11/acceptance/vitest.acceptance.config.ts artifacts/sayit-reader-v11/acceptance/pat-v11-09-18.acceptance.ts",
+      "result": "PASS; 1 file, 2 tests",
+      "candidateGuardRan": true,
+      "receipts": [
+        {
+          "path": "pat-v11-09-a33e7ff1-bb917540-2026-10-07T04-45-35-930Z.json",
+          "sha256": "D9498DCCB910D21F9EBF7821AB91BE8667FBA2CD57D72502F79AADC38024C7B4"
+        },
+        {
+          "path": "pat-rc-18-a33e7ff1-bb917540-2026-10-07T04-45-36-787Z.json",
+          "sha256": "8C08683E470544712A153F4D8EF1EE92F4C36A8D6C0AB22BD975C3B2BD6DD577"
+        }
+      ]
+    },
+    {
+      "cases": ["PAT-RC-09", "PAT-RC-10"],
+      "command": "& .\\node_modules\\.bin\\vitest.cmd run --config artifacts/sayit-reader-v11/acceptance/vitest.acceptance.config.ts artifacts/sayit-reader-v11/acceptance/pat-rc-09-10.acceptance.ts",
+      "result": "PASS; 1 file, 1 test",
+      "candidateGuardRan": true,
+      "receipt": "pat-rc-09-10-a33e7ff1-bb917540-2026-10-07T04-41-29-447Z.json",
+      "receiptSha256": "A038FB4E58062DB47BFFC9B7CA72835A86CF349701FC02F6F030228EE26362EE"
+    }
+  ],
+  "realProvider": {
+    "cases": ["PAT-V11-03"],
+    "provider": "DeepSeek",
+    "model": "deepseek-flash",
+    "requestCount": 1,
+    "runtimeStatus": "SUCCEEDED",
+    "verifiedInputCandidateIds": [
+      "2bc08210af3211126d5e713a",
+      "a2038bfe714d79143cc03618",
+      "a6fc6d8e8a7d73938ab64e6c"
+    ],
+    "selected": [
+      {
+        "candidateId": "a2038bfe714d79143cc03618",
+        "contributionType": "explanation",
+        "rationale": "Explains why grid connection queues delay energy projects, citing grouped studies, transformer and transmission lead times, and cost allocation rules."
+      },
+      {
+        "candidateId": "a6fc6d8e8a7d73938ab64e6c",
+        "contributionType": "perspective",
+        "rationale": "Presents rural cooperative members weighing local control, revenue, storm restoration, rates, and ownership against regional power reliability plans."
+      }
+    ],
+    "rejectedCandidateId": "2bc08210af3211126d5e713a",
+    "issueStatus": "PARTIAL",
+    "actualReadingMinutes": 2.345,
+    "targetReadingMinutes": 5,
+    "lowerTargetMinutes": 3.5,
+    "receipt": "pat-v11-03-a33e7ff1-bb917540-2026-10-06T15-44-50-606Z.json",
+    "receiptSha256": "5D5EE240BC4B8CB1520CC714BCF25975C7014F40A5EE7CE28B769DE8686A1653",
+    "bodyDisclosure": "No full article bodies are published; evidence contains bounded request/response, source attribution, word and paragraph counts, and body hashes."
+  },
+  "realBroadDiscovery": [
+    {
+      "trigger": "Reader startup catch-up in the isolated acceptance Vite service",
+      "savedPreferencesOnly": true,
+      "preloadedArticleUrlList": false,
+      "queryCount": 4,
+      "uniqueDiscoveredUrlCount": 36,
+      "traceRows": 40,
+      "fullTextVerifiedCount": 0,
+      "semanticDecisionCount": 0,
+      "deliveredCount": 0,
+      "receipt": "pat-v11-06-live-default-catchup-nonfull-a33e7ff1-host-normalized.json",
+      "receiptSha256": "2FB9A3D868F98B3C614FE49A964E01DFB78BDB005012C9864652CF462A57FA4C"
+    },
+    {
+      "trigger": "manual POST /api/reader/run with body {\"trigger\":\"manual\"}; saved climate adaptation preferences; isolated Reader state",
+      "preferences": {
+        "topics": ["climate adaptation"],
+        "dailyArticleCount": 1,
+        "difficulty": "Intermediate",
+        "readingBudgetMinutes": 20,
+        "collectionTime": "23:59",
+        "timezone": "Asia/Shanghai"
+      },
+      "preloadedArticleUrlList": false,
+      "queries": [
+        "climate adaptation latest news in-depth article",
+        "climate adaptation recent news analysis long-form article",
+        "climate adaptation explainer reporting English article",
+        "climate adaptation independent analysis reporting"
+      ],
+      "uniqueDiscoveredUrlCount": 28,
+      "traceRows": 38,
+      "fullTextVerifiedCount": 0,
+      "semanticDecisionCount": 0,
+      "deliveredCount": 0,
+      "receipt": "pat-v11-06-live-climate-adaptation-nonfull-a33e7ff1.json",
+      "receiptSha256": "E6EB228A21C79080567953B4A238F99C7DC5D1C072BA85C27FD51610B806C534"
+    }
+  ],
+  "liveUnknownPublisherDiagnosis": {
+    "url": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue",
+    "publisherNameMapAbsent": true,
+    "statusCode": 200,
+    "exactTraceReason": "Standalone article structure and title metadata do not agree.",
+    "metadataAndExtraction": {
+      "htmlTitle": "Who’s liable when AI agents go rogue? | MIT Technology Review",
+      "readabilityTitle": "Who’s liable when AI agents go rogue?",
+      "structuredHeadline": "Who’s liable when AI agents go rogue?",
+      "openGraphTitle": "Who’s liable when AI agents go rogue?",
+      "openGraphSiteName": "MIT Technology Review",
+      "openGraphType": "article",
+      "htmlLang": "en",
+      "articleRootCount": 0,
+      "pageLevelH1Status": "UNKNOWN; receipt only stores h1 elements under article roots",
+      "readableParagraphCount": 39,
+      "readableWordCount": 1941,
+      "citationPublication": null,
+      "articlePublisher": null,
+      "structuredArticleBodyBoundary": "NOT_RETAINED",
+      "originalSearchResultTitle": "NOT_RETAINED",
+      "canonicalUrl": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue/",
+      "candidateNormalizationRemovesTrailingSlash": true
+    },
+    "falseRejectionReproducible": false,
+    "receipt": "pat-v11-06-single-page-diagnosis-technologyreview-a33e7ff1.json",
+    "receiptSha256": "9CF0C994BE78F59C9C6D93E4F126C8E26CCF3D227BAC99743A24A171BAA55DB8"
+  },
+  "unknownInvalidControl": {
+    "case": "PAT-V11-02",
+    "fixturePublisher": "Riverland Technology Journal",
+    "conflictingOgSiteName": "North Coast Market News",
+    "expectedAndObservedReason": "Publisher identity metadata conflicts.",
+    "contentStatus": "EXTERNAL_ONLY",
+    "fullTextCount": 0,
+    "semanticCall": false,
+    "assertions": "candidate-observations.acceptance.ts"
+  },
+  "blockedBrowserObservations": {
+    "cases": ["PAT-RH-09", "PAT-RH-12"],
+    "tool": "mcp__cua_repl browser surfaces",
+    "error": "nodeRepl.fetch request failed",
+    "result": "No browser tab/product UI observation; not claimed as PASS."
+  },
+  "historicalFailure": {
+    "candidateCommit": "628aa110e59b5f77bcb5bcd4782acf0b1f959970",
+    "receipt": "pat-v11-03-628aa110-tree-146b7a9f-instrumented-failure.json",
+    "sha256": "EA394339E9EA4259B995B038A633E552D82E85FDCD123B6DBA07C689CE123FF2",
+    "disposition": "Preserved as failed 628aa110 evidence; not used for the a33e7ff1 candidate."
+  },
+  "directEngineeringAssertionMap": [
+    {
+      "observations": ["PAT-V11-04", "PAT-RC-08", "PAT-RC-26", "PAT-RC-28"],
+      "source": "server/reader/editorial.test.ts:556-580",
+      "assertions": "Same-event independent reporting and analysis remain eligible; copy does not occupy another slot."
+    },
+    {
+      "observations": ["PAT-V11-05"],
+      "sources": ["server/reader/semantic.test.ts:139-244", "src/shared/reader-contract.test.ts:85-102"],
+      "assertions": "Strict response schema, ID cardinality, invalid values, input authority, provider behavior, and trace authority are tested."
+    },
+    {
+      "observations": ["PAT-V11-07"],
+      "sources": ["server/reader/safe-fetch.test.ts:25-146", "server/reader/semantic.test.ts:160-196"],
+      "assertions": "Private-address, DNS/rebinding, redirect, pinned IP, proxy, and model-authority safeguards."
+    },
+    {
+      "observations": ["PAT-V11-08", "PAT-RC-11"],
+      "sources": ["server/reader/semantic.test.ts:139-244", "server/reader/service.test.ts:197-436"],
+      "assertions": "Fail-closed semantic errors, preserved issue/progress, and bounded scheduled retries."
+    },
+    {
+      "observations": ["PAT-RC-12", "PAT-RC-15", "PAT-RC-16"],
+      "source": "server/reader/editorial.test.ts:378-554; 624-642",
+      "assertions": "Summary/incomplete/403/404 exclusions, shortage, and saved constraints."
+    },
+    {
+      "observations": ["PAT-RC-09"],
+      "source": "server/reader/editorial.test.ts:582-609",
+      "assertions": "Original and accessible publisher/URL attribution remain separate on a verified accessible version."
+    },
+    {
+      "observations": ["PAT-RH-15"],
+      "sources": ["server/reader/service.test.ts:479-523", "src/reader/ReaderWorkspace.test.tsx:434-595"],
+      "assertions": "Confirmed regeneration preserves old editions and carries reading progress."
+    },
+    {
+      "observations": ["PAT-V11-09"],
+      "sources": ["server/reader/store.test.ts:121-200", "server/reader/api.test.ts:297-326", "pat-v11-09-18.acceptance.ts"],
+      "assertions": "Direct store/API historical compatibility plus actual PAT03 decision persistence replay through a restarted service."
+    }
+  ],
+  "engineeringVerificationReportedByIntegrator": {
+    "defaultSuite": "150/150 PASS after acceptance test discovery was isolated",
+    "focusedSuite": "47/47 PASS",
+    "typecheck": "PASS",
+    "build": "PASS",
+    "diffCheck": "PASS",
+    "claimLimit": "Totals support source binding only; per-case outcomes above rely on assertions and observations, not mechanically on suite totals."
+  }
+}

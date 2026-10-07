@@ -22,7 +22,7 @@
 ## 4. Engineering and Integration
 
 - [x] 4.1 汇合各实现任务已提供的回归证据，运行正常工程套件与构建并保存结果；见 artifacts/sayit-reader-v11/engineering/implementer-handoff.md（正常 150/150，聚焦 92/92，typecheck/build PASS）。
-- [ ] 4.2 Integrator 核对仅本增量改动，旧 V1 证据/PR 不变，产出一个 candidate SHA 与证据目录。
+- [x] 4.2 Integrator 核对仅本增量改动，旧 V1 证据/PR 不变；初始 candidate 为 `628aa110e59b5f77bcb5bcd4782acf0b1f959970`，PAT-V11-03 有界修复后的当前单一 candidate 为 `a33e7ff1a881551ade59b37e38da24fca05a7dc4`，均已验证 tree/source manifest 与对应工程证据一致。
 
 ## 5. Product Acceptance and Delivery
 
@@ -31,5 +31,7 @@
 - [ ] 5.3 真实 FAIL 只返回负责的 Implementer 做必要修复；新候选重跑受影响案例及所需回归，AE 不修实现。
 - [ ] 5.4 生成候选绑定验收报告和日志索引；PM 在全部必需案例 PASS 后作 V1.1 最终产品判定。
 - [ ] 5.5 提交并推送新分支及合规证据，针对 current main 开新 PR，交付 candidate/PR、分组结果、真实运行与未知来源接受/拒绝例证。
+
+当前收口记录（2026-10-07，candidate `a33e7ff1a881551ade59b37e38da24fca05a7dc4`）：独立 AE 报告新 V1.1 8 PASS / 0 FAIL / 2 NOT-RUN，受影响 V1 14 PASS / 0 FAIL / 3 NOT-RUN。报告和索引已生成，尚未满足最终产品接受条件；待补观察仅为 PAT-V11-01、PAT-V11-06、PAT-RC-07、PAT-RH-09、PAT-RH-12。实时发现尚无未知出版者核验成功正例，CUA bridge 失败还阻塞两项真实 UI 观察。PM 状态为 ACCEPTANCE_INCOMPLETE。
 
 任务勾选属于执行记录，可随进度更新；冻结产品意义由 `freeze.md` 所列合同工件及 revision 决定，不能通过任务改写降低验收要求。

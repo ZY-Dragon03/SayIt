@@ -1,0 +1,312 @@
+{
+  "observations": [
+    "PAT-RC-18"
+  ],
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "contract": "sayit-reader-v1.1-product-contract-r1",
+  "fixtureKind": "controlled synthetic verified article pages and semantic response through candidate collector and scheduled ReaderService lifecycle",
+  "savedPreferences": {
+    "topics": [
+      "Technology"
+    ],
+    "dailyArticleCount": 2,
+    "difficulty": "Intermediate",
+    "readingBudgetMinutes": 10,
+    "collectionTime": "18:00",
+    "timezone": "UTC"
+  },
+  "controlledClock": {
+    "manualAt": "2026-10-07T09:00:00.000Z",
+    "scheduledAt": "2026-10-07T18:00:00.000Z",
+    "method": "injected clock and explicit pulse; no calendar waiting"
+  },
+  "fixtureMetrics": {
+    "https://north-valley-technology.example/energy/grid-queue-overview": {
+      "wordCount": 336,
+      "readingMinutes": 1.68,
+      "fkgl": 10.856170212765957,
+      "difficulty": "Intermediate",
+      "bodySha256": "9f9737332d6b624d1caa863c2a950f4ce7eb5ff169031951579c1110202270aa",
+      "url": "https://north-valley-technology.example/energy/grid-queue-overview",
+      "title": "How grid connection queues delay new technology projects",
+      "publisher": "North Valley Technology Review"
+    },
+    "https://west-ridge-technology.example/energy/queue-update": {
+      "wordCount": 329,
+      "readingMinutes": 1.645,
+      "fkgl": 12.450869565217396,
+      "difficulty": "Advanced",
+      "bodySha256": "bdaaaa9d0a21a627c4af69062dac808692fb43402f4b8b716254a2d2674d955e",
+      "url": "https://west-ridge-technology.example/energy/queue-update",
+      "title": "Grid queue update repeats project delay findings",
+      "publisher": "West Ridge Technology Journal"
+    },
+    "https://community-network-review.example/technology/small-town-service-costs": {
+      "wordCount": 1536,
+      "readingMinutes": 7.68,
+      "fkgl": 11.53027777777778,
+      "difficulty": "Intermediate",
+      "bodySha256": "92bbda0109f06a1ce9d9d8f448a6fa7aee4db207b425be54b3ac3bd5a1133bc9",
+      "url": "https://community-network-review.example/technology/small-town-service-costs",
+      "title": "Small firms compare technology support costs across towns",
+      "publisher": "Community Network Review"
+    }
+  },
+  "semanticRuntimeInputs": [
+    {
+      "alreadyDelivered": [],
+      "candidates": [
+        {
+          "id": "b890cb51ce6a92fa7e5f5117",
+          "title": "How grid connection queues delay new technology projects",
+          "publication": "North Valley Technology",
+          "evidence": "In the early 1 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 2 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 3 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 4 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 5 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 6 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain. In the early 7 review, technology teams compare service costs and customer needs across small towns. Finance staff record changes in monthly bills and repair hours before expanding a regional network. Managers explain each result with public evidence so readers can assess what improved and which questions remain.",
+          "topicalEvidence": [],
+          "wordCount": 336,
+          "readingMinutes": 1.68,
+          "fkgl": 10.856170212765957,
+          "difficulty": "Intermediate",
+          "provenance": {
+            "publisherIdentity": "North Valley Technology Review",
+            "publisherIdentitySources": [
+              "citation_publication_title",
+              "open_graph_site_name"
+            ],
+            "canonicalRelationship": "original_url",
+            "standaloneArticleVerified": true,
+            "titleAgreementVerified": true,
+            "bodyCompletenessVerified": true
+          }
+        }
+      ]
+    },
+    {
+      "alreadyDelivered": [
+        {
+          "title": "How grid connection queues delay new technology projects",
+          "publication": "North Valley Technology",
+          "topics": [
+            "Technology"
+          ],
+          "wordCount": 336,
+          "readingMinutes": 1.68,
+          "difficulty": "Intermediate",
+          "contributionType": "analysis"
+        }
+      ],
+      "candidates": [
+        {
+          "id": "f7fa380ad208daa333db8508",
+          "title": "Grid queue update repeats project delay findings",
+          "publication": "West Ridge Technology",
+          "evidence": "In the 1 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 2 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 3 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 4 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 5 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 6 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work. In the 7 grid review, utility leaders report the same queue delays for technology projects. The report repeats transformer orders, local upgrade costs, and study schedules already described in the earlier connection queue coverage. It offers no new evidence about the timing or responsibility for the work.",
+          "topicalEvidence": [],
+          "wordCount": 329,
+          "readingMinutes": 1.645,
+          "fkgl": 12.450869565217396,
+          "difficulty": "Advanced",
+          "provenance": {
+            "publisherIdentity": "West Ridge Technology Journal",
+            "publisherIdentitySources": [
+              "citation_publication_title",
+              "open_graph_site_name"
+            ],
+            "canonicalRelationship": "original_url",
+            "standaloneArticleVerified": true,
+            "titleAgreementVerified": true,
+            "bodyCompletenessVerified": true
+          }
+        },
+        {
+          "id": "4645eb8e4917ba0f77d237c9",
+          "title": "Small firms compare technology support costs across towns",
+          "publication": "Community Network Review",
+          "evidence": "[beginning] During the 1 service review, small firms compare software support costs with the time needed to repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison helps readers judge how a technology plan affects daily work, customer access, and operating costs. During the 2 service review, small firms compare software support costs with the time needed to repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison help [middle] tware support costs with the time needed to repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison helps readers judge how a technology plan affects daily work, customer access, and operating costs. During the 13 service review, small firms compare software support costs with the time needed to repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison helps readers judge how a technology plan affects daily [end] repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison helps readers judge how a technology plan affects daily work, customer access, and operating costs. During the 24 service review, small firms compare software support costs with the time needed to repair network equipment. Local buyers record monthly charges, response times, and service interruptions before renewing a contract. Public records show which towns received faster repairs and which routes still need investment. The comparison helps readers judge how a technology plan affects daily work, customer access, and operating costs.",
+          "topicalEvidence": [],
+          "wordCount": 1536,
+          "readingMinutes": 7.68,
+          "fkgl": 11.53027777777778,
+          "difficulty": "Intermediate",
+          "provenance": {
+            "publisherIdentity": "Community Network Review",
+            "publisherIdentitySources": [
+              "citation_publication_title",
+              "open_graph_site_name"
+            ],
+            "canonicalRelationship": "original_url",
+            "standaloneArticleVerified": true,
+            "titleAgreementVerified": true,
+            "bodyCompletenessVerified": true
+          }
+        }
+      ]
+    }
+  ],
+  "issueId": "issue:2026-10-07:UTC",
+  "edition": 1,
+  "finalIssue": {
+    "status": "COMPLETE",
+    "articles": [
+      {
+        "url": "https://north-valley-technology.example/energy/grid-queue-overview",
+        "title": "How grid connection queues delay new technology projects",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Technology"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "analysis",
+          "rationale": "Adds a technology support cost comparison from small firms across towns."
+        },
+        "provenance": {
+          "publisherIdentity": "North Valley Technology Review",
+          "publisherIdentitySources": [
+            "citation_publication_title",
+            "open_graph_site_name"
+          ],
+          "canonicalRelationship": "original_url",
+          "standaloneArticleVerified": true,
+          "titleAgreementVerified": true,
+          "bodyCompletenessVerified": true
+        }
+      },
+      {
+        "url": "https://community-network-review.example/technology/small-town-service-costs",
+        "title": "Small firms compare technology support costs across towns",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Technology"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "analysis",
+          "rationale": "Adds a technology support cost comparison from small firms across towns."
+        },
+        "provenance": {
+          "publisherIdentity": "Community Network Review",
+          "publisherIdentitySources": [
+            "citation_publication_title",
+            "open_graph_site_name"
+          ],
+          "canonicalRelationship": "original_url",
+          "standaloneArticleVerified": true,
+          "titleAgreementVerified": true,
+          "bodyCompletenessVerified": true
+        }
+      }
+    ],
+    "actual": {
+      "count": 2,
+      "topics": [
+        "Technology"
+      ],
+      "difficulty": "Intermediate",
+      "readingMinutes": 9.36
+    }
+  },
+  "rejectedOverlapTrace": {
+    "url": "https://west-ridge-technology.example/energy/queue-update",
+    "publication": "West Ridge Technology",
+    "outcome": "REJECTED",
+    "reason": "Keyword evidence for semantic topic review: Technology: technology, technolog, tech. 329 reading words; FKGL 12.45. Semantic reject: topic fit yes, value low, depth low, novelty low, overlap substantial, contribution reporting. Repeats the grid queue delays and project findings already delivered in this issue.",
+    "statusCode": 200,
+    "articleId": "f7fa380ad208daa333db8508"
+  },
+  "scheduledTraceSemantic": {
+    "contractVersion": "reader-editorial-curation.v1",
+    "status": "SUCCEEDED",
+    "provider": "controlled-acceptance-fixture",
+    "model": "scheduled-overlap-decision-control",
+    "candidateIds": [
+      "f7fa380ad208daa333db8508",
+      "4645eb8e4917ba0f77d237c9"
+    ],
+    "inputSha256": "8c434b5f53c768c05e7885caefc46d14e42eb7829250f5e275e8eef50af9fa47",
+    "requestIds": [
+      "acceptance-rc18-2"
+    ],
+    "requestCount": 1,
+    "elapsedMs": 1,
+    "reason": null,
+    "decisions": [
+      {
+        "candidateId": "f7fa380ad208daa333db8508",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "REJECT",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Technology"
+          ],
+          "relevance": "medium",
+          "editorialValue": "low",
+          "analysisDepth": "low",
+          "novelty": "low",
+          "overlap": "substantial",
+          "contributionType": "reporting",
+          "rationale": "Repeats the grid queue delays and project findings already delivered in this issue."
+        }
+      },
+      {
+        "candidateId": "4645eb8e4917ba0f77d237c9",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Technology"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "analysis",
+          "rationale": "Adds a technology support cost comparison from small firms across towns."
+        }
+      }
+    ]
+  },
+  "occurrence": {
+    "id": "occurrence:2026-10-07:UTC",
+    "localDate": "2026-10-07",
+    "timezone": "UTC",
+    "localTime": "18:00",
+    "scheduledAt": "2026-10-07T18:00:00.000Z",
+    "status": "COMPLETED",
+    "scheduledAttemptCount": 1,
+    "maxScheduledAttempts": 3,
+    "nextAttemptAt": null,
+    "lastAttemptId": "attempt:42ea41ed-559d-4362-b866-d429e1dc75ee",
+    "updatedAt": "2026-10-07T18:00:00.000Z"
+  },
+  "attempts": [
+    {
+      "trigger": "manual",
+      "state": "SUCCEEDED",
+      "deliveredCount": 1,
+      "semanticRuntimeStatus": "SUCCEEDED"
+    },
+    {
+      "trigger": "scheduled",
+      "state": "SUCCEEDED",
+      "deliveredCount": 2,
+      "semanticRuntimeStatus": "SUCCEEDED"
+    }
+  ],
+  "isolatedDirectory": "OS temp; removed after test"
+}

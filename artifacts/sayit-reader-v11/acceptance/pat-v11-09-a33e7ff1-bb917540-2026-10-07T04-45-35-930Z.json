@@ -1,0 +1,246 @@
+{
+  "observations": [
+    "PAT-V11-09"
+  ],
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "contract": "sayit-reader-v1.1-product-contract-r1",
+  "method": "candidate ReaderService/ReaderStore persistence replay using metadata and semantic trace from the successful real PAT-V11-03 receipt; no second provider call or article body persistence",
+  "providerReceipt": {
+    "path": "artifacts/sayit-reader-v11/acceptance/pat-v11-03-a33e7ff1-bb917540-2026-10-06T15-44-50-606Z.json",
+    "sha256": "5d5ee240bc4b8cb1520cc714bcf25975c7014f40a5ee7ce28b769de8686a1653",
+    "provider": "DeepSeek",
+    "model": "deepseek-flash",
+    "requestCount": 1,
+    "selected": [
+      {
+        "candidateId": "a6fc6d8e8a7d73938ab64e6c",
+        "url": "https://community-power.example/features/rural-reliability",
+        "title": "Rural residents weigh local control against power reliability",
+        "bodySha256": "1b85178f0ab7e98ffd7531016adfbc05ff1c5558496de67d1518f9b3320f1279",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Environment",
+            "Economy"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "medium",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "perspective",
+          "rationale": "Presents rural cooperative members weighing local control, revenue, storm restoration, rates, and ownership against regional power reliability plans."
+        },
+        "provenance": {
+          "publisherIdentity": "Community Power Journal",
+          "publisherIdentitySources": [
+            "citation_publication_title",
+            "open_graph_site_name"
+          ],
+          "canonicalRelationship": "original_url",
+          "standaloneArticleVerified": true,
+          "titleAgreementVerified": true,
+          "bodyCompletenessVerified": true
+        }
+      },
+      {
+        "candidateId": "a2038bfe714d79143cc03618",
+        "url": "https://systems-analysis.example/energy/grid-queue",
+        "title": "Why the grid connection queue slows new energy projects",
+        "bodySha256": "0c729653288642e80bc0bf57dae3e0c63877d96090ca7b7b47348e81d63103b3",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Environment",
+            "Economy"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "explanation",
+          "rationale": "Explains why grid connection queues delay energy projects, citing grouped studies, transformer and transmission lead times, and cost allocation rules."
+        },
+        "provenance": {
+          "publisherIdentity": "Systems Analysis Review",
+          "publisherIdentitySources": [
+            "citation_publication_title",
+            "open_graph_site_name"
+          ],
+          "canonicalRelationship": "original_url",
+          "standaloneArticleVerified": true,
+          "titleAgreementVerified": true,
+          "bodyCompletenessVerified": true
+        }
+      }
+    ]
+  },
+  "retrievalPath": "ReaderService.start() -> today() / edition() after constructing a new ReaderStore over the same isolated directory",
+  "sameReaderArticleIdentityBeforeAndAfterRestart": [
+    {
+      "id": "article:2bdf082156ac79dc19fcda7d5f4fad712094f80e",
+      "title": "Rural residents weigh local control against power reliability",
+      "originalUrl": "https://community-power.example/features/rural-reliability"
+    },
+    {
+      "id": "article:f833c5be1e392871c1aaa2e7f52e436e3ae97282",
+      "title": "Why the grid connection queue slows new energy projects",
+      "originalUrl": "https://systems-analysis.example/energy/grid-queue"
+    }
+  ],
+  "retrieved": [
+    {
+      "id": "article:2bdf082156ac79dc19fcda7d5f4fad712094f80e",
+      "title": "Rural residents weigh local control against power reliability",
+      "originalUrl": "https://community-power.example/features/rural-reliability",
+      "editorial": {
+        "contractVersion": "reader-editorial-curation.v1",
+        "decision": "APPROVE",
+        "topicFit": "YES",
+        "matchedTopics": [
+          "Environment",
+          "Economy"
+        ],
+        "relevance": "high",
+        "editorialValue": "high",
+        "analysisDepth": "medium",
+        "novelty": "high",
+        "overlap": "none",
+        "contributionType": "perspective",
+        "rationale": "Presents rural cooperative members weighing local control, revenue, storm restoration, rates, and ownership against regional power reliability plans."
+      },
+      "provenance": {
+        "publisherIdentity": "Community Power Journal",
+        "publisherIdentitySources": [
+          "citation_publication_title",
+          "open_graph_site_name"
+        ],
+        "canonicalRelationship": "original_url",
+        "standaloneArticleVerified": true,
+        "titleAgreementVerified": true,
+        "bodyCompletenessVerified": true
+      }
+    },
+    {
+      "id": "article:f833c5be1e392871c1aaa2e7f52e436e3ae97282",
+      "title": "Why the grid connection queue slows new energy projects",
+      "originalUrl": "https://systems-analysis.example/energy/grid-queue",
+      "editorial": {
+        "contractVersion": "reader-editorial-curation.v1",
+        "decision": "APPROVE",
+        "topicFit": "YES",
+        "matchedTopics": [
+          "Environment",
+          "Economy"
+        ],
+        "relevance": "high",
+        "editorialValue": "high",
+        "analysisDepth": "high",
+        "novelty": "high",
+        "overlap": "none",
+        "contributionType": "explanation",
+        "rationale": "Explains why grid connection queues delay energy projects, citing grouped studies, transformer and transmission lead times, and cost allocation rules."
+      },
+      "provenance": {
+        "publisherIdentity": "Systems Analysis Review",
+        "publisherIdentitySources": [
+          "citation_publication_title",
+          "open_graph_site_name"
+        ],
+        "canonicalRelationship": "original_url",
+        "standaloneArticleVerified": true,
+        "titleAgreementVerified": true,
+        "bodyCompletenessVerified": true
+      }
+    }
+  ],
+  "persistedSemanticTrace": {
+    "contractVersion": "reader-editorial-curation.v1",
+    "status": "SUCCEEDED",
+    "provider": "DeepSeek",
+    "model": "deepseek-flash",
+    "candidateIds": [
+      "2bc08210af3211126d5e713a",
+      "a2038bfe714d79143cc03618",
+      "a6fc6d8e8a7d73938ab64e6c"
+    ],
+    "inputSha256": "9f939c16a4843fbc79ee8ef04a978b08f951581a3c5e12078a618fe28ede4ef3",
+    "requestIds": [],
+    "requestCount": 1,
+    "elapsedMs": 2155,
+    "reason": null,
+    "decisions": [
+      {
+        "candidateId": "2bc08210af3211126d5e713a",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "REJECT",
+          "topicFit": "PARTIAL",
+          "matchedTopics": [
+            "Environment",
+            "Economy"
+          ],
+          "relevance": "medium",
+          "editorialValue": "low",
+          "analysisDepth": "low",
+          "novelty": "low",
+          "overlap": "none",
+          "contributionType": "reporting",
+          "rationale": "Repeats solar project announcements and totals without comparing plans to household bills, grid limits, or timing, leaving practical effects unanswered."
+        }
+      },
+      {
+        "candidateId": "a2038bfe714d79143cc03618",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Environment",
+            "Economy"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "explanation",
+          "rationale": "Explains why grid connection queues delay energy projects, citing grouped studies, transformer and transmission lead times, and cost allocation rules."
+        }
+      },
+      {
+        "candidateId": "a6fc6d8e8a7d73938ab64e6c",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Environment",
+            "Economy"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "medium",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "perspective",
+          "rationale": "Presents rural cooperative members weighing local control, revenue, storm restoration, rates, and ownership against regional power reliability plans."
+        }
+      }
+    ]
+  },
+  "historicalCompatibility": {
+    "editorialAndProvenanceRemoved": true,
+    "semanticTraceRemoved": true,
+    "recordsLoaded": 2,
+    "legacyFullTextRecords": 2
+  },
+  "issueStatus": "PARTIAL",
+  "isolatedDirectory": "OS temp; removed after test"
+}

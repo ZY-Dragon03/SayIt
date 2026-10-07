@@ -1,0 +1,121 @@
+{
+  "observations": [
+    "PAT-RC-09",
+    "PAT-RC-10"
+  ],
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "contract": "sayit-reader-v1.1-product-contract-r1",
+  "fixtureKind": "controlled synthetic source recovery boundary; original returns HTTP 403 and a separate verified article is processed on its own attribution",
+  "preferences": {
+    "topics": [
+      "Finance"
+    ],
+    "dailyArticleCount": 1,
+    "difficulty": "Intermediate",
+    "readingBudgetMinutes": 5
+  },
+  "original": {
+    "url": "https://unlisted-origin-finance.example/research/credit-report",
+    "title": "Credit market report from North Coast Finance Research",
+    "publisher": "North Coast Finance Research",
+    "statusCode": 403,
+    "trace": {
+      "url": "https://unlisted-origin-finance.example/research/credit-report",
+      "publication": "North Coast Finance Research",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "95f415a97e6de16733496b00"
+    },
+    "resultingContentStatus": "EXTERNAL_ONLY",
+    "actualFullTextCountContribution": 0
+  },
+  "independentAlternative": {
+    "url": "https://independent-river-economics.example/analysis/local-credit-costs",
+    "title": "Independent analysis of local credit costs and lender access",
+    "publisher": "River Economics Journal",
+    "bodyParagraphCount": 15,
+    "wordCount": 855,
+    "readingMinutes": 4.275,
+    "bodySha256": "ee66f4bb88bacc2f69978cdff0164f69710af6c8f9bd9b89650dbd3822a1278a",
+    "selectedPublication": "Independent River Economics",
+    "selectedOriginalUrl": "https://independent-river-economics.example/analysis/local-credit-costs",
+    "selectedAccessiblePublication": "River Economics Journal",
+    "selectedAccessibleUrl": "https://independent-river-economics.example/analysis/local-credit-costs",
+    "originalSourceLabelFromHost": "Independent River Economics",
+    "provenance": {
+      "publisherIdentity": "River Economics Journal",
+      "publisherIdentitySources": [
+        "citation_publication_title",
+        "open_graph_site_name"
+      ],
+      "canonicalRelationship": "original_url",
+      "standaloneArticleVerified": true,
+      "titleAgreementVerified": true,
+      "bodyCompletenessVerified": true
+    },
+    "editorial": {
+      "contractVersion": "reader-editorial-curation.v1",
+      "decision": "APPROVE",
+      "topicFit": "YES",
+      "matchedTopics": [
+        "Finance"
+      ],
+      "relevance": "high",
+      "editorialValue": "high",
+      "analysisDepth": "high",
+      "novelty": "high",
+      "overlap": "none",
+      "contributionType": "analysis",
+      "rationale": "Compares local credit costs and lender access using rate, approval-time, and repayment evidence."
+    }
+  },
+  "actual": {
+    "count": 1,
+    "topics": [
+      "Finance"
+    ],
+    "difficulty": "Intermediate",
+    "readingMinutes": 4.275
+  },
+  "status": "COMPLETE",
+  "semanticRuntime": {
+    "contractVersion": "reader-editorial-curation.v1",
+    "status": "SUCCEEDED",
+    "provider": "controlled-acceptance-fixture",
+    "model": "source-attribution-path-control",
+    "candidateIds": [
+      "08ac1cb8d01680304fb29fe7"
+    ],
+    "inputSha256": "6120512a63d4c9cb1f4b9e83dab3ab8118ab23c7c84b1e4e07d2a8ac688478de",
+    "requestIds": [
+      "acceptance-source-recovery-1"
+    ],
+    "requestCount": 1,
+    "elapsedMs": 11,
+    "reason": null,
+    "decisions": [
+      {
+        "candidateId": "08ac1cb8d01680304fb29fe7",
+        "editorial": {
+          "contractVersion": "reader-editorial-curation.v1",
+          "decision": "APPROVE",
+          "topicFit": "YES",
+          "matchedTopics": [
+            "Finance"
+          ],
+          "relevance": "high",
+          "editorialValue": "high",
+          "analysisDepth": "high",
+          "novelty": "high",
+          "overlap": "none",
+          "contributionType": "analysis",
+          "rationale": "Compares local credit costs and lender access using rate, approval-time, and repayment evidence."
+        }
+      }
+    ]
+  },
+  "selectedCount": 1,
+  "submittedUrlList": "controlled search callback only; no URL list was supplied as a service input"
+}

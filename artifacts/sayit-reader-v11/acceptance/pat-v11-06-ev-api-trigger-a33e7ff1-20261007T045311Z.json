@@ -1,0 +1,67 @@
+{
+  "candidate": {
+    "commit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+    "tree": "bb9175405b17741114f2a1e86e393891487f46b1"
+  },
+  "createdAt": "2026-10-07T04:57:56.9711366Z",
+  "triggerRequest": {
+    "articleUrlListProvided": false,
+    "trigger": "manual"
+  },
+  "savedPreferences": {
+    "topics": [
+      "Electric vehicle batteries"
+    ],
+    "dailyArticleCount": 1,
+    "difficulty": "Intermediate",
+    "readingBudgetMinutes": 60,
+    "collectionTime": "23:59",
+    "timezone": "Asia/Shanghai"
+  },
+  "apiResponse": {
+    "attempt": {
+      "id": "attempt:ca01fb32-dae7-486b-aeed-4e68f8182127",
+      "issueId": "issue:2026-10-07:Asia%2FShanghai",
+      "edition": 1,
+      "trigger": "manual",
+      "state": "RUNNING",
+      "startedAt": "2026-10-07T04:57:56.918Z",
+      "completedAt": null,
+      "retryable": false,
+      "failureReason": null,
+      "deliveredCount": 0,
+      "traceId": "trace:ce837c1c-1258-4d7d-92dc-9772c1429c12"
+    },
+    "issue": {
+      "id": "issue:2026-10-07:Asia%2FShanghai",
+      "localDate": "2026-10-07",
+      "timezone": "Asia/Shanghai",
+      "edition": 1,
+      "status": "NOT_DELIVERED",
+      "target": {
+        "topics": [
+          "Electric vehicle batteries"
+        ],
+        "dailyArticleCount": 1,
+        "difficulty": "Intermediate",
+        "readingBudgetMinutes": 60,
+        "collectionTime": "23:59",
+        "timezone": "Asia/Shanghai"
+      },
+      "actual": {
+        "count": 0,
+        "topics": [],
+        "difficulty": null,
+        "readingMinutes": 0
+      },
+      "unmetConstraints": [
+        "No verified full-text articles have been delivered."
+      ],
+      "articles": [],
+      "createdAt": "2026-10-07T04:57:56.916Z",
+      "updatedAt": "2026-10-07T04:57:56.916Z",
+      "priorEditions": []
+    },
+    "schema_version": "1"
+  }
+}
