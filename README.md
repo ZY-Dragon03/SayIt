@@ -56,6 +56,20 @@ IPA results use the browser-local cache key `sayit.ipa.v1`. Any change to the IP
 
 The local IPA engine is approved for private/local Dogfood use only. Public distribution remains blocked pending a license/distribution review of bundled eSpeak NG code or replacement with a permissively licensed engine.
 
+### SayIt result cache
+
+Repeated successful SayIt queries are served from one shared local cache instead of spending another LLM call. It is used by both normal SayIt and Reader, and it is not History: History records what you asked and used, while the cache answers "do we already have a valid model answer for this request?".
+
+- a normalized single lexical word (`Psychologically`, ` psychologically `, `PSYCHOLOGICALLY`) is one context-free entry shared by both surfaces;
+- a Reader phrase or sentence also keys on its normalized article sentence, so a context-specific interpretation is never reused in an unrelated context;
+- only validated successful `SayItResult` objects are stored — clarification and no-match answers are always re-asked;
+- an explicit SayIt action that hits the cache still behaves like a SayIt interaction and follows the normal History dedupe policy;
+- a local dictionary-only selection (no SayIt action) never writes History or the cache.
+
+The cache lives under the browser-local key `sayit.result-cache.v1`. Changing the retrieval prompt, model, or result shape MUST bump `SAYIT_CACHE_SCHEMA_VERSION` in `src/lib/sayit-cache.ts` so stale answers are invalidated.
+
+Speech playback warms the Web Speech voice list at startup and reuses the selected US/UK voice, so pressing Listen does not pay a multi-second voice-discovery cost. The service only cancels the engine when playback is actually pending or speaking.
+
 ## Verification
 
 ```powershell

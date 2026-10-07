@@ -29,6 +29,13 @@ export interface PronunciationCallbacks {
   onError: () => void;
 }
 
+export interface SpeechStartTiming {
+  /** Milliseconds between the speak() call and the engine's onstart event. */
+  startLatencyMs: number;
+  /** Whether the voice list was already warm when the request was made. */
+  voicesWarm: boolean;
+}
+
 export function loadPronunciationPreferences(
   storage?: Storage | null,
 ): PronunciationPreferences {
@@ -97,10 +104,26 @@ export function selectPronunciationVoice(
 
 type UtteranceFactory = (text: string) => SpeechSynthesisUtterance;
 
+type TimingReporter = (timing: SpeechStartTiming) => void;
+
+/**
+ * Shared Web Speech playback service for normal SayIt and Reader.
+ *
+ * The browser's speech engine can take seconds to answer the first speak()
+ * request, so the voice list is resolved once, kept warm through
+ * `voiceschanged`, and reused for every later request instead of being
+ * rebuilt on each click.
+ */
 export class PronunciationService {
   private readonly synthesis: SpeechSynthesis | null;
   private readonly createUtterance: UtteranceFactory;
+  private readonly reportTiming: TimingReporter | null;
   private requestId = 0;
+  private warmed = false;
+  private readonly cachedVoices = new Map<
+    PronunciationAccent,
+    SpeechSynthesisVoice | null
+  >();
 
   constructor(
     synthesis: SpeechSynthesis | null =
@@ -109,9 +132,36 @@ export class PronunciationService {
         : null,
     createUtterance: UtteranceFactory = (text) =>
       new SpeechSynthesisUtterance(text),
+    reportTiming: TimingReporter | null = null,
   ) {
     this.synthesis = synthesis;
     this.createUtterance = createUtterance;
+    this.reportTiming = reportTiming;
+  }
+
+  /** Resolve the voice list once and keep it fresh via `voiceschanged`. */
+  warmUp(): void {
+    if (this.warmed || !this.synthesis) {
+      return;
+    }
+    this.warmed = true;
+
+    try {
+      if (typeof this.synthesis.addEventListener === "function") {
+        this.synthesis.addEventListener("voiceschanged", this.handleVoicesChanged);
+      } else {
+        this.synthesis.onvoiceschanged = this.handleVoicesChanged;
+      }
+    } catch {
+      // Engine change notifications are an optimization, not a requirement.
+    }
+
+    this.refreshVoices();
+  }
+
+  /** True once a voice list has been read from the engine. */
+  get isWarm(): boolean {
+    return this.warmed;
   }
 
   speak(
@@ -123,25 +173,39 @@ export class PronunciationService {
       throw new Error("Speech playback is unavailable in this browser.");
     }
 
+    this.warmUp();
+
     const requestId = ++this.requestId;
-    this.synthesis.cancel();
+    const voicesWereWarm = this.hasResolvedVoice(preferences.accent);
+    const requestedAt = now();
+
+    // Only interrupt playback that actually exists. An unconditional cancel()
+    // on every idle click is pure avoidable startup latency.
+    try {
+      if (this.synthesis.speaking || this.synthesis.pending) {
+        this.synthesis.cancel();
+      }
+      if (this.synthesis.paused) {
+        this.synthesis.resume();
+      }
+    } catch {
+      // A status read that fails must not prevent the new utterance.
+    }
+
     const utterance = this.createUtterance(text);
     utterance.lang = getPronunciationLocale(preferences.accent);
     utterance.rate = getPronunciationRate(preferences.speed);
-
-    try {
-      utterance.voice = selectPronunciationVoice(
-        this.synthesis.getVoices(),
-        preferences.accent,
-      ) ?? null;
-    } catch {
-      utterance.voice = null;
-    }
+    utterance.voice = this.resolveVoice(preferences.accent);
 
     utterance.onstart = () => {
-      if (requestId === this.requestId) {
-        callbacks.onStart();
+      if (requestId !== this.requestId) {
+        return;
       }
+      this.reportTiming?.({
+        startLatencyMs: Math.round((now() - requestedAt) * 100) / 100,
+        voicesWarm: voicesWereWarm,
+      });
+      callbacks.onStart();
     };
     utterance.onend = () => {
       if (requestId === this.requestId) {
@@ -165,6 +229,59 @@ export class PronunciationService {
 
   stop(): void {
     this.requestId += 1;
-    this.synthesis?.cancel();
+    try {
+      this.synthesis?.cancel();
+    } catch {
+      // Nothing to cancel when the engine is unavailable.
+    }
   }
+
+  private readonly handleVoicesChanged = (): void => {
+    this.refreshVoices();
+  };
+
+  private refreshVoices(): void {
+    if (!this.synthesis) {
+      return;
+    }
+    this.cachedVoices.clear();
+    // Reading the list here populates the engine's internal voice table, which
+    // is what keeps the first real speak() call from blocking for seconds.
+    this.resolveVoice("us");
+    this.resolveVoice("uk");
+  }
+
+  private hasResolvedVoice(accent: PronunciationAccent): boolean {
+    return this.cachedVoices.has(accent);
+  }
+
+  private resolveVoice(accent: PronunciationAccent): SpeechSynthesisVoice | null {
+    if (this.cachedVoices.has(accent)) {
+      return this.cachedVoices.get(accent) ?? null;
+    }
+    if (!this.synthesis) {
+      return null;
+    }
+
+    let voice: SpeechSynthesisVoice | undefined;
+    try {
+      voice = selectPronunciationVoice(this.synthesis.getVoices(), accent);
+    } catch {
+      voice = undefined;
+    }
+    if (!voice) {
+      // Do not cache a miss: a late `voiceschanged` may still deliver an
+      // English voice, and a miss cached here would outlive it.
+      return null;
+    }
+    this.cachedVoices.set(accent, voice);
+    return voice;
+  }
+}
+
+function now(): number {
+  return typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 }

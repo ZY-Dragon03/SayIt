@@ -7,12 +7,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
-  apiErrorSchema,
   isSuccessfulResult,
   MAX_CONTEXT_SUMMARY_LENGTH,
   MAX_INPUT_LENGTH,
   MAX_SESSION_TURNS,
-  sayItResultSchema,
   type SayItResult,
   type SessionContextTurn,
   type ExpressionType,
@@ -39,8 +37,22 @@ import {
   PronunciationService,
   savePronunciationPreferences,
   type PronunciationPreferences,
+  type SpeechStartTiming,
 } from "./lib/pronunciation";
 import { getIPA, getIPACacheKey } from "./lib/ipa";
+import {
+  BookmarkIcon,
+  CheckIcon,
+  CopyButton,
+  CopyIcon,
+  HistoryIcon,
+  SpeakButton,
+  SpeakerIcon,
+  useCopyAction,
+} from "./lib/action-controls";
+import { LocalSayItCacheRepository } from "./lib/sayit-cache";
+import { resolveSayItRequest } from "./lib/sayit-resolver";
+import { RetrievalApiError, requestRetrieval } from "./lib/sayit-request";
 import { ReaderWorkspace } from "./reader/ReaderWorkspace";
 import "./App.css";
 
@@ -133,28 +145,10 @@ function getIPAExpressions(result: SayItResult): string[] {
   );
 }
 
-async function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const helper = document.createElement("textarea");
-  helper.value = text;
-  helper.style.position = "fixed";
-  helper.style.opacity = "0";
-  document.body.appendChild(helper);
-  helper.select();
-  const copied = document.execCommand("copy");
-  helper.remove();
-  if (!copied) {
-    throw new Error("Clipboard access is unavailable.");
-  }
-}
-
 function App() {
   const repositoryRef = useRef<LocalMemoryRepository | null>(null);
   const historyRepositoryRef = useRef<LocalHistoryRepository | null>(null);
+  const cacheRepositoryRef = useRef<LocalSayItCacheRepository | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SayItResult | null>(null);
@@ -167,7 +161,6 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
@@ -186,14 +179,25 @@ function App() {
   const [ipaByKey, setIpaByKey] = useState<Record<string, string>>({});
   const pronunciationServiceRef = useRef<PronunciationService | null>(null);
 
+  const getCacheRepository = useCallback(() => {
+    cacheRepositoryRef.current ??= new LocalSayItCacheRepository();
+    return cacheRepositoryRef.current;
+  }, []);
+
+  const getHistoryRepository = useCallback(() => {
+    historyRepositoryRef.current ??= new LocalHistoryRepository();
+    return historyRepositoryRef.current;
+  }, []);
+
   useEffect(() => {
     const repository = new LocalMemoryRepository();
     repositoryRef.current = repository;
     setSavedItems(repository.list());
-    const historyRepository = new LocalHistoryRepository();
-    historyRepositoryRef.current = historyRepository;
+    const historyRepository = getHistoryRepository();
     setHistoryItems(historyRepository.list());
-  }, []);
+    // Establish the shared SayIt result cache before any request can need it.
+    getCacheRepository();
+  }, [getCacheRepository, getHistoryRepository]);
 
   useEffect(() => {
     const textarea = inputRef.current;
@@ -217,7 +221,18 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    pronunciationServiceRef.current = new PronunciationService();
+    pronunciationServiceRef.current = new PronunciationService(
+      undefined,
+      undefined,
+      (timing: SpeechStartTiming) => {
+        if (import.meta.env.DEV) {
+          console.debug("[sayit] speech start latency", timing);
+        }
+      },
+    );
+    // Warm the engine voice list at startup so the first Listen is not paying
+    // for voice discovery.
+    pronunciationServiceRef.current.warmUp();
     return () => {
       pronunciationServiceRef.current?.stop();
     };
@@ -276,6 +291,21 @@ function App() {
     window.setTimeout(() => setNotice(null), 2200);
   }, []);
 
+  const { copiedLabel, copy: handleCopy } = useCopyAction(showNotice);
+
+  const markSayItInteraction = useCallback(
+    (value: string, nextResult: SayItResult) => {
+      const historyRepository = getHistoryRepository();
+      try {
+        historyRepository.append(value, nextResult);
+        setHistoryItems(historyRepository.list());
+      } catch {
+        showNotice("This result could not be added to local history.");
+      }
+    },
+    [getHistoryRepository, showNotice],
+  );
+
   const updatePronunciationPreferences = useCallback(
     (next: PronunciationPreferences) => {
       setPronunciationPreferences(next);
@@ -317,67 +347,61 @@ function App() {
     [pronunciationPreferences],
   );
 
-  const retrieve = useCallback(async (value: string) => {
-    setIsSubmitting(true);
-    setError(null);
-    setNotice(null);
-    setResult(null);
-    setActiveSavedId(null);
+  const retrieve = useCallback(
+    async (value: string) => {
+      setIsSubmitting(true);
+      setError(null);
+      setNotice(null);
+      setResult(null);
+      setActiveSavedId(null);
 
-    try {
-      const response = await fetch("/api/retrieve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: value,
-          context: sessionContext.slice(-MAX_SESSION_TURNS),
-        }),
-      });
-      const payload: unknown = await response.json();
+      const requestedContext = sessionContext.slice(-MAX_SESSION_TURNS);
 
-      if (!response.ok) {
-        const parsedError = apiErrorSchema.safeParse(payload);
-        throw new Error(
-          parsedError.success
-            ? parsedError.data.error.message
-            : "SayIt could not complete this request.",
-        );
-      }
-
-      const parsedResult = sayItResultSchema.safeParse(payload);
-      if (!parsedResult.success) {
-        throw new Error("SayIt received an invalid result.");
-      }
-      setResult(parsedResult.data);
-      if (parsedResult.data.status === "success") {
-        const historyRepository =
-          historyRepositoryRef.current ?? new LocalHistoryRepository();
-        historyRepositoryRef.current = historyRepository;
-        try {
-          historyRepository.append(value, parsedResult.data);
-          setHistoryItems(historyRepository.list());
-        } catch {
-          showNotice("This result could not be added to local history.");
+      try {
+        // One shared persistent cache: a repeated successful query renders from
+        // local storage without spending another LLM call.
+        const resolved = await resolveSayItRequest({
+          selection: value,
+          source: "sayit",
+          context: requestedContext,
+          cache: getCacheRepository(),
+          retrieve: (requestedInput, requestedTurns) =>
+            requestRetrieval({
+              input: requestedInput,
+              context: requestedTurns.slice(-MAX_SESSION_TURNS),
+            }),
+        });
+        const resolvedResult = resolved.result;
+        setResult(resolvedResult);
+        if (resolvedResult.status === "success") {
+          // An explicit SayIt action stays a SayIt interaction even on a cache
+          // hit; History dedupe decides whether a new entry is meaningful.
+          markSayItInteraction(value, resolvedResult);
         }
+        setSessionContext((currentContext) =>
+          [
+            ...currentContext,
+            {
+              input: value,
+              mode: resolvedResult.mode,
+              assistant_summary: summarizeResult(resolvedResult),
+            },
+          ].slice(-MAX_SESSION_TURNS),
+        );
+      } catch (requestError) {
+        setError(
+          requestError instanceof RetrievalApiError
+            ? requestError.message
+            : requestError instanceof Error
+              ? requestError.message
+              : "SayIt could not complete this request.",
+        );
+      } finally {
+        setIsSubmitting(false);
       }
-      setSessionContext((currentContext) => [
-        ...currentContext,
-        {
-          input: value,
-          mode: parsedResult.data.mode,
-          assistant_summary: summarizeResult(parsedResult.data),
-        },
-      ].slice(-MAX_SESSION_TURNS));
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "SayIt could not complete this request.",
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [sessionContext, showNotice]);
+    },
+    [getCacheRepository, markSayItInteraction, sessionContext],
+  );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -401,16 +425,6 @@ function App() {
     ) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
-    }
-  };
-
-  const handleCopy = async (text: string, label: string) => {
-    try {
-      await copyToClipboard(text);
-      setCopiedLabel(label);
-      window.setTimeout(() => setCopiedLabel(null), 1600);
-    } catch {
-      showNotice("Clipboard access is unavailable.");
     }
   };
 
@@ -495,15 +509,7 @@ function App() {
 
   const handleReaderSuccessfulSayIt = (value: string, readerResult: SayItResult) => {
     if (readerResult.status !== "success") return;
-    const historyRepository =
-      historyRepositoryRef.current ?? new LocalHistoryRepository();
-    historyRepositoryRef.current = historyRepository;
-    try {
-      historyRepository.append(value, readerResult);
-      setHistoryItems(historyRepository.list());
-    } catch {
-      showNotice("This Reader result could not be added to local history.");
-    }
+    markSayItInteraction(value, readerResult);
   };
 
   const handleSaveReaderResult = (value: string, readerResult: SayItResult): boolean => {
@@ -749,6 +755,7 @@ function App() {
         speakingKey={speakingKey}
         pronunciationErrorKey={pronunciationErrorKey}
         pronunciationError={pronunciationError}
+        sayItCache={getCacheRepository()}
         onCopy={handleCopy}
         onSpeak={handleSpeak}
         onSuccessfulSayIt={handleReaderSuccessfulSayIt}
@@ -757,19 +764,18 @@ function App() {
         archiveOpen={readerArchiveOpen}
         onClosePreferences={() => setReaderPreferencesOpen(false)}
         onCloseArchive={() => setReaderArchiveOpen(false)}
-        renderSayItResult={(readerResult, readerInput, isSaved, onSave, readerIpaByKey, onRetry) => (
-          <ResultView
+        renderSayItResult={(readerResult, readerInput, isSaved, onSave, readerIpaByKey) => (
+          <ReaderResultBody
             result={readerResult}
             isSaved={isSaved}
+            pronunciationAccent={pronunciationPreferences.accent}
             copiedLabel={copiedLabel}
-            onCopy={handleCopy}
-            onSave={onSave}
-            onRetry={onRetry}
-            onSpeak={handleSpeak}
             speakingKey={speakingKey}
             pronunciationErrorKey={pronunciationErrorKey}
-            pronunciationAccent={pronunciationPreferences.accent}
             ipaByKey={readerIpaByKey}
+            onCopy={handleCopy}
+            onSave={onSave}
+            onSpeak={handleSpeak}
           />
         )}
       />
@@ -1641,26 +1647,6 @@ function ContextualActions({
   );
 }
 
-interface CopyButtonProps {
-  label: string;
-  copied: boolean;
-  onCopy: () => void;
-}
-
-function CopyButton({ label, copied, onCopy }: CopyButtonProps) {
-  return (
-    <button
-      className={`copy-button ${copied ? "copied" : ""}`}
-      type="button"
-      aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
-      title={copied ? "Copied" : "Copy"}
-      onClick={onCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </button>
-  );
-}
-
 interface PronunciationControlsProps {
   preferences: PronunciationPreferences;
   onChange: (preferences: PronunciationPreferences) => void;
@@ -1709,12 +1695,164 @@ function PronunciationControls({
   );
 }
 
-function HistoryIcon() {
+interface ReaderResultBodyProps {
+  result: SayItResult;
+  isSaved: boolean;
+  pronunciationAccent: PronunciationPreferences["accent"];
+  copiedLabel: string | null;
+  speakingKey: string | null;
+  pronunciationErrorKey: string | null;
+  ipaByKey: Record<string, string>;
+  onCopy: (text: string, label: string) => Promise<void>;
+  onSave: () => void;
+  onSpeak: (text: string, key: string) => void;
+}
+
+/**
+ * Compact Reader rendering of a SayIt result.
+ *
+ * It reuses the same semantic result data as the full SayIt surface, but the
+ * selected expression stays the single heading owned by the Reader popover, so
+ * Meaning / Usage / Example are not repeated under a second title.
+ */
+function ReaderResultBody({
+  result,
+  isSaved,
+  pronunciationAccent,
+  copiedLabel,
+  speakingKey,
+  pronunciationErrorKey,
+  ipaByKey,
+  onCopy,
+  onSave,
+  onSpeak,
+}: ReaderResultBodyProps) {
+  const shared = {
+    copiedLabel,
+    speakingKey,
+    pronunciationErrorKey,
+    pronunciationAccent,
+    ipaByKey,
+    onCopy,
+    onSpeak,
+  };
+
+  if (result.mode === "interpret") {
+    if (result.status === "no_match") {
+      return (
+        <p className="reader-popover-note">
+          {result.inferred_intent || "Add the sentence, show, speaker, or situation."}
+        </p>
+      );
+    }
+    if (result.status === "needs_clarification") {
+      return <p className="reader-popover-note">{result.clarifying_question}</p>;
+    }
+    const interpretation = result.interpretation;
+    if (!interpretation) return null;
+
+    return (
+      <div className="reader-popover-result">
+        <ExplanatoryResultBlock
+          kicker="Meaning in this context"
+          text={interpretation.meaning_in_context}
+          emphasis="primary"
+          copyLabel="Meaning in this context"
+          speechKey="interpretation-meaning"
+          {...shared}
+        />
+        <ExplanatoryResultBlock
+          kicker="Usage / reference"
+          text={interpretation.usage_or_reference}
+          copyLabel="Usage / reference"
+          speechKey="interpretation-usage"
+          {...shared}
+        />
+        {interpretation.example && (
+          <ExplanatoryResultBlock
+            kicker="Example"
+            text={interpretation.example}
+            copyLabel="Example"
+            speechKey="interpretation-example"
+            {...shared}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (result.status === "no_match") {
+    return (
+      <p className="reader-popover-note">
+        {result.inferred_intent || "Try selecting a little more context."}
+      </p>
+    );
+  }
+  if (result.status === "needs_clarification") {
+    return <p className="reader-popover-note">{result.clarifying_question}</p>;
+  }
+  if (!result.best_match || !result.natural_sentence) {
+    return null;
+  }
+
   return (
-    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="5.75" />
-      <path d="M8 4.5v3.75l2.5 1.5" />
-    </svg>
+    <div className="reader-popover-result">
+      {result.alternatives.length > 0 && (
+        <div className="reader-popover-alternatives">
+          {result.alternatives.map((alternative) => (
+            <ExpressionRow
+              key={`${alternative.text}-${alternative.expression_type}`}
+              expression={alternative}
+              {...shared}
+            />
+          ))}
+        </div>
+      )}
+
+      <ExplanatoryResultBlock
+        kicker="Natural version"
+        text={result.natural_sentence}
+        copyLabel="Natural version"
+        speechKey="natural-version"
+        {...shared}
+      />
+
+      {result.short_explanation && (
+        <ExplanatoryResultBlock
+          kicker="Explanation"
+          text={result.short_explanation}
+          copyLabel="Explanation"
+          speechKey="short-explanation"
+          {...shared}
+        />
+      )}
+
+      <div className="reader-popover-footer">
+        <button
+          className={`icon-button save-result-button ${isSaved ? "saved-state" : ""}`}
+          type="button"
+          onClick={onSave}
+          disabled={isSaved}
+          aria-pressed={isSaved}
+          aria-label={isSaved ? "Saved locally" : "Save expression"}
+          title={isSaved ? "Saved" : "Save expression"}
+        >
+          {isSaved ? <CheckIcon /> : <BookmarkIcon />}
+        </button>
+        {result.learnable_items.length > 0 && (
+          <div className="learnable-row">
+            {result.learnable_items.map((item) => (
+              <span
+                className="learnable-chip"
+                key={`${item.text}-${item.expression_type}`}
+              >
+                {item.text}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1725,120 +1863,6 @@ function GearIcon() {
         fill="currentColor"
         d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
       />
-    </svg>
-  );
-}
-
-function BookmarkIcon() {
-  return (
-    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
-      <path d="M4 2.25h8a.75.75 0 0 1 .75.75v10.5L8 10.5l-4.75 3V3a.75.75 0 0 1 .75-.75Z" />
-    </svg>
-  );
-}
-
-interface SpeakButtonProps {
-  text: string;
-  label: string;
-  speaking: boolean;
-  error: boolean;
-  onSpeak: (text: string, key: string) => void;
-  speechKey?: string;
-}
-
-function SpeakButton({
-  text,
-  label,
-  speaking,
-  error,
-  onSpeak,
-  speechKey = label.toLowerCase().replaceAll(" ", "-"),
-}: SpeakButtonProps) {
-  return (
-    <button
-      className={`speak-button ${speaking ? "speaking" : ""} ${
-        error ? "error" : ""
-      }`}
-      type="button"
-      aria-label={
-        error
-          ? `Pronunciation unavailable for ${label}`
-          : `${speaking ? "Playing" : "Listen to"} ${label}`
-      }
-      aria-pressed={speaking}
-      title={error ? "Listen unavailable" : speaking ? "Playing" : "Listen"}
-      onClick={() => onSpeak(text, speechKey)}
-    >
-      {error ? <ErrorIcon /> : speaking ? <StopIcon /> : <SpeakerIcon />}
-    </button>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="action-icon"
-      viewBox="0 0 16 16"
-      fill="none"
-    >
-      <rect x="5.25" y="2.25" width="8.5" height="9.5" rx="1.5" />
-      <path d="M10.75 13.75H3.5A1.25 1.25 0 0 1 2.25 12.5V5.25" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="action-icon"
-      viewBox="0 0 16 16"
-      fill="none"
-    >
-      <path d="m3.25 8.25 3 3 6.5-6.5" />
-    </svg>
-  );
-}
-
-function SpeakerIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="action-icon"
-      viewBox="0 0 16 16"
-      fill="none"
-    >
-      <path d="M2.5 6.25h2l3-2.5v8.5l-3-2.5h-2z" />
-      <path d="M10 5.5a3.5 3.5 0 0 1 0 5" />
-      <path d="M11.75 3.75a6 6 0 0 1 0 8.5" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="action-icon"
-      viewBox="0 0 16 16"
-      fill="none"
-    >
-      <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1" />
-    </svg>
-  );
-}
-
-function ErrorIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="action-icon"
-      viewBox="0 0 16 16"
-      fill="none"
-    >
-      <path d="M8 2.25 14 13.5H2z" />
-      <path d="M8 6v3.25M8 11.5v.25" />
     </svg>
   );
 }

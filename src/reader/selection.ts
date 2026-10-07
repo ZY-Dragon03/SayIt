@@ -1,9 +1,12 @@
 import { segmentExplanatoryText } from "../lib/explanatory-text";
+import { isSingleWordSelection } from "../lib/selection-normalize";
 import { MAX_INPUT_LENGTH } from "../shared/contract";
 
-export function isSingleWordSelection(value: string): boolean {
-  return /^[\p{L}][\p{L}'’\-]*$/u.test(value.trim());
-}
+export { isSingleWordSelection };
+
+const POPOVER_WIDTH = 380;
+const POPOVER_VIEWPORT_MARGIN = 12;
+const POPOVER_GAP_PX = 8;
 
 export function expandBoundaryOffset(
   text: string,
@@ -147,14 +150,22 @@ export function readReaderSelection(selectableRoot: HTMLElement): ReaderSelectab
     typeof range.getBoundingClientRect === "function"
       ? range.getBoundingClientRect()
       : { left: 12, bottom: 28, top: 12, right: 12, width: 0, height: 16 };
-  const width = 380;
+  const width = POPOVER_WIDTH;
+  // Document-space anchor: the popover is positioned against the page, not the
+  // viewport, so scrolling the article carries it along with the selection.
+  const scrollX = Number.isFinite(window.scrollX) ? window.scrollX : 0;
+  const scrollY = Number.isFinite(window.scrollY) ? window.scrollY : 0;
+  const viewportLeft = Math.min(
+    Math.max(rect.left, POPOVER_VIEWPORT_MARGIN),
+    Math.max(POPOVER_VIEWPORT_MARGIN, window.innerWidth - width - POPOVER_VIEWPORT_MARGIN),
+  );
   return {
     text,
     context,
     contextKind,
     singleWord: isSingleWordSelection(text),
-    left: Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - width - 12)),
-    top: Math.max(12, rect.bottom + 8),
+    left: viewportLeft + scrollX,
+    top: Math.max(0, rect.bottom + scrollY + POPOVER_GAP_PX),
   };
 }
 

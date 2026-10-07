@@ -7,16 +7,22 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
-  apiErrorSchema,
-  isSuccessfulResult,
   MAX_INPUT_LENGTH,
-  sayItResultSchema,
   type SayItResult,
 } from "../shared/contract";
+import {
+  CopyButton,
+  SayItButton,
+  SpeakButton,
+} from "../lib/action-controls";
 import { getDefinitionForSurface, prefetchDictionary } from "../lib/local-dictionary";
 import { getIPA, getIPACacheKey } from "../lib/ipa";
 import type { PronunciationAccent } from "../lib/pronunciation";
+import type { LocalSayItCacheRepository } from "../lib/sayit-cache";
+import { buildSayItCacheIdentity } from "../lib/sayit-cache";
+import { resolveSayItRequest } from "../lib/sayit-resolver";
 import {
   getReaderArchive,
   getReaderArticle,
@@ -45,9 +51,14 @@ import type {
 } from "./types";
 
 const READER_POINTER_KEY = "sayit.reader.last-opened.v1";
+const READER_SPEECH_KEY = "reader-selection";
+const READER_COPY_LABEL = "Reader selection";
 const ARCHIVE_LIMIT = 60;
 const PROGRESS_SAVE_DELAY_MS = 500;
 const SCROLL_ANCHOR_PX = 128;
+/** Horizontal breathing room kept between the popover and the viewport edge. */
+const POPOVER_VIEWPORT_MARGIN = 12;
+const POPOVER_GAP_PX = 8;
 
 interface ReaderPointer {
   issueId: string;
@@ -76,6 +87,8 @@ export interface ReaderWorkspaceProps {
   speakingKey: string | null;
   pronunciationErrorKey: string | null;
   pronunciationError: string | null;
+  /** The one shared SayIt result cache, owned by the app shell. */
+  sayItCache: LocalSayItCacheRepository;
   onCopy: (text: string, label: string) => Promise<void>;
   onSpeak: (text: string, key: string) => void;
   onSuccessfulSayIt: (input: string, result: SayItResult) => void;
@@ -172,11 +185,6 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
-function readApiError(payload: unknown): string | null {
-  const parsed = apiErrorSchema.safeParse(payload);
-  return parsed.success ? parsed.data.error.message : null;
-}
-
 function isActiveAttempt(attempt: RunAttempt): boolean {
   return isRunAttemptRunning(attempt);
 }
@@ -188,6 +196,7 @@ export function ReaderWorkspace({
   speakingKey,
   pronunciationErrorKey,
   pronunciationError,
+  sayItCache,
   onCopy,
   onSpeak,
   onSuccessfulSayIt,
@@ -661,39 +670,53 @@ export function ReaderWorkspace({
     setSayItError(null);
     setReaderSayItResult(null);
     setReaderResultSaved(false);
+
+    const input = buildReaderInterpretationInput(
+      currentSelection.text,
+      currentSelection.context,
+    );
+    if (!input || input.length > MAX_INPUT_LENGTH) {
+      setSayItError("Select a shorter expression so SayIt can include its article sentence.");
+      return;
+    }
+
+    // A single lexical word is context-free, so a word already explained in
+    // normal SayIt (or earlier in Reader) resolves locally with no API call.
+    const cached = sayItCache.get(
+      buildSayItCacheIdentity({
+        selection: currentSelection.text,
+        source: "reader",
+        context: currentSelection.context,
+      }),
+    );
+    if (cached) {
+      setReaderSayItResult({ input: currentSelection.text, result: cached });
+      if (cached.status === "success") {
+        onSuccessfulSayIt(currentSelection.text, cached);
+      }
+      return;
+    }
+
     setSayItBusy(true);
     try {
-      const input = buildReaderInterpretationInput(
-        currentSelection.text,
-        currentSelection.context,
-      );
-      if (!input || input.length > MAX_INPUT_LENGTH) {
-        setSayItError("Select a shorter expression so SayIt can include its article sentence.");
-        return;
-      }
-      const response = await fetch("/api/retrieve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input, context: [] }),
+      const resolved = await resolveSayItRequest({
+        selection: currentSelection.text,
+        source: "reader",
+        contextText: currentSelection.context,
+        requestInput: input,
+        cache: sayItCache,
       });
-      const payload: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        setSayItError(
-          readApiError(payload) ?? "SayIt could not interpret this selection.",
-        );
-        return;
-      }
-      const parsed = sayItResultSchema.safeParse(payload);
-      if (!parsed.success) {
-        setSayItError("SayIt returned an invalid result for this selection.");
-        return;
-      }
-      setReaderSayItResult({ input: currentSelection.text, result: parsed.data });
-      if (isSuccessfulResult(parsed.data) || parsed.data.status === "success") {
-        onSuccessfulSayIt(currentSelection.text, parsed.data);
+      setReaderSayItResult({
+        input: currentSelection.text,
+        result: resolved.result,
+      });
+      if (resolved.result.status === "success") {
+        onSuccessfulSayIt(currentSelection.text, resolved.result);
       }
     } catch (error) {
-      setSayItError(error instanceof Error ? error.message : "SayIt could not interpret this selection.");
+      setSayItError(
+        error instanceof Error ? error.message : "SayIt could not interpret this selection.",
+      );
     } finally {
       setSayItBusy(false);
     }
@@ -956,80 +979,31 @@ export function ReaderWorkspace({
             </article>
 
             {selection && (
-              <aside
-                className={`reader-selection-popover${sayItBusy ? " is-busy" : ""}`}
-                style={{ left: selection.left, top: selection.top }}
-                aria-live="polite"
-                aria-label="Selection"
-                onMouseDown={(event) => event.preventDefault()}
-              >
-                <div className="reader-result-panel-header">
-                  <div>
-                    {selection.singleWord && selection.definitionPrimary && !readerSayItResult && (
-                      <span className="reader-eyebrow">Local dictionary</span>
-                    )}
-                    <strong>{selection.text}</strong>
-                  </div>
-                  <button type="button" className="reader-icon-close" aria-label="Close selection" onClick={closeContextResult}>
-                    ×
-                  </button>
-                </div>
-                {selection.ipa && <p className="reader-word-ipa">{selection.ipa}</p>}
-                {!readerSayItResult && selection.singleWord && selection.definitionPrimary && (
-                  <>
-                    <p className="reader-word-definition">{selection.definitionPrimary}</p>
-                    {selection.definitionSecondary && (
-                      <p className="reader-word-definition reader-word-definition--secondary">{selection.definitionSecondary}</p>
-                    )}
-                  </>
-                )}
-                {sayItBusy && (
-                  <p className="reader-selection-status" role="status">Interpreting in this article…</p>
-                )}
-                {sayItError && <p className="reader-inline-error" role="alert">{sayItError}</p>}
-                {readerSayItResult && (
-                  <div className="reader-selection-result">
-                    {renderSayItResult(
-                      readerSayItResult.result,
-                      readerSayItResult.input,
-                      readerResultSaved,
-                      handleSaveReaderResult,
-                      readerIpaByKey,
-                      () => void handleSelectionAction(selectedExpressionForRetryRef.current ?? selection),
-                    )}
-                  </div>
-                )}
-                <div className="reader-inline-actions">
-                  <button
-                    className={`reader-secondary-button ${speakingKey === "reader-selection" ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => onSpeak(selection.text, "reader-selection")}
-                  >
-                    Listen
-                  </button>
-                  <button
-                    className="reader-secondary-button"
-                    type="button"
-                    onClick={() => void onCopy(selection.text, "Reader selection")}
-                  >
-                    {copiedLabel === "Reader selection" ? "Copied" : "Copy"}
-                  </button>
-                  {!readerSayItResult && (
-                    <button
-                      className="reader-selection-sayit"
-                      type="button"
-                      onClick={() => void handleSelectionAction(selection)}
-                      aria-label={`Use SayIt for ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
-                      disabled={sayItBusy}
-                    >
-                      SayIt
-                    </button>
-                  )}
-                </div>
-                {pronunciationErrorKey === "reader-selection" && pronunciationError && (
-                  <p className="reader-inline-error" role="status">{pronunciationError}</p>
-                )}
-              </aside>
+              <ReaderSelectionPopover
+                selection={selection}
+                busy={sayItBusy}
+                error={sayItError}
+                result={readerSayItResult}
+                resultSaved={readerResultSaved}
+                speaking={speakingKey === READER_SPEECH_KEY}
+                speakError={pronunciationErrorKey === READER_SPEECH_KEY}
+                pronunciationError={pronunciationError}
+                copied={copiedLabel === READER_COPY_LABEL}
+                ipaByKey={readerIpaByKey}
+                renderSayItResult={renderSayItResult}
+                onSaveResult={handleSaveReaderResult}
+                onSpeak={() => onSpeak(selection.text, READER_SPEECH_KEY)}
+                onCopy={() => void onCopy(selection.text, READER_COPY_LABEL)}
+                onSayIt={(requested) =>
+                  void handleSelectionAction(requested ?? selection)
+                }
+                onRetry={() =>
+                  void handleSelectionAction(
+                    selectedExpressionForRetryRef.current ?? selection,
+                  )
+                }
+                onClose={closeContextResult}
+              />
             )}
           </>
         )}
@@ -1204,6 +1178,143 @@ export function ReaderWorkspace({
         </div>
       )}
     </main>
+  );
+}
+
+interface ReaderSelectionPopoverProps {
+  selection: ReaderSelection;
+  busy: boolean;
+  error: string | null;
+  result: { input: string; result: SayItResult } | null;
+  resultSaved: boolean;
+  speaking: boolean;
+  speakError: boolean;
+  pronunciationError: string | null;
+  copied: boolean;
+  ipaByKey: Record<string, string>;
+  renderSayItResult: ReaderWorkspaceProps["renderSayItResult"];
+  onSaveResult: () => void;
+  onSpeak: () => void;
+  onCopy: () => void;
+  onSayIt: (requested?: ReaderSelection) => void;
+  onRetry: () => void;
+  onClose: () => void;
+}
+
+/**
+ * Compact, document-anchored Reader selection surface.
+ *
+ * The anchor is a document-space coordinate pair, so the popover travels with
+ * the selected text instead of staying pinned to the viewport. It renders into
+ * document.body so no reader ancestor can clip it, and it deliberately has no
+ * internal scroll container: long results grow and the page scrolls.
+ */
+function ReaderSelectionPopover({
+  selection,
+  busy,
+  error,
+  result,
+  resultSaved,
+  speaking,
+  speakError,
+  pronunciationError,
+  copied,
+  ipaByKey,
+  renderSayItResult,
+  onSaveResult,
+  onSpeak,
+  onCopy,
+  onSayIt,
+  onRetry,
+  onClose,
+}: ReaderSelectionPopoverProps) {
+  return createPortal(
+    <aside
+      className={`reader-selection-popover${busy ? " is-busy" : ""}`}
+      style={{ left: selection.left, top: selection.top }}
+      aria-live="polite"
+      aria-label="Selection"
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <div className="reader-popover-term">
+        <strong>{selection.text}</strong>
+        <button
+          type="button"
+          className="reader-icon-close"
+          aria-label="Close selection"
+          title="Close"
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="reader-popover-actions">
+        {selection.ipa ? (
+          <span className="reader-popover-ipa">{selection.ipa}</span>
+        ) : (
+          <span className="reader-popover-ipa reader-popover-ipa--empty" aria-hidden="true" />
+        )}
+        <div className="reader-popover-buttons">
+          <SpeakButton
+            text={selection.text}
+            label={selection.text}
+            speaking={speaking}
+            error={speakError}
+            onSpeak={onSpeak}
+            speechKey={READER_SPEECH_KEY}
+          />
+          <CopyButton label={selection.text} copied={copied} onCopy={onCopy} />
+          <SayItButton
+            label={`SayIt: ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
+            busy={busy}
+            onSayIt={() => onSayIt()}
+          />
+        </div>
+      </div>
+
+      {!result && selection.singleWord && selection.definitionPrimary && (
+        <div className="reader-popover-local">
+          <p className="reader-popover-definition">{selection.definitionPrimary}</p>
+          {selection.definitionSecondary && (
+            <p className="reader-popover-definition reader-popover-definition--secondary">
+              {selection.definitionSecondary}
+            </p>
+          )}
+        </div>
+      )}
+
+      {busy && (
+        <p className="reader-selection-status" role="status">
+          Interpreting in this article…
+        </p>
+      )}
+      {error && (
+        <p className="reader-inline-error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {result && (
+        <div className="reader-selection-result">
+          {renderSayItResult(
+            result.result,
+            result.input,
+            resultSaved,
+            onSaveResult,
+            ipaByKey,
+            onRetry,
+          )}
+        </div>
+      )}
+
+      {speakError && pronunciationError && (
+        <p className="reader-inline-error" role="status">
+          {pronunciationError}
+        </p>
+      )}
+    </aside>,
+    document.body,
   );
 }
 

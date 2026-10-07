@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SayItResult } from "../shared/contract";
+import { LocalSayItCacheRepository } from "../lib/sayit-cache";
 import { ReaderWorkspace, type ReaderWorkspaceProps } from "./ReaderWorkspace";
 import type { ArticleProgress } from "./types";
 
@@ -239,6 +240,7 @@ function baseProps(overrides: Partial<ReaderWorkspaceProps> = {}): ReaderWorkspa
     speakingKey: null,
     pronunciationErrorKey: null,
     pronunciationError: null,
+    sayItCache: new LocalSayItCacheRepository(window.localStorage),
     onCopy: vi.fn().mockResolvedValue(undefined),
     onSpeak: vi.fn(),
     onSuccessfulSayIt: vi.fn(),
@@ -292,6 +294,8 @@ describe("Reader workspace", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    // The selection popover renders through a portal, so it lives on body.
+    document.querySelectorAll(".reader-selection-popover").forEach((node) => node.remove());
     if (originalReaderRectDescriptor) {
       Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", originalReaderRectDescriptor);
     } else {
@@ -639,7 +643,7 @@ describe("Reader workspace", () => {
     await act(async () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
-    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+    expect(document.querySelector(".reader-selection-popover")).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
 
     await act(async () => {
@@ -648,27 +652,35 @@ describe("Reader workspace", () => {
     await flush();
 
     expect(selection.toString()).toBe("policy");
-    expect(container.querySelector(".reader-selection-popover")).toBeTruthy();
-    expect(container.textContent).toContain("Local dictionary");
-    expect(container.textContent).toContain("A course or principle of action.");
-    expect(container.textContent).toContain("/ˈpɑləsi/");
+    expect(document.querySelector(".reader-selection-popover")).toBeTruthy();
+    expect(document.body.textContent).toContain("A course or principle of action.");
+    expect(document.body.textContent).toContain("/ˈpɑləsi/");
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
-    const listenButton = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Listen"),
+    const listenButton = document.querySelector<HTMLButtonElement>(
+      '.reader-selection-popover button[aria-label="Listen to policy"]',
     );
+    expect(listenButton?.classList.contains("speak-button")).toBe(true);
+    expect(listenButton?.textContent).toBe("");
     await act(async () => listenButton?.click());
     expect(props.onSpeak).toHaveBeenCalledWith("policy", "reader-selection");
-
-    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
-      button.getAttribute("aria-label")?.includes("Use SayIt for word"),
+    const copyButton = document.querySelector<HTMLButtonElement>(
+      '.reader-selection-popover button.copy-button',
     );
-    expect(sayItButton).toBeTruthy();
+    expect(copyButton?.textContent).toBe("");
+    await act(async () => copyButton?.click());
+    expect(props.onCopy).toHaveBeenCalledWith("policy", "Reader selection");
+
+    const sayItButton = document.querySelector<HTMLButtonElement>(
+      '.reader-selection-popover button[aria-label*="SayIt: word"]',
+    );
+    expect(sayItButton?.classList.contains("sayit-button")).toBe(true);
+    expect(sayItButton?.textContent).toBe("");
     await act(async () => sayItButton?.click());
     await flush();
 
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(true);
     expect(props.onSuccessfulSayIt).toHaveBeenCalledWith("policy", interpretationResult);
-    expect(container.querySelector(".reader-selection-popover")).toBeTruthy();
+    expect(document.querySelector(".reader-selection-popover")).toBeTruthy();
     expect(container.querySelector(".reader-result-panel")).toBeNull();
   });
 
@@ -708,10 +720,10 @@ describe("Reader workspace", () => {
     });
     await flush();
     expect(window.getSelection()?.toString()).toBe(phrase);
-    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
+    expect(document.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
-    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
-      button.getAttribute("aria-label")?.includes("Use SayIt for selected expression"),
+    const sayItButton = document.querySelector<HTMLButtonElement>(
+      '.reader-selection-popover button[aria-label*="SayIt: selected expression"]',
     );
     await act(async () => sayItButton?.click());
     await flush();
@@ -726,7 +738,9 @@ describe("Reader workspace", () => {
     expect(request.input.length).toBeLessThanOrEqual(500);
     expect(props.onSuccessfulSayIt).toHaveBeenCalledWith(phrase, interpretationResult);
     expect(container.querySelector(".reader-result-panel")).toBeNull();
-    expect(container.querySelector('[data-testid="rendered-sayit-result"]')?.textContent).toBe("interpret");
+    expect(
+      document.querySelector('[data-testid="rendered-sayit-result"]')?.textContent,
+    ).toBe("interpret");
     expect(window.scrollTo).not.toHaveBeenCalled();
   });
 
@@ -754,7 +768,7 @@ describe("Reader workspace", () => {
     await act(async () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
-    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+    expect(document.querySelector(".reader-selection-popover")).toBeNull();
 
     await act(async () => {
       title.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -762,13 +776,13 @@ describe("Reader workspace", () => {
     await flush();
 
     expect(selection.toString()).toBe(word);
-    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(word);
-    expect(container.textContent).toContain("The act of investing money for profit.");
-    expect(container.textContent).toContain("/ɪnˈvɛstmənt/");
+    expect(document.querySelector(".reader-selection-popover")?.textContent).toContain(word);
+    expect(document.body.textContent).toContain("The act of investing money for profit.");
+    expect(document.body.textContent).toContain("/ɪnˈvɛstmənt/");
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
 
-    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
-      button.getAttribute("aria-label")?.includes("Use SayIt for word"),
+    const sayItButton = document.querySelector<HTMLButtonElement>(
+      '.reader-selection-popover button[aria-label*="SayIt: word"]',
     );
     await act(async () => sayItButton?.click());
     await flush();
@@ -810,7 +824,7 @@ describe("Reader workspace", () => {
     await flush();
 
     expect(selection.toString()).toBe(phrase);
-    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
+    expect(document.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
 
     const eyebrow = container.querySelector(".reader-eyebrow")!;
@@ -823,7 +837,7 @@ describe("Reader workspace", () => {
     await act(async () => {
       eyebrow.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+    expect(document.querySelector(".reader-selection-popover")).toBeNull();
   });
 
   it("does not show a selection action or request when selection is empty", async () => {
@@ -838,7 +852,7 @@ describe("Reader workspace", () => {
     const body = container.querySelector(".reader-article-body")!;
     await act(async () => body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
 
-    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+    expect(document.querySelector(".reader-selection-popover")).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
   });
 
