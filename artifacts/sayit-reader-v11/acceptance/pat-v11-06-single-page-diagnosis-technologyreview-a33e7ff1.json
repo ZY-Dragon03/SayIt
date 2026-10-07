@@ -1,0 +1,52 @@
+{
+  "observation": "PAT-V11-06 diagnostic only; no new collection was run",
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "sourceTrace": {
+    "priorReceipt": "pat-v11-06-live-default-catchup-nonfull-a33e7ff1-host-normalized.json",
+    "url": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue",
+    "publicationFromDiscoveryHost": "Technologyreview",
+    "statusCodeFromCollection": 200,
+    "outcomeFromCollection": "REJECTED",
+    "exactTraceReason": "Standalone article structure and title metadata do not agree.",
+    "publisherNameMapSourceSha256": "d0bdf17cadf5b33041facdee4d39f259dcc8678cdacd461120437e8e6b149bf8",
+    "publisherDomainAbsentFromMap": true
+  },
+  "oneReadOnlySafeRefetch": {
+    "statusCode": 200,
+    "contentType": "text/html; charset=utf-8",
+    "finalUrl": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue",
+    "canonicalUrl": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue/",
+    "canonicalMatchesOriginalOrFinal": false,
+    "pageByteCount": 458940,
+    "pageHtmlSha256": "b5bbf94a113361a8e8cb1b652e2b76cea46f3947149ea91aa21c1c5bf1803138",
+    "metadata": {
+      "htmlTitle": "Who’s liable when AI agents go rogue? | MIT Technology Review",
+      "readabilityTitle": "Who’s liable when AI agents go rogue?",
+      "h1Values": [],
+      "structuredArticleHeadlines": [
+        "Who’s liable when AI agents go rogue?"
+      ],
+      "citationTitle": null,
+      "openGraphTitle": "Who’s liable when AI agents go rogue?",
+      "citationPublication": null,
+      "articlePublisher": null,
+      "openGraphSiteName": "MIT Technology Review",
+      "htmlLang": "en",
+      "openGraphType": "article",
+      "canonicalUrl": "https://www.technologyreview.com/2026/09/28/1145197/whos-liable-when-ai-agents-go-rogue/"
+    },
+    "articleRootCount": 0,
+    "readableParagraphCount": 39,
+    "readableWordCount": 1941,
+    "readableTextSha256": "402460a68b916516bb8b31dc6fdaad2b0c390b09bb43609c3ecee6efac6e105f",
+    "titleAgreement": false,
+    "articleTypeVerified": true,
+    "standalonePredicate": false,
+    "failurePredicates": [
+      "Expected exactly one article root, observed 0.",
+      "Exactly one article h1 and all declared article titles did not exactly equal the Readability title."
+    ]
+  },
+  "adjudicationLimit": "The original search-result title was not retained in the saved trace, so the original title-comparison input cannot be reconstructed. This refetch diagnoses the current page metadata and body only; it cannot replace the lost search-result title or prove a defect by itself."
+}

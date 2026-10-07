@@ -9,12 +9,14 @@ import {
   occurrenceSchema,
   readerPreferencesSchema,
   readingProgressSchema,
+  readerSemanticRuntimeTraceSchema,
   runAttemptSchema,
   type ArticleSummary,
   type DailyIssue,
   type Occurrence,
   type ReaderPreferences,
   type ReadingProgress,
+  type ReaderSemanticRuntimeTrace,
   type RunAttempt,
 } from "../../src/shared/reader-contract";
 
@@ -35,6 +37,7 @@ export interface ReaderTrace {
   queries: string[];
   candidates: CandidateTrace[];
   decisions: string[];
+  semantic?: ReaderSemanticRuntimeTrace;
 }
 
 const candidateTraceSchema = z.object({
@@ -53,6 +56,7 @@ const readerTraceSchema = z.object({
   queries: z.array(z.string().max(300)),
   candidates: z.array(candidateTraceSchema),
   decisions: z.array(z.string().max(500)),
+  semantic: readerSemanticRuntimeTraceSchema.optional(),
 });
 
 const cachedBodyMetaSchema = z.object({

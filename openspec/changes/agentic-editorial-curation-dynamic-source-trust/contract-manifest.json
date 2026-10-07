@@ -1,0 +1,28 @@
+{
+  "revision": "sayit-reader-v1.1-product-contract-r1",
+  "baseCommit": "d80e13c327ac2a8672e0eee95584cb4333dd422b",
+  "contractSetSha256": "5d58710e6fd10df211f69db4cbcd91f035a0a71a874d918aa013861f2769692d",
+  "canonicalHashInput": "path<TAB>lowercase-sha256<LF>, sorted path order",
+  "files": [
+    {
+      "path": "acceptance-plan.md",
+      "sha256": "f5f8881df236ce520302cda4a58aed21ee684cbcb5dc06698c66304df8a83e0a"
+    },
+    {
+      "path": "design.md",
+      "sha256": "cf4622db83dcd1585930bd684d1219de61246770c10494b19088bc4fa0b14fc8"
+    },
+    {
+      "path": "proposal.md",
+      "sha256": "d6daae709e5e8e4ea79eefd238a8a84388745ae156371cdc8f94d365fab6f1ae"
+    },
+    {
+      "path": "specs/reader-dynamic-source-trust/spec.md",
+      "sha256": "8f1cdeb5c1b3c69d2f4b69f31387bd72e18b74871926042e6a63b61be6ee30b2"
+    },
+    {
+      "path": "specs/reader-semantic-curation/spec.md",
+      "sha256": "cdaffba7bc2d93ce6492d894425e9f772cf262787c85710a88e2652957c2cbcb"
+    }
+  ]
+}

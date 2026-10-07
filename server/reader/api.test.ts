@@ -42,7 +42,7 @@ function prefs(overrides: Partial<ReaderPreferences> = {}): ReaderPreferences {
   };
 }
 
-function fullArticle(id = "editorial-id-1"): EditorialArticle {
+function fullArticle(id = "editorial-id-1", overrides: Partial<EditorialArticle> = {}): EditorialArticle {
   return {
     id,
     title: "Technology changes the energy market",
@@ -64,6 +64,7 @@ function fullArticle(id = "editorial-id-1"): EditorialArticle {
     paragraphCount: 3,
     paragraphs: ["First article paragraph.", "Second article paragraph.", "Third article paragraph."],
     bodyHash: "b".repeat(64),
+    ...overrides,
   };
 }
 
@@ -177,7 +178,29 @@ describe("Reader local API", () => {
       .mockResolvedValueOnce({
         ...emptyCollection,
         status: "COMPLETE",
-        articles: [fullArticle()],
+        articles: [fullArticle("editorial-id-1", {
+          provenance: {
+            publisherIdentity: "Example News",
+            publisherIdentitySources: ["open_graph_site_name"],
+            canonicalRelationship: "original_url",
+            standaloneArticleVerified: true,
+            titleAgreementVerified: true,
+            bodyCompletenessVerified: true,
+          },
+          editorial: {
+            contractVersion: "reader-editorial-curation.v1",
+            decision: "APPROVE",
+            topicFit: "YES",
+            matchedTopics: ["Technology"],
+            relevance: "high",
+            editorialValue: "high",
+            analysisDepth: "high",
+            novelty: "medium",
+            overlap: "none",
+            contributionType: "analysis",
+            rationale: "It explains how regional evidence changes the energy market.",
+          },
+        })],
         actual: { count: 1, topics: ["Technology"], difficulty: "Intermediate", readingMinutes: 7 },
         unmetConstraints: [],
         trace: {
@@ -221,6 +244,14 @@ describe("Reader local API", () => {
     );
     expect(articleResponse.response.status).toBe(200);
     expect(articleResponse.body.article).toMatchObject({ id: oldArticleId, contentStatus: "FULL_TEXT" });
+    expect(articleResponse.body.article).toMatchObject({
+      provenance: { publisherIdentity: "Example News", bodyCompletenessVerified: true },
+      editorial: {
+        contractVersion: "reader-editorial-curation.v1",
+        rationale: "It explains how regional evidence changes the energy market.",
+        contributionType: "analysis",
+      },
+    });
     expect(articleResponse.body.paragraphs).toEqual([
       "First article paragraph.",
       "Second article paragraph.",
@@ -268,8 +299,9 @@ describe("Reader local API", () => {
     expect(newArticle.body.progress).toMatchObject({ scrollRatio: 0.4, firstVisibleParagraph: 1 });
     expect(firstRun.response.status).toBe(202);
 
+    const reloadedStore = new ReaderStore({ directory: harness.directory, now: () => new Date(current) });
     const restarted = new ReaderService({
-      store: harness.service.store,
+      store: reloadedStore,
       now: () => new Date(current),
       collect,
       reopenArticle: reopen,
@@ -280,6 +312,13 @@ describe("Reader local API", () => {
     await restarted.start();
     const restoredBody = await restarted.article(oldArticleId, 1);
     expect(restoredBody.paragraphs).toEqual(["Live paragraph one.", "Live paragraph two."]);
+    expect(restoredBody.article).toMatchObject({
+      editorial: {
+        contractVersion: "reader-editorial-curation.v1",
+        rationale: "It explains how regional evidence changes the energy market.",
+      },
+      provenance: { canonicalRelationship: "original_url" },
+    });
     expect(reopen).toHaveBeenCalledWith(
       expect.objectContaining({ id: oldArticleId, originalUrl: "https://news.example/story/technology" }),
       expect.any(Function),

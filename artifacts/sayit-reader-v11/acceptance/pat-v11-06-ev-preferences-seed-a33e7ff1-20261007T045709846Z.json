@@ -1,0 +1,76 @@
+{
+  "candidate": {
+    "commit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+    "tree": "bb9175405b17741114f2a1e86e393891487f46b1"
+  },
+  "observation": "PAT-V11-06 saved preferences seed; no collection or article URL input occurred in this setup step",
+  "recordedAt": "2026-10-07T04:57:09.846Z",
+  "isolatedDataDirectory": "C:\\Users\\Asus\\AppData\\Local\\Temp\\sayit-reader-v11-a33-ev-20261007T045311Z",
+  "savedPreferences": {
+    "topics": [
+      "Electric vehicle batteries"
+    ],
+    "dailyArticleCount": 1,
+    "difficulty": "Intermediate",
+    "readingBudgetMinutes": 60,
+    "collectionTime": "23:59",
+    "timezone": "Asia/Shanghai"
+  },
+  "preferencesConfigured": true,
+  "startupControl": {
+    "intendedLocalTimeAtSeed": "12:57",
+    "collectionTimeIsFuture": true,
+    "collectionTime": "23:59",
+    "attemptsBeforeServerStart": 0,
+    "tracesBeforeServerStart": 0,
+    "issuesBeforeServerStart": 0,
+    "articleUrlListProvided": false
+  },
+  "productionPublisherNormalizationSnapshot": {
+    "source": "server/reader/editorial.ts#ESTABLISHED_EDITORIAL_PUBLISHER_NAMES",
+    "sourceSha256": "d0bdf17cadf5b33041facdee4d39f259dcc8678cdacd461120437e8e6b149bf8",
+    "mapBlockSha256": "759f6f9be2bb9444653d41303e132c3f7540abdf0db3e7af4f0a3456d762e813",
+    "domains": [
+      "theguardian.com",
+      "theconversation.com",
+      "apnews.com",
+      "reuters.com",
+      "bbc.com",
+      "bbc.co.uk",
+      "npr.org",
+      "nature.com",
+      "sciencedaily.com",
+      "arstechnica.com",
+      "economist.com",
+      "ft.com",
+      "nytimes.com",
+      "washingtonpost.com",
+      "scientificamerican.com",
+      "aljazeera.com",
+      "cnbc.com",
+      "theverge.com",
+      "foreignaffairs.com"
+    ],
+    "publisherNames": [
+      "The Guardian",
+      "The Conversation",
+      "Associated Press",
+      "Reuters",
+      "BBC",
+      "BBC",
+      "NPR",
+      "Nature",
+      "ScienceDaily",
+      "Ars Technica",
+      "The Economist",
+      "Financial Times",
+      "The New York Times",
+      "The Washington Post",
+      "Scientific American",
+      "Al Jazeera",
+      "CNBC",
+      "The Verge",
+      "Foreign Affairs"
+    ]
+  }
+}

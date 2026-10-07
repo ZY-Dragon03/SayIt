@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { createRetrieveHandler } from "./server/api";
-import { createDeepSeekProvider } from "./server/provider";
+import { createDeepSeekJsonCompletionClient, createDeepSeekProvider } from "./server/provider";
 import { readerServicePlugin } from "./server/reader/vite-plugin";
 
 interface ApiPluginOptions {
@@ -26,15 +26,24 @@ function sayItApiPlugin(options: ApiPluginOptions): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const providerConfig = {
+    apiKey: env.DEEPSEEK_API_KEY,
+    model: env.DEEPSEEK_MODEL,
+    baseUrl: env.DEEPSEEK_BASE_URL,
+  };
 
   return {
     plugins: [
       react(),
-      ...(mode === "development" ? [readerServicePlugin()] : []),
+      ...(mode === "development"
+        ? [readerServicePlugin({
+            serviceOptions: {
+              semanticClient: createDeepSeekJsonCompletionClient(providerConfig),
+            },
+          })]
+        : []),
       sayItApiPlugin({
-        apiKey: env.DEEPSEEK_API_KEY,
-        model: env.DEEPSEEK_MODEL,
-        baseUrl: env.DEEPSEEK_BASE_URL,
+        ...providerConfig,
         diagnostics: mode === "development",
       }),
     ],

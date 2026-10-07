@@ -111,12 +111,30 @@ export class ProviderError extends Error {
   }
 }
 
-interface DeepSeekConfig {
+export interface DeepSeekProviderConfig {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
   diagnostics?: boolean;
   diagnosticLogger?: (diagnostic: ProviderDiagnostic) => void;
+}
+
+export interface JsonCompletionRequest {
+  systemPrompt: string;
+  userContent: string;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
+}
+
+export interface JsonCompletionResponse {
+  content: string;
+  provider: string;
+  model: string;
+  requestId: string | null;
+}
+
+export interface JsonCompletionClient {
+  completeJson(request: JsonCompletionRequest): Promise<JsonCompletionResponse>;
 }
 
 export type ProviderDiagnosticKind =
@@ -218,7 +236,7 @@ function createTimeoutSignal(timeoutMs: number): {
   };
 }
 
-export class DeepSeekProvider implements ExpressionProvider {
+export class DeepSeekProvider implements ExpressionProvider, JsonCompletionClient {
   private readonly apiKey: string | undefined;
   private readonly model: string;
   private readonly baseUrl: string;
@@ -227,7 +245,7 @@ export class DeepSeekProvider implements ExpressionProvider {
     diagnostic: ProviderDiagnostic,
   ) => void;
 
-  constructor(config: DeepSeekConfig) {
+  constructor(config: DeepSeekProviderConfig) {
     this.apiKey = config.apiKey;
     this.model = config.model || DEFAULT_MODEL;
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
@@ -270,6 +288,43 @@ export class DeepSeekProvider implements ExpressionProvider {
       "invalid_provider_response",
       "SayIt could not validate the model result. Your input is still here; try again.",
     );
+  }
+
+  async completeJson(request: JsonCompletionRequest): Promise<JsonCompletionResponse> {
+    const timeoutMs = request.timeoutMs ?? MODEL_TIMEOUT_MS;
+    const maxOutputTokens = request.maxOutputTokens ?? 700;
+    if (
+      !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000 ||
+      !Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 4_096 ||
+      request.systemPrompt.length > 10_000 || request.userContent.length > 40_000
+    ) {
+      throw new ProviderError(
+        "configuration_error",
+        "The structured JSON request exceeds its configured bounds.",
+        400,
+        false,
+      );
+    }
+    if (!this.apiKey) {
+      throw new ProviderError(
+        "configuration_error",
+        "DeepSeek is not configured for this server.",
+        500,
+        false,
+      );
+    }
+    const response = await this.requestJsonContent(
+      request.systemPrompt,
+      request.userContent,
+      timeoutMs,
+      maxOutputTokens,
+    );
+    return {
+      content: response.content,
+      provider: "DeepSeek",
+      model: this.model,
+      requestId: response.requestId,
+    };
   }
 
   private recordDiagnostic(
@@ -323,7 +378,24 @@ ${input}
 ${contextBlock}
 
 Return the SayIt result JSON only.`;
-    const timeout = createTimeoutSignal(MODEL_TIMEOUT_MS);
+    const result = await this.requestJsonContent(
+      invalidOutput
+        ? `${SYSTEM_PROMPT}\nThe previous result failed schema validation. Repair it.`
+        : SYSTEM_PROMPT,
+      userContent,
+      MODEL_TIMEOUT_MS,
+      700,
+    );
+    return result.content;
+  }
+
+  private async requestJsonContent(
+    systemPrompt: string,
+    userContent: string,
+    timeoutMs: number,
+    maxOutputTokens: number,
+  ): Promise<{ content: string; requestId: string | null }> {
+    const timeout = createTimeoutSignal(timeoutMs);
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -335,16 +407,11 @@ Return the SayIt result JSON only.`;
         body: JSON.stringify({
           model: this.model,
           messages: [
-            {
-              role: "system",
-              content: invalidOutput
-                ? `${SYSTEM_PROMPT}\nThe previous result failed schema validation. Repair it.`
-                : SYSTEM_PROMPT,
-            },
+            { role: "system", content: systemPrompt },
             { role: "user", content: userContent },
           ],
           temperature: 0.2,
-          max_tokens: 700,
+          max_tokens: maxOutputTokens,
           thinking: { type: "disabled" },
           response_format: { type: "json_object" },
         }),
@@ -376,7 +443,13 @@ Return the SayIt result JSON only.`;
         );
       }
 
-      return parsed.data.choices[0].message.content;
+      return {
+        content: parsed.data.choices[0].message.content,
+        requestId:
+          response.headers?.get("x-request-id") ??
+          response.headers?.get("request-id") ??
+          null,
+      };
     } catch (error) {
       if (error instanceof ProviderError) {
         throw error;
@@ -400,7 +473,13 @@ Return the SayIt result JSON only.`;
 }
 
 export function createDeepSeekProvider(
-  config: DeepSeekConfig,
+  config: DeepSeekProviderConfig,
 ): ExpressionProvider {
+  return new DeepSeekProvider(config);
+}
+
+export function createDeepSeekJsonCompletionClient(
+  config: DeepSeekProviderConfig,
+): JsonCompletionClient {
   return new DeepSeekProvider(config);
 }

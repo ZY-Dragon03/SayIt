@@ -3,6 +3,16 @@ import http from "node:http";
 import tls from "node:tls";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
+import type { JsonCompletionClient } from "../provider";
+import {
+  MAX_SEMANTIC_ARTICLE_EVIDENCE_CHARS,
+  MAX_SEMANTIC_EXISTING_ARTICLES,
+  reviewSemanticCandidates,
+  SemanticReviewError,
+  type SemanticEditorialRecord,
+  type SemanticExistingArticleInput,
+  type SemanticRuntimeTrace,
+} from "./semantic";
 
 export type ReaderDifficulty = "Easy" | "Intermediate" | "Advanced";
 export type CandidateContentStatus = "FULL_TEXT" | "EXTERNAL_ONLY" | "SUMMARY" | "UNAVAILABLE";
@@ -53,6 +63,20 @@ export interface EditorialArticle {
   paragraphCount: number;
   paragraphs?: string[];
   bodyHash?: string;
+  provenance?: {
+    publisherIdentity: string;
+    publisherIdentitySources: Array<
+      | "structured_publisher"
+      | "citation_publication_title"
+      | "article_publisher"
+      | "open_graph_site_name"
+    >;
+    canonicalRelationship: "original_url" | "accessible_url";
+    standaloneArticleVerified: true;
+    titleAgreementVerified: true;
+    bodyCompletenessVerified: true;
+  };
+  editorial?: SemanticEditorialRecord;
 }
 
 export interface EditorialCandidateTrace {
@@ -68,6 +92,7 @@ export interface EditorialTrace {
   queries: string[];
   candidates: EditorialCandidateTrace[];
   decisions: string[];
+  semantic?: SemanticRuntimeTrace;
 }
 
 export interface EditorialCollection {
@@ -101,14 +126,22 @@ export interface EditorialOptions {
   now?: () => Date;
   maxArticleChecks?: number;
   signal?: AbortSignal;
+  semanticClient?: JsonCompletionClient;
+  alreadyDelivered?: SemanticExistingArticleInput[];
 }
 
-export type EditorialCollectionFailureCode = "reader_discovery_unavailable" | "reader_source_unavailable";
+export type EditorialCollectionFailureCode =
+  | "reader_discovery_unavailable"
+  | "reader_source_unavailable"
+  | "reader_semantic_unavailable";
 
 export class EditorialCollectionError extends Error {
-  readonly retryable = true;
-
-  constructor(readonly code: EditorialCollectionFailureCode, message: string) {
+  constructor(
+    readonly code: EditorialCollectionFailureCode,
+    message: string,
+    readonly retryable = true,
+    readonly trace?: EditorialTrace,
+  ) {
     super(message);
     this.name = "EditorialCollectionError";
   }
@@ -119,41 +152,8 @@ const MAX_SEARCH_BYTES = 2 * 1024 * 1024;
 const MAX_RESULTS_PER_QUERY = 12;
 const MAX_QUERIES = 12;
 const MAX_SHINGLE_CANDIDATES = 36;
-/**
- * First-party publisher roots with an established editorial operation. This is
- * deliberately a small source-quality gate: article URLs are still discovered
- * dynamically from the user's preferences, but readable text from other hosts
- * is not promoted to verified FULL_TEXT based on readability or metadata alone.
- */
-const ESTABLISHED_EDITORIAL_HOST_ROOTS = [
-  "theguardian.com",
-  "theconversation.com",
-  "apnews.com",
-  "reuters.com",
-  "bbc.com",
-  "bbc.co.uk",
-  "npr.org",
-  "nature.com",
-  "sciencedaily.com",
-  "arstechnica.com",
-  "economist.com",
-  "ft.com",
-  "nytimes.com",
-  "washingtonpost.com",
-  "scientificamerican.com",
-  "aljazeera.com",
-  "cnbc.com",
-  "theverge.com",
-  "foreignaffairs.com",
-];
-const PREFERENCE_SEARCH_HOST_ROOTS = [
-  "theguardian.com",
-  "theconversation.com",
-  "apnews.com",
-  "reuters.com",
-  "bbc.com",
-  "npr.org",
-];
+// This map normalizes visible publisher names only. It never grants trust or
+// determines FULL_TEXT eligibility.
 const ESTABLISHED_EDITORIAL_PUBLISHER_NAMES: Record<string, string> = {
   "theguardian.com": "The Guardian",
   "theconversation.com": "The Conversation",
@@ -304,27 +304,12 @@ function normalizeUrl(value: string): string | null {
 }
 
 function queryVariants(topics: string[]): string[] {
-  const general = topics.map((topic) => `${topic} ${QUERY_VARIANTS[0]}`).slice(0, MAX_QUERIES);
-  const targeted = PREFERENCE_SEARCH_HOST_ROOTS
-    .slice(0, Math.min(PREFERENCE_SEARCH_HOST_ROOTS.length, MAX_QUERIES - general.length))
-    .map((root, index) => {
-      const topic = topics[index % topics.length]!;
-      const variant = QUERY_VARIANTS[(index + 1) % QUERY_VARIANTS.length]!;
-      return `site:${root} ${topic} ${variant}`;
-    });
-  for (let variantIndex = 1; variantIndex < QUERY_VARIANTS.length && general.length + targeted.length < MAX_QUERIES; variantIndex += 1) {
-    for (const topic of topics) {
-      if (general.length + targeted.length >= MAX_QUERIES) break;
-      general.push(`${topic} ${QUERY_VARIANTS[variantIndex]}`);
-    }
-  }
   const variants: string[] = [];
-  for (let index = 0; variants.length < MAX_QUERIES; index += 1) {
-    const broad = general[index];
-    const trusted = targeted[index];
-    if (broad) variants.push(broad);
-    if (trusted && variants.length < MAX_QUERIES) variants.push(trusted);
-    if (!broad && !trusted) break;
+  for (let variantIndex = 0; variantIndex < QUERY_VARIANTS.length && variants.length < MAX_QUERIES; variantIndex += 1) {
+    for (const topic of topics) {
+      if (variants.length >= MAX_QUERIES) break;
+      variants.push(`${topic} ${QUERY_VARIANTS[variantIndex]}`);
+    }
   }
   return [...new Set(variants)].slice(0, MAX_QUERIES);
 }
@@ -718,6 +703,7 @@ function extractStructuredArticle(document: Document): {
 
 function publisherMetadata(document: Document): {
   publisher: string | null;
+  publisherSource: "structured_publisher" | "citation_publication_title" | "article_publisher" | null;
   siteName: string | null;
   canonicalUrl: string | null;
   licenses: string[];
@@ -726,10 +712,16 @@ function publisherMetadata(document: Document): {
   const structured = extractStructuredArticle(document);
   const meta = (selector: string) =>
     normalizeWhitespace(document.querySelector<HTMLMetaElement>(selector)?.content ?? "") || null;
-  const publisher =
-    structured.publisher ??
-    meta('meta[name="citation_publication_title"]') ??
-    meta('meta[property="article:publisher"]');
+  const citationPublisher = meta('meta[name="citation_publication_title"]');
+  const articlePublisher = meta('meta[property="article:publisher"]');
+  const publisher = structured.publisher ?? citationPublisher ?? articlePublisher;
+  const publisherSource = structured.publisher
+    ? "structured_publisher"
+    : citationPublisher
+      ? "citation_publication_title"
+      : articlePublisher
+        ? "article_publisher"
+        : null;
   const siteName = meta('meta[property="og:site_name"]');
   const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href ?? null;
   const licenses = [
@@ -742,7 +734,16 @@ function publisherMetadata(document: Document): {
     ...[...document.querySelectorAll<HTMLMetaElement>('meta[name="robots"], meta[name="googlebot"]')]
       .map((item) => item.content.toLowerCase()),
   ].join(" ");
-  return { publisher, siteName, canonicalUrl: canonical, licenses, robots };
+  return { publisher, publisherSource, siteName, canonicalUrl: canonical, licenses, robots };
+}
+
+function titleMetadata(document: Document, structuredHeadline: string | null): string[] {
+  const values = [
+    structuredHeadline,
+    normalizeWhitespace(document.querySelector<HTMLMetaElement>('meta[name="citation_title"]')?.content ?? "") || null,
+    normalizeWhitespace(document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content ?? "") || null,
+  ].filter((value): value is string => Boolean(value));
+  return [...new Set(values.map(normalizeWhitespace))];
 }
 
 function publisherNamesConflict(first: string | null, second: string | null): boolean {
@@ -794,13 +795,6 @@ function pageFailure(document: Document, bodyText: string, title: string): strin
     return "The source article is no longer available.";
   }
   return null;
-}
-
-function isEstablishedEditorialHost(host: string | null): boolean {
-  if (!host) return false;
-  return ESTABLISHED_EDITORIAL_HOST_ROOTS.some(
-    (root) => host === root || host.endsWith(`.${root}`),
-  );
 }
 
 function isCollectionPageType(value: unknown): boolean {
@@ -979,6 +973,7 @@ interface VerifiedCandidate {
   article: EditorialArticle;
   body: string;
   source: SearchCandidate;
+  topicalEvidence: string[];
   trace: EditorialCandidateTrace;
 }
 
@@ -992,23 +987,62 @@ function paragraphsFromReadability(content: string): string[] {
 interface SourceArticleParagraphs {
   paragraphs: string[];
   verifiedBodyBoundary: boolean;
+  readabilityReconstructionAllowed: boolean;
 }
 
 function hasVerifiedStandaloneArticleRoot(
   document: Document,
   title: string,
   hasStructuredArticleType: boolean,
+  declaredTitles: string[],
 ): boolean {
-  const roots = [...document.querySelectorAll("article")];
-  if (roots.length !== 1) return false;
   const openGraphType = normalizeWhitespace(
     document.querySelector<HTMLMetaElement>('meta[property="og:type"]')?.content ?? "",
   ).toLowerCase();
   if (openGraphType !== "article" && !hasStructuredArticleType) return false;
   const normalizedTitle = normalizeWhitespace(title).toLowerCase();
-  return [...roots[0]!.querySelectorAll("h1")].some(
-    (heading) => normalizeWhitespace(heading.textContent ?? "").toLowerCase() === normalizedTitle,
-  );
+  if (
+    declaredTitles.length === 0 ||
+    !declaredTitles.every((declared) => declared.toLowerCase() === normalizedTitle)
+  ) {
+    return false;
+  }
+  const roots = [...document.querySelectorAll("article")];
+  if (roots.length > 1) return false;
+  const normalizeHeading = (heading: Element) =>
+    normalizeWhitespace(heading.textContent ?? "").toLowerCase();
+  const headings = (roots.length === 1
+    ? [...roots[0]!.querySelectorAll("h1")]
+    : [...document.querySelectorAll("h1")])
+    .map(normalizeHeading)
+    .filter(Boolean);
+  return headings.length === 1 && headings[0] === normalizedTitle;
+}
+
+function isMediaCredit(paragraph: string): boolean {
+  return paragraph.length <= 80 && /^(illustration|photo|photograph|image|caption)\s+by\b/iu.test(paragraph);
+}
+
+function storyParagraphs(root: ParentNode): string[] {
+  return [...root.querySelectorAll("p")]
+    .filter((paragraph) => !paragraph.closest("form, aside, nav, footer, [role='complementary']"))
+    .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
+    .filter((paragraph) => paragraph.length >= 20 && !isMediaCredit(paragraph));
+}
+
+function narrowFallbackContentRoot(root: Element): Element {
+  const heading = root.querySelector("h1");
+  if (!heading) return root;
+  let node: Element = heading;
+  while (node.parentElement && !/^(BODY|HTML)$/u.test(node.parentElement.tagName)) {
+    const parent = node.parentElement;
+    const currentCount = storyParagraphs(node).length;
+    const parentCount = storyParagraphs(parent).length;
+    const added = parentCount - currentCount;
+    if (currentCount >= 3 && added > 0 && added / parentCount > 0.12) break;
+    node = parent;
+  }
+  return node;
 }
 
 function sourceArticleParagraphs(
@@ -1027,19 +1061,20 @@ function sourceArticleParagraphs(
       ? publisherBodyRoots
       : articleRoots.length > 0
         ? articleRoots
-        : [...document.querySelectorAll("main, [role='main']")];
-  const paragraphSets = roots.map((root) => [...root.querySelectorAll("p")]
-    .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
-    .filter((paragraph) => paragraph.length >= 20));
+        : [...document.querySelectorAll("main, [role='main']")].map((root) => narrowFallbackContentRoot(root));
+  const paragraphSets = roots.map((root) => storyParagraphs(root));
   const paragraphs = paragraphSets
     .sort((left, right) => right.join(" ").length - left.join(" ").length)[0] ?? [];
   const structuredBodyMatchesSource = Boolean(
     structuredBody && normalizeWhitespace(paragraphs.join(" ")) === normalizeWhitespace(structuredBody),
   );
+  const publisherBodyIsSource = articleBodyRoots.length === 0 && publisherBodyRoots.length > 0;
   return {
     paragraphs,
     verifiedBodyBoundary:
       articleBodyRoots.length > 0 || publisherBodyRoots.length > 0 || structuredBodyMatchesSource || verifiedStandaloneArticleRoot,
+    readabilityReconstructionAllowed:
+      articleBodyRoots.length > 0 || structuredBodyMatchesSource || (verifiedStandaloneArticleRoot && !publisherBodyIsSource),
   };
 }
 
@@ -1101,9 +1136,38 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
 
   const structured = extractStructuredArticle(document);
   const metadata = publisherMetadata(document);
+  const publisherIdentity = metadata.publisher ?? metadata.siteName;
+  const publisherIdentitySources = [
+    metadata.publisherSource,
+    metadata.siteName ? "open_graph_site_name" as const : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
+  const canonical = normalizeUrl(metadata.canonicalUrl ?? "");
+  const canonicalRelationship = canonical === sourceUrl
+    ? "original_url" as const
+    : canonical === accessibleUrl
+      ? "accessible_url" as const
+      : null;
+  const fallbackForProvenance = (reason: string, title = source.title) => {
+    const summary = makeCandidateSummary(source, "EXTERNAL_ONLY", reason, page.statusCode);
+    return {
+      article: null,
+      body: "",
+      summary: {
+        ...summary,
+        title: normalizeWhitespace(title || "") || summary.title,
+        accessibleUrl,
+      },
+      reason,
+    };
+  };
   if (publisherNamesConflict(metadata.publisher, metadata.siteName)) {
-    const summary = makeCandidateSummary(source, "UNAVAILABLE", "Publisher metadata conflicts.", page.statusCode);
-    return { article: null, body: "", summary, reason: "Structured publisher metadata contradicts the page site name." };
+    return fallbackForProvenance("Publisher identity metadata conflicts.");
+  }
+  if (!publisherIdentity || publisherIdentitySources.length === 0) {
+    return fallbackForProvenance("Publisher identity could not be attributed to article-page metadata.");
+  }
+  if (!canonical || !canonicalRelationship) {
+    return fallbackForProvenance("Canonical URL is missing or does not match the discovered or accessible article URL.");
   }
   const reader = new Readability(document.cloneNode(true) as Document, { charThreshold: 100 });
   const parsedArticle = reader.parse();
@@ -1116,6 +1180,13 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     return { article: null, body: "", summary, reason: "The page did not expose readable article paragraphs." };
   }
   const title = normalizeWhitespace(parsedArticle.title || structured.headline || source.title);
+  const declaredTitles = titleMetadata(document, structured.headline);
+  const standaloneArticleVerified = hasVerifiedStandaloneArticleRoot(
+    document,
+    title,
+    structured.hasArticleType,
+    declaredTitles,
+  );
   if (isCategoryOrListingPage(document, parsedArticle.content, page.finalUrl, title)) {
     const summary = makeCandidateSummary(
       source,
@@ -1130,21 +1201,42 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
       reason: "The source is a category or story listing, not an individual article.",
     };
   }
-  let paragraphs = paragraphsFromReadability(parsedArticle.content);
+  if (!standaloneArticleVerified) {
+    return fallbackForProvenance("Standalone article structure and title metadata do not agree.", title);
+  }
+  let paragraphs = paragraphsFromReadability(parsedArticle.content)
+    .filter((paragraph) => !isMediaCredit(paragraph));
   const sourceBody = sourceArticleParagraphs(
     document,
     structured.articleBody,
-    hasVerifiedStandaloneArticleRoot(document, title, structured.hasArticleType),
+    standaloneArticleVerified,
   );
   const sourceParagraphs = sourceBody.paragraphs;
+  if (!sourceBody.verifiedBodyBoundary || sourceParagraphs.length < 3) {
+    const reason = "The source did not expose a verified, continuous standalone article body; extracted text was too short or incomplete.";
+    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
+    return { article: null, body: "", summary, reason };
+  }
   let omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
   let recoveredParagraphCount = 0;
-  const readabilityParagraphsBelongToSourceBody = missingSourceParagraphs(paragraphs, sourceParagraphs) === 0;
+  const sourceText = normalizeWhitespace(sourceParagraphs.join(" ")).toLowerCase();
+  const extraneousParagraphs = paragraphs.filter((paragraph) => !sourceText.includes(normalizeWhitespace(paragraph).toLowerCase()));
+  if (paragraphs.length > 0 && extraneousParagraphs.length / paragraphs.length > 0.1) {
+    const reason = "Extracted paragraphs are incomplete or include material outside the verified article body.";
+    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
+    return { article: null, body: "", summary, reason };
+  }
+  if (extraneousParagraphs.length > 0) {
+    const extraneous = new Set(extraneousParagraphs);
+    paragraphs = paragraphs.filter((paragraph) => !extraneous.has(paragraph));
+    omittedParagraphCount = missingSourceParagraphs(sourceParagraphs, paragraphs);
+  }
   if (
     omittedParagraphCount > 0 &&
-    sourceBody.verifiedBodyBoundary &&
     sourceParagraphs.length > 0 &&
-    readabilityParagraphsBelongToSourceBody
+    sourceBody.verifiedBodyBoundary &&
+    sourceBody.readabilityReconstructionAllowed &&
+    omittedParagraphCount / sourceParagraphs.length <= 0.1
   ) {
     // Readability can discard real paragraphs because of publisher CSS classes such as
     // "comment" even when article-level metadata and one matching article root establish
@@ -1184,29 +1276,9 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
       return { article: null, body, summary, reason: "Extracted body is below 70% of the structured NewsArticle.articleBody." };
     }
   }
-  const finalHost = hostOf(accessibleUrl);
   const originalHost = hostOf(sourceUrl);
-  const originalPublication = normalizeWhitespace(source.publication ?? "") || (originalHost ? displayPublication(originalHost) : "Unverified source");
-  const accessiblePublication = metadata.publisher ?? metadata.siteName ?? (finalHost ? displayPublication(finalHost) : originalPublication);
-  if (!isEstablishedEditorialHost(originalHost) || !isEstablishedEditorialHost(finalHost)) {
-    const unverifiedHosts = [
-      !isEstablishedEditorialHost(originalHost) ? `original host ${originalHost ?? "unknown"}` : null,
-      !isEstablishedEditorialHost(finalHost) ? `accessible host ${finalHost ?? "unknown"}` : null,
-    ].filter((item): item is string => item !== null);
-    const reason = `Unverified host(s) for this article: ${unverifiedHosts.join(", ")}. Full text is delivered only from the curated established editorial publisher list, so this page remains external-only.`;
-    const summary = makeCandidateSummary(source, "EXTERNAL_ONLY", reason, page.statusCode);
-    return {
-      article: null,
-      body: "",
-      summary: {
-        ...summary,
-        title,
-        accessiblePublication,
-        accessibleUrl,
-      },
-      reason,
-    };
-  }
+  const originalPublication = originalHost ? displayPublication(originalHost) : publisherIdentity;
+  const accessiblePublication = publisherIdentity;
   const bodyHash = hash(paragraphs.join("\n\n").toLowerCase());
   const article: EditorialArticle = {
     id: hash(sourceUrl).slice(0, 24),
@@ -1223,6 +1295,14 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     paragraphCount: paragraphs.length,
     paragraphs,
     bodyHash,
+    provenance: {
+      publisherIdentity,
+      publisherIdentitySources,
+      canonicalRelationship,
+      standaloneArticleVerified: true,
+      titleAgreementVerified: true,
+      bodyCompletenessVerified: true,
+    },
   };
   return {
     article,
@@ -1244,7 +1324,7 @@ function evaluateVerified(
   source: SearchCandidate,
   page: FetchedArticlePage,
   preferences: EditorialPreferences,
-): { article: EditorialArticle | null; summary: EditorialArticle; body: string; reason: string; trace: EditorialCandidateTrace } {
+): { article: EditorialArticle | null; summary: EditorialArticle; body: string; reason: string; topicalEvidence?: string[]; trace: EditorialCandidateTrace } {
   const extracted = extractPage(source, page);
   const fallbackPublication = extracted.summary.originalPublication;
   if (!extracted.article) {
@@ -1261,35 +1341,21 @@ function evaluateVerified(
     };
   }
   const matched = topicEvidence(preferences.topics, extracted.article.title, extracted.body);
-  if (!matched.topics.length) {
-    return {
-      article: null,
-      // The text is readable full text, but it is unsuitable for this saved issue.
-      // Do not relabel it as an external-only page or surface it as a delivery candidate.
-      summary: extracted.article,
-      body: extracted.body,
-      reason: "The article did not provide evidence for any configured topic.",
-      trace: {
-        url: source.url,
-        publication: extracted.article.originalPublication,
-        outcome: "REJECTED",
-        reason: "Topic mismatch: no configured topic matched the article headline or body.",
-        statusCode: page.statusCode,
-        articleId: extracted.article.id,
-      },
-    };
-  }
   const withTopics = { ...extracted.article, topics: matched.topics };
+  const topicalReason = matched.evidence.length > 0
+    ? `Keyword evidence for semantic topic review: ${matched.evidence.join("; ")}.`
+    : "No direct configured-topic keyword match; retained for semantic topic review.";
   return {
     article: withTopics,
     summary: withTopics,
     body: extracted.body,
-    reason: "Verified article with topic evidence.",
+    reason: topicalReason,
+    topicalEvidence: matched.topics,
     trace: {
       url: source.url,
       publication: withTopics.originalPublication,
       outcome: "ACCEPTED",
-      reason: `Topic evidence: ${matched.evidence.join("; ")}; ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.${extracted.recoveredParagraphCount ? ` Reconstructed ${extracted.recoveredParagraphCount} paragraph(s) from the verified source article body after Readability omission.` : ""}`,
+      reason: `${topicalReason} ${withTopics.wordCount} reading words; FKGL ${withTopics.fkgl?.toFixed(2) ?? "unavailable"}.${extracted.recoveredParagraphCount ? ` Reconstructed ${extracted.recoveredParagraphCount} paragraph(s) from the verified source article body after Readability omission.` : ""}`,
       statusCode: page.statusCode,
       articleId: withTopics.id,
     },
@@ -1397,11 +1463,13 @@ function satisfiesDifficulty(article: EditorialArticle, target: ReaderDifficulty
 
 function bestSelection(
   pool: EditorialArticle[],
-  preferences: EditorialPreferences,
+  maxCount: number,
+  budgetMinutes: number,
+  lowerMinutes: number,
 ): EditorialArticle[] {
-  const maxCount = preferences.dailyArticleCount;
-  const budgetTenths = Math.floor(preferences.readingBudgetMinutes * 10 + 1e-8);
-  const lowerTenths = Math.ceil(preferences.readingBudgetMinutes * 7 + 1e-8);
+  if (maxCount <= 0) return [];
+  const budgetTenths = Math.floor(budgetMinutes * 10 + 1e-8);
+  const lowerTenths = Math.ceil(lowerMinutes * 10 - 1e-8);
   let states = new Map<string, EditorialArticle[]>([["0:0", []]]);
   for (const article of pool) {
     const minutes = Math.round(article.readingMinutes * 10);
@@ -1432,6 +1500,27 @@ function bestSelection(
       const bDistance = Math.abs(b.tenths - lowerTenths);
       return aDistance - bDistance || b.tenths - a.tenths;
     })[0]?.articles ?? [];
+}
+
+function editorialEvidence(body: string, maximum: number): string {
+  const text = normalizeWhitespace(body);
+  if (text.length <= maximum) return text;
+  const sectionSize = Math.floor((maximum - 48) / 3);
+  const middleStart = Math.max(0, Math.floor((text.length - sectionSize) / 2));
+  const excerpts = [
+    `[beginning] ${text.slice(0, sectionSize)}`,
+    `[middle] ${text.slice(middleStart, middleStart + sectionSize)}`,
+    `[end] ${text.slice(-sectionSize)}`,
+  ];
+  return excerpts.join(" ").slice(0, maximum);
+}
+
+function editorialScore(decision: SemanticEditorialRecord): number {
+  const rating = { low: 0, medium: 1, high: 2 } as const;
+  const overlap = { none: 0, some: 2, substantial: 5 } as const;
+  const contribution = decision.contributionType === "perspective" ? 1 : 0;
+  return rating[decision.relevance] + rating[decision.editorialValue] * 2 +
+    rating[decision.analysisDepth] + rating[decision.novelty] + contribution - overlap[decision.overlap];
 }
 
 function buildQueries(topics: string[]): string[] {
@@ -1562,6 +1651,7 @@ export async function collectEditorial(
       article: candidate.article,
       body: candidate.body,
       source: candidates.find((item) => normalizeUrl(item.url) === normalizeUrl(candidate.article!.originalUrl))!,
+      topicalEvidence: candidate.topicalEvidence ?? [],
       trace: candidate.trace,
     };
     const duplicate = deduplicate(entry, verified);
@@ -1577,63 +1667,166 @@ export async function collectEditorial(
     trace.candidates.push(candidate.trace);
   }
 
-  const eligible = verified
-    .map((item) => item.article)
-    .filter((article) => satisfiesDifficulty(article, preferences.difficulty))
-    .sort((left, right) => left.readingMinutes - right.readingMinutes);
-  const excludedDifficulty = verified.filter((item) => !satisfiesDifficulty(item.article, preferences.difficulty));
-  for (const item of excludedDifficulty) {
-    trace.candidates.push({ ...item.trace, outcome: "REJECTED", reason: `Difficulty ${item.article.difficulty} does not match ${preferences.difficulty}.` });
+  if (verified.length > 0) {
+    const semanticInput = {
+      contractVersion: "reader-editorial-curation.v1" as const,
+      preferences: {
+        topics: preferences.topics,
+        dailyArticleCount: preferences.dailyArticleCount,
+        difficulty: preferences.difficulty,
+        readingBudgetMinutes: preferences.readingBudgetMinutes,
+      },
+      alreadyDelivered: options.alreadyDelivered?.slice(0, MAX_SEMANTIC_EXISTING_ARTICLES) ?? [],
+      candidates: verified.map((item) => ({
+        id: item.article.id,
+        title: item.article.title,
+        publication: item.article.originalPublication,
+        evidence: editorialEvidence(item.body, MAX_SEMANTIC_ARTICLE_EVIDENCE_CHARS),
+        topicalEvidence: item.topicalEvidence,
+        wordCount: item.article.wordCount,
+        readingMinutes: item.article.readingMinutes,
+        fkgl: item.article.fkgl,
+        difficulty: item.article.difficulty,
+        provenance: item.article.provenance!,
+      })),
+    };
+    try {
+      const review = await reviewSemanticCandidates(semanticInput, options.semanticClient);
+      trace.semantic = review.runtime;
+      const reviewedIds = new Set(review.runtime.candidateIds);
+      const decisions = new Map(review.decisions.map((item) => [item.candidateId, item.editorial]));
+      trace.decisions.push(
+        `Semantic review ${review.runtime.contractVersion} succeeded with ${review.runtime.requestCount} request(s), provider ${review.runtime.provider}/${review.runtime.model}, input sha256 ${review.runtime.inputSha256}.`,
+      );
+      for (const item of verified) {
+        if (!reviewedIds.has(item.article.id)) {
+          item.trace.outcome = "REJECTED";
+          item.trace.reason = "Not submitted for semantic review because the bounded request capacity was reached.";
+          continue;
+        }
+        const editorial = decisions.get(item.article.id);
+        if (!editorial) {
+          // The versioned response validator guarantees a complete ID set. Keep this
+          // guard so future changes cannot turn a partial decision into eligibility.
+          item.trace.outcome = "REJECTED";
+          item.trace.reason = "Semantic review returned no validated decision for this candidate.";
+          continue;
+        }
+        item.article = {
+          ...item.article,
+          topics: editorial.matchedTopics,
+          editorial,
+        };
+        item.trace.outcome = editorial.decision === "APPROVE" ? "ACCEPTED" : "REJECTED";
+        item.trace.reason = `${item.trace.reason} Semantic ${editorial.decision.toLowerCase()}: topic fit ${editorial.topicFit.toLowerCase()}, value ${editorial.editorialValue}, depth ${editorial.analysisDepth}, novelty ${editorial.novelty}, overlap ${editorial.overlap}, contribution ${editorial.contributionType}. ${editorial.rationale}`;
+        trace.decisions.push(`${item.article.id}: ${item.trace.reason}`);
+      }
+    } catch (error) {
+      if (!(error instanceof SemanticReviewError)) throw error;
+      trace.semantic = error.runtime;
+      trace.decisions.push(`Semantic review failed (${error.runtime.status}): ${error.runtime.reason ?? "unknown semantic failure"}`);
+      for (const item of verified) {
+        item.trace.outcome = "REJECTED";
+        item.trace.reason = `Semantic review failed (${error.runtime.status}); this candidate was not eligible for delivery.`;
+      }
+      throw new EditorialCollectionError(
+        "reader_semantic_unavailable",
+        error.message,
+        error.retryable,
+        trace,
+      );
+    }
   }
 
-  const selected = bestSelection(eligible.slice(0, MAX_SHINGLE_CANDIDATES), preferences);
+  const approved = verified
+    .filter((item) => item.article.editorial?.decision === "APPROVE")
+    .sort((left, right) =>
+      editorialScore(right.article.editorial!) - editorialScore(left.article.editorial!) ||
+      left.article.readingMinutes - right.article.readingMinutes,
+    );
+  const eligible = approved
+    .map((item) => item.article)
+    .filter((article) => satisfiesDifficulty(article, preferences.difficulty) && article.topics.length > 0);
+  for (const item of approved) {
+    if (!satisfiesDifficulty(item.article, preferences.difficulty)) {
+      item.trace.outcome = "REJECTED";
+      item.trace.reason = `Semantic approval did not override measured difficulty ${item.article.difficulty}; saved preference is ${preferences.difficulty}.`;
+    }
+  }
+  const deliveredContext = options.alreadyDelivered?.slice(0, MAX_SEMANTIC_EXISTING_ARTICLES) ?? [];
+  const existingCount = deliveredContext.length;
+  const existingMinutes = deliveredContext.reduce((sum, article) => sum + article.readingMinutes, 0);
+  const remainingCount = Math.max(0, preferences.dailyArticleCount - existingCount);
+  const remainingBudget = Math.max(0, preferences.readingBudgetMinutes - existingMinutes);
+  const requiredAdditionalMinutes = Math.max(0, preferences.readingBudgetMinutes * 0.7 - existingMinutes);
+  const selected = bestSelection(
+    eligible.slice(0, MAX_SHINGLE_CANDIDATES),
+    remainingCount,
+    remainingBudget,
+    requiredAdditionalMinutes,
+  );
   const selectedIds = new Set(selected.map((article) => article.id));
   for (const item of eligible) {
     if (!selectedIds.has(item.id)) {
-      trace.decisions.push(`${item.id} is verified and eligible but not included because exact count and the reading-time hard cap are prioritized.`);
+      const candidate = verified.find((entry) => entry.article.id === item.id);
+      if (candidate) {
+        candidate.trace.reason = "Semantic approval was not selected under the exact-count and reading-time limits.";
+        trace.decisions.push(`${item.id} was approved but not selected under the exact-count and reading-time limits.`);
+      }
     }
   }
-  const readingMinutes = selected.reduce((sum, article) => sum + article.readingMinutes, 0);
+  const readingMinutes = existingMinutes + selected.reduce((sum, article) => sum + article.readingMinutes, 0);
+  const actualCount = existingCount + selected.length;
   const target = preferences.readingBudgetMinutes;
   const lower = target * 0.7;
+  const combinedArticles = [
+    ...deliveredContext.map((article) => ({ topics: article.topics, difficulty: article.difficulty })),
+    ...selected.map((article) => ({ topics: article.topics, difficulty: article.difficulty })),
+  ];
+  const allTopicsMatch = combinedArticles.every((article) =>
+    preferences.topics.some((topic) => article.topics.some((matched) => matched.toLowerCase() === topic.toLowerCase())),
+  );
+  const allDifficultyMatch = combinedArticles.every((article) => article.difficulty === preferences.difficulty);
   const complete =
-    selected.length === preferences.dailyArticleCount &&
+    actualCount === preferences.dailyArticleCount &&
     readingMinutes >= lower - 1e-9 &&
     readingMinutes <= target + 1e-9 &&
-    selected.every((article) => article.topics.length > 0 && article.difficulty === preferences.difficulty);
+    allTopicsMatch &&
+    allDifficultyMatch;
   const status: EditorialCollection["status"] = complete
     ? "COMPLETE"
-    : selected.length > 0
+    : actualCount > 0
       ? "PARTIAL"
       : "NOT_DELIVERED";
   const unmetConstraints: string[] = [];
-  if (selected.length < preferences.dailyArticleCount) {
-    unmetConstraints.push(`Article count: ${selected.length}/${preferences.dailyArticleCount} verified full-text articles.`);
+  if (actualCount < preferences.dailyArticleCount) {
+    unmetConstraints.push(`Article count: ${actualCount}/${preferences.dailyArticleCount} verified full-text articles.`);
   }
-  if (selected.length > 0 && readingMinutes < lower - 1e-9) {
+  if (actualCount > 0 && readingMinutes < lower - 1e-9) {
     unmetConstraints.push(`Reading time: ${readingMinutes.toFixed(1)} minutes is below the ${lower.toFixed(1)} minute 70% target.`);
   }
   if (readingMinutes > target + 1e-9) {
     unmetConstraints.push(`Reading time: ${readingMinutes.toFixed(1)} minutes exceeds the ${target.toFixed(1)} minute hard limit.`);
   }
-  if (selected.length < preferences.dailyArticleCount) {
-    unmetConstraints.push("Suitable supply was insufficient; unsuitable or unverified candidates were not used to fill the issue.");
+  if (!allTopicsMatch) unmetConstraints.push("One or more delivered articles do not match a configured topic.");
+  if (!allDifficultyMatch) unmetConstraints.push("One or more delivered articles do not match the configured difficulty.");
+  if (actualCount < preferences.dailyArticleCount) {
+    unmetConstraints.push("Suitable supply was insufficient; unsuitable, unverified, or semantically rejected candidates were not used to fill the issue.");
   }
-  if (eligible.length === 0) {
-    unmetConstraints.push(`No verified full-text articles matched the configured ${preferences.difficulty} difficulty and selected topics.`);
+  if (eligible.length === 0 && actualCount < preferences.dailyArticleCount) {
+    unmetConstraints.push(`No semantic-approved full-text articles matched the configured ${preferences.difficulty} difficulty and selected topics.`);
   }
-  const actualTopics = [...new Set(selected.flatMap((article) => article.topics))];
-  const actualDifficulty = selected.length && selected.every((article) => article.difficulty === selected[0].difficulty)
-    ? selected[0].difficulty
-    : null;
+  const actualTopics = [...new Set(combinedArticles.flatMap((article) => article.topics))];
+  const difficultySet = new Set(combinedArticles.map((article) => article.difficulty));
+  const actualDifficulty = difficultySet.size === 1 ? combinedArticles[0]?.difficulty ?? null : null;
   trace.decisions.push(
-    `${status}: delivered ${selected.length}/${preferences.dailyArticleCount} verified full-text articles; estimated ${readingMinutes.toFixed(1)}/${target} minutes; topics ${actualTopics.join(", ") || "none"}; difficulty ${actualDifficulty ?? "mixed/none"}.`,
+    `${status}: delivered ${actualCount}/${preferences.dailyArticleCount} verified full-text articles; estimated ${readingMinutes.toFixed(1)}/${target} minutes; topics ${actualTopics.join(", ") || "none"}; difficulty ${actualDifficulty ?? "mixed/none"}.`,
   );
   return {
     status,
     articles: selected,
     candidates: allSummaries,
-    actual: { count: selected.length, topics: actualTopics, difficulty: actualDifficulty, readingMinutes },
+    actual: { count: actualCount, topics: actualTopics, difficulty: actualDifficulty, readingMinutes },
     unmetConstraints,
     trace,
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  collectEditorial,
+  collectEditorial as collectEditorialCore,
   countSentenceEnds,
   countSyllablesInWord,
   readArticleFullText,
@@ -11,6 +11,53 @@ import {
   type FetchedArticlePage,
   type SearchCandidate,
 } from "./editorial";
+import { EDITORIAL_SEMANTIC_CONTRACT_VERSION } from "./semantic";
+import type { JsonCompletionClient } from "../provider";
+
+function testSemanticClient(): JsonCompletionClient {
+  return {
+    async completeJson(request) {
+      const match = /<semantic_review_input>\n([\s\S]*?)\n<\/semantic_review_input>/u.exec(request.userContent);
+      if (!match) throw new Error("The bounded semantic input was missing.");
+      const payload = JSON.parse(match[1]!) as {
+        preferences: { topics: string[] };
+        candidates: Array<{ id: string; title: string }>;
+      };
+      return {
+        provider: "fixture",
+        model: "explicit-test-decision",
+        requestId: "fixture-semantic-request",
+        content: JSON.stringify({
+          contract_version: EDITORIAL_SEMANTIC_CONTRACT_VERSION,
+          decisions: payload.candidates.map((candidate) => ({
+            candidate_id: candidate.id,
+            decision: "APPROVE",
+            topic_fit: "YES",
+            matched_topics: payload.preferences.topics.slice(0, 1),
+            relevance: "high",
+            editorial_value: "high",
+            analysis_depth: "high",
+            novelty: "medium",
+            overlap: "none",
+            contribution_type: "analysis",
+            rationale: `The verified article explains ${candidate.title.slice(0, 100)}.`,
+          })),
+        }),
+      };
+    },
+  };
+}
+
+function collectEditorial(
+  preferences: EditorialPreferences,
+  options: Parameters<typeof collectEditorialCore>[1],
+) {
+  return collectEditorialCore(preferences, {
+    ...options,
+    // Tests make their semantic decision explicit; this never ships as a production fallback.
+    semanticClient: options.semanticClient ?? testSemanticClient(),
+  });
+}
 
 function articleBody(seed: string, independent = false): string {
   const sentences = independent
@@ -43,7 +90,14 @@ function pageFor(
   publisher = new URL(url).hostname.replace(/^www\./u, "").split(".")[0],
 ): FetchedArticlePage {
   const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
-  const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title><meta property="og:site_name" content="${publisher}"></head><body><main><article><h1>${title}</h1>${paragraphs}</article></main></body></html>`;
+  const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+    <link rel="canonical" href="${url}">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
+    <meta property="article:publisher" content="${publisher}">
+    <meta property="og:site_name" content="${publisher}">
+    </head><body><main><article><h1>${title}</h1>${paragraphs}</article></main></body></html>`;
   return {
     statusCode: 200,
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -65,7 +119,10 @@ function indexPageWithArticleMetadata(
   const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
   const html = `<!doctype html><html lang="en"><head>
     <title>${title} | ${publisher}</title>
+    <link rel="canonical" href="${url}">
     <meta property="og:type" content="article">
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
     <meta property="og:site_name" content="${publisher}">
     </head><body><main role="main" itemscope itemtype="https://schema.org/NewsArticle">
     <h1>${title}</h1><section aria-label="Editorial index">${cards}</section>
@@ -93,6 +150,10 @@ function pageWithLinkDenseSourceBlocks(
   }).join("");
   const html = `<!doctype html><html lang="en"><head>
     <title>${title} | Reuters</title>
+    <link rel="canonical" href="${url}">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
     <meta property="og:site_name" content="Reuters">
     </head><body><main><article><h1>${title}</h1>
     <div data-component="text-block"><div class="Grid">${textBlocks}</div></div>
@@ -116,9 +177,7 @@ function pageWithSemanticBodyAndReadabilityOmissions(
     `<p${omittedIndexes.has(index) ? ' class="comment"' : ""}>${paragraph}</p>`,
   ).join("");
   const itemprop = semanticSource === "itemprop" ? ' itemprop="articleBody"' : "";
-  const openGraphType = semanticSource === "article-page"
-    ? '<meta property="og:type" content="article">'
-    : "";
+  const openGraphType = '<meta property="og:type" content="article">';
   const structuredArticle = semanticSource !== "itemprop"
     ? `<script type="application/ld+json">${JSON.stringify({
         "@context": "https://schema.org",
@@ -130,7 +189,10 @@ function pageWithSemanticBodyAndReadabilityOmissions(
     : "";
   const html = `<!doctype html><html lang="en"><head>
     <title>${title} | Reuters</title>
+    <link rel="canonical" href="${url}">
     ${openGraphType}
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
     <meta property="og:site_name" content="Reuters">
     ${structuredArticle}</head><body><main><article><h1>${title}</h1>
     <div${itemprop}>${sourceBody}</div>
@@ -160,7 +222,10 @@ function pageWithPublisherBodyBoundary(
     .join("");
   const html = `<!doctype html><html lang="en"><head>
     <title>${title} | The Guardian</title>
+    <link rel="canonical" href="${url}">
     <meta property="og:type" content="article">
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
     <meta property="og:site_name" content="The Guardian">
     </head><body><main><article><h1>${title}</h1>${articleLevel}
     <div data-gu-name="body">${body}</div>
@@ -471,7 +536,8 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(searches.length).toBeGreaterThan(0);
     expect(searches.every((query) => query.toLowerCase().includes("finance"))).toBe(true);
     expect(searches.some((query) => /in-depth|analysis|reporting/u.test(query))).toBe(true);
-    expect(searches.some((query) => /site:(?:theguardian\.com|theconversation\.com|apnews\.com|reuters\.com|bbc\.com|npr\.org)/u.test(query))).toBe(true);
+    expect(searches.every((query) => !/\bsite:/iu.test(query))).toBe(true);
+    expect(searches.length).toBeGreaterThan(0);
     expect(fetchCalls).toContain(first);
     expect(fetchCalls).toContain(second);
     expect(result.status).toBe("COMPLETE");
@@ -575,7 +641,7 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.articles.every((article) => article.contentStatus === "FULL_TEXT")).toBe(true);
   });
 
-  it("keeps a readable InfoStream Global page external-only when its host is not established", async () => {
+  it("accepts an unlisted publisher when objective provenance evidence agrees", async () => {
     const url = "https://infostreamglobal.com/tech-reporting-ensuring-2026-media-credibility";
     const title = "Tech Reporting: Ensuring 2026 Media Credibility";
     const body = articleBody("technology reporting and digital media credibility");
@@ -588,24 +654,174 @@ describe("SayIt Reader Editorial Agent", () => {
       maxArticleChecks: 1,
     });
 
-    expect(result.articles).toHaveLength(0);
-    expect(result.status).toBe("NOT_DELIVERED");
-    expect(result.candidates[0]).toMatchObject({
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles[0]).toMatchObject({
       originalPublication: "Infostreamglobal",
-      originalUrl: url,
       accessiblePublication: "InfoStream Global",
-      accessibleUrl: url,
-      contentStatus: "EXTERNAL_ONLY",
-      paragraphCount: 0,
+      contentStatus: "FULL_TEXT",
+      provenance: {
+        publisherIdentity: "InfoStream Global",
+        canonicalRelationship: "original_url",
+        standaloneArticleVerified: true,
+        titleAgreementVerified: true,
+        bodyCompletenessVerified: true,
+      },
     });
-    expect(result.candidates[0]?.paragraphs).toBeUndefined();
     expect(result.trace.candidates).toEqual(expect.arrayContaining([
       expect.objectContaining({
         url,
-        outcome: "REJECTED",
-        reason: expect.stringContaining("curated established editorial publisher list"),
+        outcome: "ACCEPTED",
       }),
     ]));
+  });
+
+  it.each([
+    ["known publisher", "https://www.reuters.com/technology/provenance-proof", "Reuters"],
+    ["unknown publisher", "https://independent-example.test/technology/provenance-proof", "Independent Example News"],
+  ])("fails closed on incoherent provenance for a %s", async (_label, url, publisher) => {
+    const title = "Technology report about regional energy evidence";
+    const body = articleBody("technology and energy evidence");
+    const validPage = pageFor(url, title, body, publisher);
+    const html = validPage.body.toString("utf8");
+    const invalidPages = [
+      {
+        label: "canonical mismatch",
+        html: html.replace(`<link rel="canonical" href="${url}">`, '<link rel="canonical" href="https://other.example/unrelated">'),
+        reason: /canonical/iu,
+      },
+      {
+        label: "missing attributable identity",
+        html: html
+          .replace(`<meta property="article:publisher" content="${publisher}">`, "")
+          .replace(`<meta property="og:site_name" content="${publisher}">`, ""),
+        reason: /publisher identity/iu,
+      },
+      {
+        label: "conflicting title metadata",
+        html: html.replace(`<meta name="citation_title" content="${title}">`, '<meta name="citation_title" content="Another unrelated report">'),
+        reason: /title metadata/iu,
+      },
+    ];
+    const semanticClient: JsonCompletionClient = { completeJson: vi.fn(async () => { throw new Error("Invalid provenance reached semantic review."); }) };
+
+    for (const invalid of invalidPages) {
+      const page = { ...validPage, body: Buffer.from(invalid.html) };
+      const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+        search: async () => [{ url, title, snippet: "A technology report" }],
+        fetchArticle: async () => page,
+        semanticClient,
+        maxArticleChecks: 1,
+      });
+      expect(result.articles).toHaveLength(0);
+      expect(result.candidates[0]?.contentStatus).not.toBe("FULL_TEXT");
+      expect(result.trace.candidates.some((candidate) => candidate.url === url && invalid.reason.test(candidate.reason))).toBe(true);
+    }
+    expect(semanticClient.completeJson).not.toHaveBeenCalled();
+  });
+
+  it("accepts a standalone article with a page-level h1 when no article element is present", async () => {
+    const url = "https://www.technologyreview.com/2026/09/28/1145197/example-technology-article";
+    const title = "Who is liable when autonomous technology systems fail in production";
+    const body = articleBody("technology liability and computing");
+    const publisher = "MIT Technology Review";
+    const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+      <link rel="canonical" href="${url}">
+      <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
+      <meta property="og:site_name" content="${publisher}">
+      </head><body><header><h1>${title}</h1></header><main>${paragraphs}</main></body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "A technology liability report" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles[0]).toMatchObject({
+      title,
+      contentStatus: "FULL_TEXT",
+      provenance: {
+        publisherIdentity: publisher,
+        standaloneArticleVerified: true,
+        titleAgreementVerified: true,
+        bodyCompletenessVerified: true,
+      },
+    });
+  });
+
+  it("keeps related modules and newsletter chrome out of a page-level article body", async () => {
+    const url = "https://www.technologyreview.com/2026/09/28/1145197/example-technology-article";
+    const title = "Who is liable when autonomous technology systems fail in production";
+    const body = articleBody("technology liability and computing");
+    const publisher = "MIT Technology Review";
+    const story = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const related = [
+      "Ten years after AlphaGo, a separate technology brief looks at research claims rather than this liability report.",
+      "Another short item says agents are not yet creative enough to carry out open-ended laboratory research.",
+      "A third related item says breathless capability claims fall apart quickly under independent scrutiny.",
+      "A fourth related item introduces new companies nipping at the heels of larger technology firms.",
+    ].map((paragraph) => `<p>${paragraph}</p>`).join("");
+    const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+      <link rel="canonical" href="${url}">
+      <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
+      <meta property="og:site_name" content="${publisher}">
+      </head><body><main>
+        <div><header><h1>${title}</h1></header><p>Illustration by Rose Wong</p>${story}</div>
+        <div class="sidebar">${related}</div>
+        <form><p>Thank you for submitting your email!</p><p>It looks like something went wrong while saving newsletter preferences.</p></form>
+      </main></body></html>`;
+    const fixture: FetchedArticlePage = {
+      statusCode: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from(html),
+      finalUrl: url,
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "A technology liability report" }],
+      fetchArticle: makeFetcher(new Map([[url, fixture]])),
+      maxArticleChecks: 1,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    const delivered = result.articles[0]?.paragraphs?.join("\n\n") ?? "";
+    expect(delivered).not.toContain("Thank you for submitting your email");
+    expect(delivered).not.toContain("nipping at the heels");
+    expect(delivered).not.toContain("Illustration by Rose Wong");
+  });
+
+  it("sends configured topic labels to semantic review when keyword evidence is long", async () => {
+    const url = "https://www.example.com/technology/long-evidence";
+    const title = "How technology, software, chips, and computing changed the data center";
+    const body = articleBody("technology software artificial intelligence machine learning semiconductor chip computing cyber robot data center internet");
+    const seen: string[] = [];
+    const semanticClient: JsonCompletionClient = {
+      async completeJson(request) {
+        seen.push(request.userContent);
+        return testSemanticClient().completeJson(request);
+      },
+    };
+    const result = await collectEditorial(preferencesForTopic(body, "Technology"), {
+      search: async () => [{ url, title, snippet: "Technology" }],
+      fetchArticle: makeFetcher(new Map([[url, pageFor(url, title, body, "Example Review")]])),
+      maxArticleChecks: 1,
+      semanticClient,
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    const payload = /<semantic_review_input>\n([\s\S]*?)\n<\/semantic_review_input>/u.exec(seen[0] ?? "")?.[1];
+    const parsed = JSON.parse(payload ?? "{}") as { candidates: Array<{ topicalEvidence: string[] }> };
+    expect(parsed.candidates[0]?.topicalEvidence).toEqual(["Technology"]);
+    expect(parsed.candidates[0]?.topicalEvidence.every((item) => item.length <= 64)).toBe(true);
   });
 
   it("accepts a dynamically discovered Guardian article path under its established publisher root", async () => {
@@ -697,7 +913,10 @@ describe("SayIt Reader Editorial Agent", () => {
     });
     const html = `<!doctype html><html lang="en"><head>
       <title>${title} | ScienceDaily</title>
+      <link rel="canonical" href="${url}">
       <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
       <meta property="og:site_name" content="ScienceDaily">
       <meta property="article:published_time" content="2026-10-01T12:00:00Z">
       <script type="application/ld+json">${jsonLd}</script>
@@ -744,7 +963,10 @@ describe("SayIt Reader Editorial Agent", () => {
     });
     const html = `<!doctype html><html lang="en"><head>
       <title>${title} | ScienceDaily</title>
+      <link rel="canonical" href="${url}">
       <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
       <meta property="og:site_name" content="ScienceDaily">
       <meta property="article:published_time" content="2026-10-04T12:00:00Z">
       <script type="application/ld+json">${jsonLd}</script>

@@ -1,0 +1,714 @@
+{
+  "observations": [
+    "PAT-V11-06",
+    "PAT-V11-01"
+  ],
+  "result": "PARTIAL_NO_UNLISTED_FULL_TEXT",
+  "candidateCommit": "a33e7ff1a881551ade59b37e38da24fca05a7dc4",
+  "candidateTree": "bb9175405b17741114f2a1e86e393891487f46b1",
+  "contract": "sayit-reader-v1.1-product-contract-r1",
+  "run": {
+    "trigger": "manual",
+    "state": "SUCCEEDED",
+    "attemptId": "attempt:be8b8568-cd09-4a9e-b5cf-5023b0a936c1",
+    "traceId": "trace:3383a1c7-2599-44e3-ae2b-c0308109466c",
+    "issueId": "issue:2026-10-07:Asia%2FShanghai",
+    "edition": 1,
+    "startedAt": "2026-10-07T04:22:28.228Z",
+    "completedAt": "2026-10-07T04:23:06.248Z",
+    "failureReason": null,
+    "semanticRuntimeStatus": null,
+    "semanticFailureReason": null,
+    "savedPreferences": {
+      "topics": [
+        "climate adaptation"
+      ],
+      "dailyArticleCount": 1,
+      "difficulty": "Intermediate",
+      "readingBudgetMinutes": 20,
+      "collectionTime": "23:59",
+      "timezone": "Asia/Shanghai"
+    },
+    "submittedAPIRequest": {
+      "trigger": "manual"
+    },
+    "submittedCandidateUrlList": false,
+    "searchQueryCount": 4,
+    "uniqueDiscoveredUrlCount": 28,
+    "candidateTraceCount": 38,
+    "fullTextVerifiedCount": 0,
+    "semanticDecisionCount": 0,
+    "deliveredCount": 0
+  },
+  "queryTrace": [
+    "climate adaptation latest news in-depth article",
+    "climate adaptation recent news analysis long-form article",
+    "climate adaptation explainer reporting English article",
+    "climate adaptation independent analysis reporting"
+  ],
+  "candidates": [
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://theconversation.com/topics/climate-change-adaptation-3306",
+      "host": "theconversation.com",
+      "normalizedHost": "theconversation.com",
+      "publication": "The Conversation",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://link.springer.com/subjects/climate-change-adaptation",
+      "host": "link.springer.com",
+      "normalizedHost": "link.springer.com",
+      "publication": "Springer",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.adaptation-undp.org/news",
+      "host": "www.adaptation-undp.org",
+      "normalizedHost": "adaptation-undp.org",
+      "publication": "Adaptation Undp",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation/nclimate",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://link.springer.com/subjects/climate-change",
+      "host": "link.springer.com",
+      "normalizedHost": "link.springer.com",
+      "publication": "Springer",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.unep.org/news-and-stories/press-release/slow-climate-adaptation-threatening-lives-and-economies",
+      "host": "www.unep.org",
+      "normalizedHost": "unep.org",
+      "publication": "Unep",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://theconversation.com/topics/climate-change-adaptation-3306",
+      "host": "theconversation.com",
+      "normalizedHost": "theconversation.com",
+      "publication": "The Conversation",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation/nclimate",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "DUPLICATE",
+      "reason": "Search results repeated the same normalized URL.",
+      "statusCode": null,
+      "articleId": null,
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://link.springer.com/subjects/climate-change-adaptation",
+      "host": "link.springer.com",
+      "normalizedHost": "link.springer.com",
+      "publication": "Springer",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "71b517c1b6d4693d48e4f2ed",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "ae547d68ec0210a0ff7d4c05",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://theconversation.com/topics/climate-change-adaptation-3306",
+      "host": "theconversation.com",
+      "normalizedHost": "theconversation.com",
+      "publication": "The Conversation",
+      "outcome": "REJECTED",
+      "reason": "Canonical URL is missing or does not match the discovered or accessible article URL.",
+      "statusCode": 200,
+      "articleId": "ac104b7f646b64e78879548e",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.nature.com/subjects/climate-change-adaptation/nclimate",
+      "host": "www.nature.com",
+      "normalizedHost": "nature.com",
+      "publication": "Nature",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "4a0bf683a6d9e94a0b945b2a",
+      "publisherMapMatch": true
+    },
+    {
+      "url": "https://www.adaptation-undp.org/news",
+      "host": "www.adaptation-undp.org",
+      "normalizedHost": "adaptation-undp.org",
+      "publication": "Adaptation Undp",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "e44cb3819dc5e397cbdd9bdc",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.unep.org/news-and-stories/press-release/slow-climate-adaptation-threatening-lives-and-economies",
+      "host": "www.unep.org",
+      "normalizedHost": "unep.org",
+      "publication": "Unep",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity metadata conflicts.",
+      "statusCode": 200,
+      "articleId": "290431384a352e8cc60198a7",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://link.springer.com/subjects/climate-change",
+      "host": "link.springer.com",
+      "normalizedHost": "link.springer.com",
+      "publication": "Springer",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "9a1fe65949e2b8ffa1aae523",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://phys.org/tags/climate+adaptation",
+      "host": "phys.org",
+      "normalizedHost": "phys.org",
+      "publication": "Phys",
+      "outcome": "REJECTED",
+      "reason": "Only public HTTPS article sources can be checked.",
+      "statusCode": null,
+      "articleId": "6d8de9996df5cc6bff7c2d40",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.nasa.gov/news-release/nasa-releases-updated-climate-change-adaptation-resilience-plan",
+      "host": "www.nasa.gov",
+      "normalizedHost": "nasa.gov",
+      "publication": "Nasa",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "12456d9b8bccf12ab0a14076",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.unep.org/news-and-stories/press-release/huge-uplift-needed-climate-adaptation-starting-finance-commitment",
+      "host": "www.unep.org",
+      "normalizedHost": "unep.org",
+      "publication": "Unep",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity metadata conflicts.",
+      "statusCode": 200,
+      "articleId": "ed049d9e5e3cf10cb4a3fe09",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.frontiersin.org/journals/climate/sections/climate-adaptation/articles",
+      "host": "www.frontiersin.org",
+      "normalizedHost": "frontiersin.org",
+      "publication": "Frontiersin",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "f2387b0386beef5fa5740515",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.weforum.org/stories/climate-action/climate-adaptation-finance-climate-nature-news",
+      "host": "www.weforum.org",
+      "normalizedHost": "weforum.org",
+      "publication": "Weforum",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "b1096f07f3dcc674379b169f",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.sciencedirect.com/science/article/pii/S0959378025000640",
+      "host": "www.sciencedirect.com",
+      "normalizedHost": "sciencedirect.com",
+      "publication": "Sciencedirect",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "eb9ff44c44a49279352c732d",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://unfccc.int/topics/adaptation-and-resilience/the-big-picture/introduction",
+      "host": "unfccc.int",
+      "normalizedHost": "unfccc.int",
+      "publication": "Unfccc",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "6806044e078bfecdb0747cec",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.publicfinanceinitiative.com/about/explainer-climate-adaptation",
+      "host": "www.publicfinanceinitiative.com",
+      "normalizedHost": "publicfinanceinitiative.com",
+      "publication": "Publicfinanceinitiative",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 404.",
+      "statusCode": 404,
+      "articleId": "5d736e9c47489a6715bf49d8",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://reportingonclimateadaptation.org/animated-explainer",
+      "host": "reportingonclimateadaptation.org",
+      "normalizedHost": "reportingonclimateadaptation.org",
+      "publication": "Reportingonclimateadaptation",
+      "outcome": "REJECTED",
+      "reason": "The article source could not be reached.",
+      "statusCode": null,
+      "articleId": "b9c26b4ffb4638e7efdff5e1",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://climatepromise.undp.org/news-and-stories/what-climate-change-adaptation-and-why-it-crucial",
+      "host": "climatepromise.undp.org",
+      "normalizedHost": "climatepromise.undp.org",
+      "publication": "Undp",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "5f5324f6ae441175d166bed0",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.lse.ac.uk/granthaminstitute/explainers-type/adaptation-to-climate-change",
+      "host": "www.lse.ac.uk",
+      "normalizedHost": "lse.ac.uk",
+      "publication": "Ac",
+      "outcome": "REJECTED",
+      "reason": "The source is a category or story listing, not an individual article.",
+      "statusCode": 200,
+      "articleId": "5481fea65f3033507c7f29cf",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.climateactiontransparency.org/sites/default/files/uploads/2020/09/Reporting-adaptation-through-the-biennial-transparency-report_an-explanation-of-the-guidance_ICAT_UNEP-DTU-PARTNERSHIP-min.pdf",
+      "host": "www.climateactiontransparency.org",
+      "normalizedHost": "climateactiontransparency.org",
+      "publication": "Climateactiontransparency",
+      "outcome": "REJECTED",
+      "reason": "The article page is too large.",
+      "statusCode": null,
+      "articleId": "70fd52da1f4bcc0dba62711b",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://wgea.org/wp-content/uploads/2026/06/CCAA-Global-Publication.pdf",
+      "host": "wgea.org",
+      "normalizedHost": "wgea.org",
+      "publication": "Wgea",
+      "outcome": "REJECTED",
+      "reason": "The article page is too large.",
+      "statusCode": null,
+      "articleId": "a15d6b39499e01752bcb9f37",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://environment.govt.nz/news/independent-climate-adaptation-report-released",
+      "host": "environment.govt.nz",
+      "normalizedHost": "environment.govt.nz",
+      "publication": "Govt",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "305a9cd150907f071779bb53",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.unep.org/resources/adaptation-gap-report",
+      "host": "www.unep.org",
+      "normalizedHost": "unep.org",
+      "publication": "Unep",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "1e5c3c1f5a4898da5ec9075f",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.marsh.com/en/risks/climate-change-sustainability/insights/climate-adaptation-report.html",
+      "host": "www.marsh.com",
+      "normalizedHost": "marsh.com",
+      "publication": "Marsh",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "324d93c20c9389a504e319f4",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://unfccc.int/sites/default/files/resource/J0160_Adaptation%20Needs%20Technical%20Report%20final.pdf",
+      "host": "unfccc.int",
+      "normalizedHost": "unfccc.int",
+      "publication": "Unfccc",
+      "outcome": "REJECTED",
+      "reason": "The accessible version is not an HTML article page.",
+      "statusCode": 200,
+      "articleId": "8f55af83c1943d1a4982c027",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://unfccc.int/methodologies-and-tools-to-evaluate-climate-change-impacts-and-adaptation",
+      "host": "unfccc.int",
+      "normalizedHost": "unfccc.int",
+      "publication": "Unfccc",
+      "outcome": "REJECTED",
+      "reason": "Publisher identity could not be attributed to article-page metadata.",
+      "statusCode": 200,
+      "articleId": "e5708c53165676eabf84f69a",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://intosaijournal.org/journal-entry/how-the-audit-of-climate-change-adaptation-actions-ccaa-contributed-to-sai-capacity-development",
+      "host": "intosaijournal.org",
+      "normalizedHost": "intosaijournal.org",
+      "publication": "Intosaijournal",
+      "outcome": "REJECTED",
+      "reason": "Canonical URL is missing or does not match the discovered or accessible article URL.",
+      "statusCode": 200,
+      "articleId": "1776c64b1501e3d3adba3f7f",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.icao.int/environmental-protection/Climate-Adaptation",
+      "host": "www.icao.int",
+      "normalizedHost": "icao.int",
+      "publication": "Icao",
+      "outcome": "REJECTED",
+      "reason": "Source returned HTTP 403.",
+      "statusCode": 403,
+      "articleId": "ebd559dd782f16d340f166f0",
+      "publisherMapMatch": false
+    },
+    {
+      "url": "https://www.rmla.org.nz/news/independent-climate-adaptation-report-released",
+      "host": "www.rmla.org.nz",
+      "normalizedHost": "rmla.org.nz",
+      "publication": "Org",
+      "outcome": "REJECTED",
+      "reason": "Standalone article structure and title metadata do not agree.",
+      "statusCode": 200,
+      "articleId": "f473471b297a5c3701c1a9b0",
+      "publisherMapMatch": false
+    }
+  ],
+  "publisherNameNormalizationMap": {
+    "sourcePath": "server/reader/editorial.ts",
+    "sourceSha256": "d0bdf17cadf5b33041facdee4d39f259dcc8678cdacd461120437e8e6b149bf8",
+    "knownDomains": [
+      "theguardian.com",
+      "theconversation.com",
+      "apnews.com",
+      "reuters.com",
+      "bbc.com",
+      "bbc.co.uk",
+      "npr.org",
+      "nature.com",
+      "sciencedaily.com",
+      "arstechnica.com",
+      "economist.com",
+      "ft.com",
+      "nytimes.com",
+      "washingtonpost.com",
+      "scientificamerican.com",
+      "aljazeera.com",
+      "cnbc.com",
+      "theverge.com",
+      "foreignaffairs.com"
+    ],
+    "matchRule": "hostname lowercased, optional leading www removed, exact domain membership"
+  },
+  "issueOutcome": {
+    "status": "NOT_DELIVERED",
+    "actual": {
+      "count": 0,
+      "topics": [],
+      "difficulty": null,
+      "readingMinutes": 0
+    },
+    "unmetConstraints": [
+      "Article count: 0/1 verified full-text articles.",
+      "Suitable supply was insufficient; unsuitable, unverified, or semantically rejected candidates were not used to fill the issue.",
+      "No semantic-approved full-text articles matched the configured Intermediate difficulty and selected topics.",
+      "Verified full-text article count is 0 of 1."
+    ],
+    "articles": [
+      {
+        "id": "article:788bd1ac91b5e94652bf9925a10ae46bb2c84571",
+        "title": "Climate-Change Adaptation - Recent articles and discoveries - Springer",
+        "originalUrl": "https://link.springer.com/subjects/climate-change-adaptation",
+        "publication": "Springer",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:3acb6c9aa8fdc7439763e665c38f14698824590c",
+        "title": "Climate-change adaptation - Latest research and news | Nature",
+        "originalUrl": "https://www.nature.com/subjects/climate-change-adaptation",
+        "publication": "Nature",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:efd9993c01c409b082759c1f78b33a25c90acef8",
+        "title": "Climate change adaptation - News, Research and Analysis - The ...",
+        "originalUrl": "https://theconversation.com/topics/climate-change-adaptation-3306",
+        "publication": "The Conversation",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:1ad14457b03b002dd3ba02f2b9f1c7942ceb8f5f",
+        "title": "Climate-change adaptation | Nature Climate Change",
+        "originalUrl": "https://www.nature.com/subjects/climate-change-adaptation/nclimate",
+        "publication": "Nature",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:d502a3ec3fa8e699adf7190007b086ca3839479c",
+        "title": "NEWS AND STORIES | UNDP Climate Change Adaptation",
+        "originalUrl": "https://www.adaptation-undp.org/news",
+        "publication": "Adaptation Undp",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:ae6e5d738c85b7f34364e422ad5726fa2509701b",
+        "title": "Slow climate adaptation threatening lives and economies - UNEP",
+        "originalUrl": "https://www.unep.org/news-and-stories/press-release/slow-climate-adaptation-threatening-lives-and-economies",
+        "publication": "Unep",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:b2b2d112489f9210fbb1904957d9ef155d8fb468",
+        "title": "Climate Change - Recent articles and discoveries - Springer",
+        "originalUrl": "https://link.springer.com/subjects/climate-change",
+        "publication": "Springer",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:0174c683923f8cc4346d3ca9374399b47782fa8d",
+        "title": "Climate Adaptation - latest research news and features",
+        "originalUrl": "https://phys.org/tags/climate+adaptation",
+        "publication": "Phys",
+        "contentStatus": "UNAVAILABLE",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:76beed5a0aa9df454edbb4f8ca2ac70158718dda",
+        "title": "NASA Releases Updated Climate Change Adaptation, Resilience Plan - NASA",
+        "originalUrl": "https://www.nasa.gov/news-release/nasa-releases-updated-climate-change-adaptation-resilience-plan",
+        "publication": "Nasa",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:56039a20d20396a4fcd679a7621949a8e239c31e",
+        "title": "Huge uplift needed on climate adaptation, starting with finance ... - UNEP",
+        "originalUrl": "https://www.unep.org/news-and-stories/press-release/huge-uplift-needed-climate-adaptation-starting-finance-commitment",
+        "publication": "Unep",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:734fc17046fb7fc8ac469e5d9ba952d619bc1b22",
+        "title": "Frontiers in Climate | Climate Adaptation",
+        "originalUrl": "https://www.frontiersin.org/journals/climate/sections/climate-adaptation/articles",
+        "publication": "Frontiersin",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:609647f5eb760f23d5dfea0a538f05234ec58b4e",
+        "title": "Climate adaptation finance 'running on empty', and other nature news",
+        "originalUrl": "https://www.weforum.org/stories/climate-action/climate-adaptation-finance-climate-nature-news",
+        "publication": "Weforum",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:36329ed0611caf4021ba1255873171e392f2aa95",
+        "title": "Beyond adjustment: A new paradigm for climate change adaptation in a ...",
+        "originalUrl": "https://www.sciencedirect.com/science/article/pii/S0959378025000640",
+        "publication": "Sciencedirect",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:598089c8ac2dd11ba8876f39ee13f0afac7cd444",
+        "title": "Introduction | UNFCCC",
+        "originalUrl": "https://unfccc.int/topics/adaptation-and-resilience/the-big-picture/introduction",
+        "publication": "Unfccc",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:e460cf81684c147bccced125e946386a5224f65f",
+        "title": "Explainer Climate Adaptation - publicfinanceinitiative.com",
+        "originalUrl": "https://www.publicfinanceinitiative.com/about/explainer-climate-adaptation",
+        "publication": "Publicfinanceinitiative",
+        "contentStatus": "UNAVAILABLE",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:56283b1828d7cd5231c505df677ad0105328f7ee",
+        "title": "Reporting on Climate Adaptation",
+        "originalUrl": "https://reportingonclimateadaptation.org/animated-explainer",
+        "publication": "Reportingonclimateadaptation",
+        "contentStatus": "UNAVAILABLE",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:c6ad762c88b489df585c46245001e9c0e1270ff4",
+        "title": "What is climate change adaptation and why is it crucial? | UNDP Climate Promise",
+        "originalUrl": "https://climatepromise.undp.org/news-and-stories/what-climate-change-adaptation-and-why-it-crucial",
+        "publication": "Undp",
+        "contentStatus": "EXTERNAL_ONLY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:20798c8f0dc9052843eb490e01dd2295e4bc0872",
+        "title": "Adaptation to climate change Archives - Grantham Research Institute on ...",
+        "originalUrl": "https://www.lse.ac.uk/granthaminstitute/explainers-type/adaptation-to-climate-change",
+        "publication": "Ac",
+        "contentStatus": "SUMMARY",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:1163481b08161ba51138dd40cf0ab5720ae08660",
+        "title": "PDF Reporting Adaptation Through the Biennial Transparency Report - Icat",
+        "originalUrl": "https://www.climateactiontransparency.org/sites/default/files/uploads/2020/09/Reporting-adaptation-through-the-biennial-transparency-report_an-explanation-of-the-guidance_ICAT_UNEP-DTU-PARTNERSHIP-min.pdf",
+        "publication": "Climateactiontransparency",
+        "contentStatus": "UNAVAILABLE",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      },
+      {
+        "id": "article:a83857b9caa62837706c7167aa5a6afbe8148df8",
+        "title": "PDF Global Climate Adaptation Audits for a Resilient Future",
+        "originalUrl": "https://wgea.org/wp-content/uploads/2026/06/CCAA-Global-Publication.pdf",
+        "publication": "Wgea",
+        "contentStatus": "UNAVAILABLE",
+        "wordCount": 0,
+        "readingMinutes": 0,
+        "difficulty": null
+      }
+    ]
+  },
+  "limitation": "The real preference-only collection discovered 28 unique sources, all source verification traces were REJECTED; no FULL_TEXT article or semantic decision occurred. This run does not satisfy the required unlisted publisher positive observation.",
+  "stateFileSha256": "4e4d119cc3aa24ec39eb9f755ad434a16ba8f0e63ffdf338d610cd010f7bc833"
+}
