@@ -63,6 +63,8 @@ Repeated successful SayIt queries are served from one shared local cache instead
 - a normalized single lexical word (`Psychologically`, ` psychologically `, `PSYCHOLOGICALLY`) is one context-free entry shared by both surfaces;
 - a Reader phrase or sentence also keys on its normalized article sentence, so a context-specific interpretation is never reused in an unrelated context;
 - only validated successful `SayItResult` objects are stored — clarification and no-match answers are always re-asked;
+- Reader reads the cache when a selection is finalized, so a word or phrase it already knows opens directly into the detailed SayIt result with no extra SayIt press and no `/api/retrieve` call; a selection it does not know keeps the lightweight local state (IPA, local dictionary, Listen, Copy, SayIt icon) until you press SayIt;
+- that passive cache read is not a SayIt interaction: it never writes History by itself;
 - an explicit SayIt action that hits the cache still behaves like a SayIt interaction and follows the normal History dedupe policy;
 - a local dictionary-only selection (no SayIt action) never writes History or the cache.
 

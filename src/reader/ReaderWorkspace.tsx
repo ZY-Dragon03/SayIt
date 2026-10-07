@@ -232,6 +232,11 @@ export function ReaderWorkspace({
     result: SayItResult;
   } | null>(null);
   const [readerResultSaved, setReaderResultSaved] = useState(false);
+  /**
+   * True when the displayed detailed result came from a passive cache read at
+   * selection time, rather than an explicit SayIt action in this session.
+   */
+  const [passiveCacheResult, setPassiveCacheResult] = useState(false);
   const [readerIpaByKey, setReaderIpaByKey] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<ArticleProgress | null>(null);
 
@@ -274,8 +279,7 @@ export function ReaderWorkspace({
     selectedArticleRef.current = selectedArticle;
   }, [selectedArticle]);
 
-  const displayedIssue = selectedIssue ?? todayIssue;
-  const issueArticles = displayedIssue?.articles ?? [];
+  const displayedIssue = selectedIssue ?? todayIssue;  const issueArticles = displayedIssue?.articles ?? [];
   const paragraphs = articleResponse?.paragraphs ?? null;
 
   const refreshWorkspace = useCallback(async (restoreLastOpened: boolean) => {
@@ -384,6 +388,7 @@ export function ReaderWorkspace({
     setArticleLoading(true);
     setSelection(null);
     setReaderSayItResult(null);
+    setPassiveCacheResult(false);
     setSayItError(null);
     setReaderResultSaved(false);
     writePointer({
@@ -555,6 +560,7 @@ export function ReaderWorkspace({
       setSayItBusy(false);
       setSayItError(null);
       setReaderSayItResult(null);
+      setPassiveCacheResult(false);
     };
     document.addEventListener("selectionchange", clearStaleSelection);
     return () => document.removeEventListener("selectionchange", clearStaleSelection);
@@ -640,35 +646,66 @@ export function ReaderWorkspace({
     });
   }, [pronunciationAccent]);
 
+  /**
+   * The shared cache identity for one Reader selection. Reader and normal SayIt
+   * must resolve the same word to the same entry, so this stays the single
+   * source of cache identity.
+   */
+  const selectionCacheIdentity = useCallback(
+    (candidate: { text: string; context: string }) =>
+      buildSayItCacheIdentity({
+        selection: candidate.text,
+        source: "reader",
+        context: candidate.context,
+      }),
+    [],
+  );
+
   const finalizeSelection = useCallback(() => {
     const content = articleContentRef.current;
     if (!content) return;
     ignoreSelectionChangeRef.current = true;
     const details = readReaderSelection(content);
-    const next = details
-      ? {
-          ...details,
-          ipa: null,
-          definitionPrimary: null,
-          definitionSecondary: null,
-        }
-      : null;
     ignoreSelectionChangeRef.current = false;
     const token = ++selectionTokenRef.current;
-    setSayItBusy(false);
+
     setSayItError(null);
-    setReaderSayItResult(null);
+    setSayItBusy(false);
     setReaderResultSaved(false);
+
+    if (!details) {
+      selectedExpressionForRetryRef.current = null;
+      setSelection(null);
+      setReaderSayItResult(null);
+      setPassiveCacheResult(false);
+      return;
+    }
+
+    const next: ReaderSelection = {
+      ...details,
+      ipa: null,
+      definitionPrimary: null,
+      definitionSecondary: null,
+    };
+    selectedExpressionForRetryRef.current = next;
+
+    // A valid cache entry is already-known knowledge, not an API optimization:
+    // surface the detailed SayIt result with the selection, before the first
+    // popover render, and without writing History for the passive read.
+    const cached = sayItCache.get(selectionCacheIdentity(next));
     setSelection(next);
-    if (next) void enrichLocalSelection(next, token);
-  }, [enrichLocalSelection]);
+    setReaderSayItResult(
+      cached ? { input: next.text, result: cached } : null,
+    );
+    setPassiveCacheResult(Boolean(cached));
+    void enrichLocalSelection(next, token);
+  }, [enrichLocalSelection, sayItCache, selectionCacheIdentity]);
 
   const handleSelectionAction = async (requestedSelection = selection) => {
     if (!requestedSelection || !requestedSelection.text.trim()) return;
     const currentSelection = requestedSelection;
     selectedExpressionForRetryRef.current = currentSelection;
     setSayItError(null);
-    setReaderSayItResult(null);
     setReaderResultSaved(false);
 
     const input = buildReaderInterpretationInput(
@@ -680,23 +717,19 @@ export function ReaderWorkspace({
       return;
     }
 
-    // A single lexical word is context-free, so a word already explained in
-    // normal SayIt (or earlier in Reader) resolves locally with no API call.
-    const cached = sayItCache.get(
-      buildSayItCacheIdentity({
-        selection: currentSelection.text,
-        source: "reader",
-        context: currentSelection.context,
-      }),
-    );
+    // A selection that already has a valid shared entry needs no provider call.
+    const cached = sayItCache.get(selectionCacheIdentity(currentSelection));
     if (cached) {
       setReaderSayItResult({ input: currentSelection.text, result: cached });
+      setPassiveCacheResult(false);
       if (cached.status === "success") {
         onSuccessfulSayIt(currentSelection.text, cached);
       }
       return;
     }
 
+    setReaderSayItResult(null);
+    setPassiveCacheResult(false);
     setSayItBusy(true);
     try {
       const resolved = await resolveSayItRequest({
@@ -731,6 +764,7 @@ export function ReaderWorkspace({
 
   const closeContextResult = useCallback(() => {
     setReaderSayItResult(null);
+    setPassiveCacheResult(false);
     setReaderResultSaved(false);
     setSayItError(null);
     setSayItBusy(false);
@@ -758,6 +792,7 @@ export function ReaderWorkspace({
     setArticleError(null);
     setSelection(null);
     setReaderSayItResult(null);
+    setPassiveCacheResult(false);
     setSayItError(null);
   };
 
@@ -768,6 +803,7 @@ export function ReaderWorkspace({
     setArticleResponse(null);
     setSelection(null);
     setReaderSayItResult(null);
+    setPassiveCacheResult(false);
   };
 
   const selectPriorEdition = async (issue: DailyIssue, edition: number) => {
@@ -779,6 +815,7 @@ export function ReaderWorkspace({
       setArticleResponse(null);
       setSelection(null);
       setReaderSayItResult(null);
+      setPassiveCacheResult(false);
       onCloseArchive?.();
     } catch (error) {
       setWorkspaceError(
@@ -985,6 +1022,7 @@ export function ReaderWorkspace({
                 error={sayItError}
                 result={readerSayItResult}
                 resultSaved={readerResultSaved}
+                passiveCacheResult={passiveCacheResult}
                 speaking={speakingKey === READER_SPEECH_KEY}
                 speakError={pronunciationErrorKey === READER_SPEECH_KEY}
                 pronunciationError={pronunciationError}
@@ -1187,6 +1225,8 @@ interface ReaderSelectionPopoverProps {
   error: string | null;
   result: { input: string; result: SayItResult } | null;
   resultSaved: boolean;
+  /** The detailed result came from a passive cache read, not a SayIt press. */
+  passiveCacheResult: boolean;
   speaking: boolean;
   speakError: boolean;
   pronunciationError: string | null;
@@ -1215,6 +1255,7 @@ function ReaderSelectionPopover({
   error,
   result,
   resultSaved,
+  passiveCacheResult,
   speaking,
   speakError,
   pronunciationError,
@@ -1265,11 +1306,13 @@ function ReaderSelectionPopover({
             speechKey={READER_SPEECH_KEY}
           />
           <CopyButton label={selection.text} copied={copied} onCopy={onCopy} />
-          <SayItButton
-            label={`SayIt: ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
-            busy={busy}
-            onSayIt={() => onSayIt()}
-          />
+          {!result && (
+            <SayItButton
+              label={`SayIt: ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
+              busy={busy}
+              onSayIt={() => onSayIt()}
+            />
+          )}
         </div>
       </div>
 
@@ -1287,6 +1330,11 @@ function ReaderSelectionPopover({
       {busy && (
         <p className="reader-selection-status" role="status">
           Interpreting in this article…
+        </p>
+      )}
+      {passiveCacheResult && !busy && !error && (
+        <p className="reader-selection-status" role="status">
+          Already explained — from your saved SayIt results.
         </p>
       )}
       {error && (

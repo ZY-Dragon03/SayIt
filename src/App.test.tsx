@@ -334,4 +334,86 @@ describe("SayIt shared result cache and Reader isolation", () => {
       "In terms of the mind and behaviour.",
     );
   });
+
+  it("shows a normal-SayIt cached word in Reader without another SayIt press", async () => {
+    await render();
+
+    // Normal SayIt is the first encounter: one LLM call, result cached.
+    await submitInput("psychologically");
+    expect(retrieveCallCount()).toBe(1);
+
+    const cacheRaw = window.localStorage.getItem("sayit.result-cache.v1");
+    expect(cacheRaw).toBeTruthy();
+    expect(
+      (JSON.parse(cacheRaw!) as { entries: { key: string }[] }).entries.map(
+        (entry) => entry.key,
+      ),
+    ).toEqual(["word:psychologically"]);
+
+    // Reader selects the same word: the passive cache read renders the
+    // detailed result immediately and asks for nothing.
+    const readerToggle = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Reader",
+    );
+    await act(async () => readerToggle?.click());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    const paragraph = container.querySelector(".reader-article-body p")!;
+    const textNode = paragraph.firstChild!;
+    const word = "psychologically";
+    const start = textNode.textContent!.indexOf(word);
+    const range = document.createRange();
+    range.setStart(textNode, start + 1);
+    range.setEnd(textNode, start + word.length - 1);
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 60,
+        right: 160,
+        top: 200,
+        bottom: 220,
+        width: 100,
+        height: 20,
+        x: 60,
+        y: 200,
+        toJSON: () => ({}),
+      }),
+    });
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => {
+      paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    const popover = document.querySelector(".reader-selection-popover")!;
+    expect(popover).toBeTruthy();
+    // Detailed SayIt content is present without pressing the SayIt icon.
+    expect(popover.textContent).toContain(
+      "She approached the problem psychologically.",
+    );
+    expect(
+      popover.querySelector("button.sayit-button"),
+    ).toBeNull();
+    expect(retrieveCallCount()).toBe(1);
+
+    // A passive cache read does not append History.
+    const history = JSON.parse(
+      window.localStorage.getItem("sayit.history.v1") ?? "{}",
+    ) as { items?: unknown[] };
+    expect(history.items).toHaveLength(1);
+  });
 });

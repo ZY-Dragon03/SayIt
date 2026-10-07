@@ -12,11 +12,17 @@ import { ReaderWorkspace, type ReaderWorkspaceProps } from "./ReaderWorkspace";
 
 vi.mock("../lib/local-dictionary", () => ({
   prefetchDictionary: vi.fn().mockResolvedValue({}),
-  getDefinitionForSurface: vi.fn(() => null),
+  getDefinitionForSurface: vi.fn((surface: string) =>
+    surface.toLowerCase() === "psychologically"
+      ? { primary: "In terms of the mind.", secondary: "A local gloss." }
+      : null,
+  ),
 }));
 
 vi.mock("../lib/ipa", () => ({
-  getIPA: vi.fn(async () => null),
+  getIPA: vi.fn(async (text: string) =>
+    text.toLowerCase() === "psychologically" ? "/ˌsaɪkəˈlɒdʒɪkli/" : null,
+  ),
   getIPACacheKey: vi.fn((text: string, accent: string) => `${accent}:${text}`),
 }));
 
@@ -257,8 +263,13 @@ describe("Reader selection popover", () => {
     return paragraph;
   }
 
-  async function commitSelection(paragraph: Element) {
+  /**
+   * Select `word` and release the drag as one uninterrupted task, which is how
+   * the browser delivers a drag-and-release to the article's mouseup handler.
+   */
+  async function commitSelection(word: string, paragraphIndex = 0) {
     await act(async () => {
+      const paragraph = selectWord(word, paragraphIndex);
       paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
     await act(async () => {
@@ -282,8 +293,7 @@ describe("Reader selection popover", () => {
       value: 0,
     });
     await openArticle();
-    const paragraph = selectWord("psychologically", 1);
-    await commitSelection(paragraph);
+    await commitSelection("psychologically", 1);
 
     const popover = document.querySelector<HTMLElement>(
       ".reader-selection-popover",
@@ -301,6 +311,7 @@ describe("Reader selection popover", () => {
       value: 1200,
     });
     await act(async () => {
+      const paragraph = selectWord("psychologically", 1);
       paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
     await act(async () => {
@@ -311,6 +322,215 @@ describe("Reader selection popover", () => {
       ".reader-selection-popover",
     );
     expect(rescrolled!.style.top).toBe("1408px");
+  });
+
+  function retrieveCalls(): number {
+    return fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "/api/retrieve",
+    ).length;
+  }
+
+  function sayItButton(): HTMLButtonElement | null {
+    return document.querySelector<HTMLButtonElement>(
+      ".reader-selection-popover button.sayit-button",
+    );
+  }
+
+  function detailedResultText(): string {
+    return (
+      document.querySelector('[data-testid="rendered"]')?.textContent ?? ""
+    );
+  }
+
+  it("shows local lightweight state for an uncached word without requesting SayIt", async () => {
+    await openArticle();
+    await commitSelection("psychologically", 1);
+
+    // Local state only: no detailed SayIt result, no API request.
+    expect(detailedResultText()).toBe("");
+    expect(retrieveCalls()).toBe(0);
+
+    const popover = document.querySelector(".reader-selection-popover")!;
+    expect(popover.textContent).toContain("A local gloss.");
+    expect(sayItButton()).toBeTruthy();
+
+    // Wait out the async local enrichment so the IPA is visible too.
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(
+      document.querySelector(".reader-selection-popover")?.textContent,
+    ).toContain("/ˌsaɪkəˈlɒdʒɪkli/");
+    expect(detailedResultText()).toBe("");
+    expect(retrieveCalls()).toBe(0);
+  });
+
+  it("caches the detailed result after the first explicit SayIt", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+    await commitSelection("psychologically", 1);
+
+    await act(async () => sayItButton()!.click());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(retrieveCalls()).toBe(1);
+    expect(detailedResultText()).toBe("interpret");
+    // The successful result is now in the shared cache. A single word is
+    // context-free, so any surrounding sentence resolves to the same entry.
+    expect(
+      cache.get(
+        buildSayItCacheIdentity({
+          selection: " PSYCHOLOGICALLY ",
+          source: "reader",
+          context: "anything at all",
+        }),
+      ),
+    ).toEqual(phraseResult);
+    expect(props.onSuccessfulSayIt).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the detailed cached result immediately after close and reselect", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+
+    // First encounter: explicit SayIt caches the detailed result.
+    await commitSelection("psychologically", 1);
+    await act(async () => sayItButton()!.click());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(retrieveCalls()).toBe(1);
+
+    // Close the popup without touching the readable article.
+    await act(async () => {
+      document
+        .querySelector<HTMLButtonElement>(
+          '.reader-selection-popover button[aria-label="Close selection"]',
+        )
+        ?.click();
+    });
+    expect(document.querySelector(".reader-selection-popover")).toBeNull();
+    expect(
+      container.querySelector(".reader-article-body")?.textContent,
+    ).toContain("psychologically");
+
+    // Later encounter, with Reader restarted against the same persistent
+    // storage. The cache is read while the selection is finalized, so the first
+    // useful popover render is already the detailed result.
+    await act(async () => root.unmount());
+    document
+      .querySelectorAll(".reader-selection-popover")
+      .forEach((node) => node.remove());
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    props = baseProps({
+      sayItCache: new LocalSayItCacheRepository(window.localStorage),
+    });
+    await openArticle();
+    await commitSelection("psychologically", 1);
+
+    const popover = document.querySelector<HTMLElement>(
+      ".reader-selection-popover",
+    );
+    expect(popover).toBeTruthy();
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(1);
+    // No upgrade icon and no local-only intermediate state.
+    expect(sayItButton()).toBeNull();
+    expect(popover!.textContent).not.toContain("A local gloss.");
+    // A passive cache read is not a new SayIt interaction.
+    expect(
+      vi.mocked(props.onSuccessfulSayIt).mock.calls.length,
+    ).toBe(0);
+    expect(
+      document.querySelectorAll('[data-testid="rendered"]'),
+    ).toHaveLength(1);
+  });
+
+  it("renders the detailed cached result for a phrase in the same context", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    cache.put(
+      buildSayItCacheIdentity({
+        selection: "held rates steady",
+        source: "reader",
+        context: "The bank held rates steady after the vote.",
+      }),
+      phraseResult,
+    );
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+
+    await commitSelection("held rates steady", 1);
+
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(0);
+    expect(sayItButton()).toBeNull();
+  });
+
+  it("keeps local lightweight state for a phrase in a different context", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    cache.put(
+      buildSayItCacheIdentity({
+        selection: "held rates steady",
+        source: "reader",
+        context: "Markets held rates steady through the summer.",
+      }),
+      phraseResult,
+    );
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+
+    await commitSelection("held rates steady", 1);
+
+    // Same phrase, different sentence: no reuse, no request, no History.
+    expect(detailedResultText()).toBe("");
+    expect(retrieveCalls()).toBe(0);
+    expect(sayItButton()).toBeTruthy();
+    expect(props.onSuccessfulSayIt).not.toHaveBeenCalled();
+  });
+
+  it("restores the detailed result from persistent storage on a fresh mount", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    cache.put(
+      buildSayItCacheIdentity({
+        selection: "psychologically",
+        source: "reader",
+        context: "She explained the result psychologically.",
+      }),
+      interpretationResult,
+    );
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+
+    await commitSelection("psychologically", 1);
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(0);
+    expect(sayItButton()).toBeNull();
+
+    // Remount Reader with the same storage, as a page/app restart would.
+    await act(async () => root.unmount());
+    container.remove();
+    document
+      .querySelectorAll(".reader-selection-popover")
+      .forEach((node) => node.remove());
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    props = baseProps({
+      sayItCache: new LocalSayItCacheRepository(window.localStorage),
+    });
+    await openArticle();
+    await commitSelection("psychologically", 1);
+
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(0);
+    expect(sayItButton()).toBeNull();
   });
 
   it("keeps the SayIt action an icon control and resolves a cached word locally", async () => {
@@ -325,40 +545,20 @@ describe("Reader selection popover", () => {
     );
     props = baseProps({ sayItCache: cache });
     await openArticle();
+    await commitSelection("psychologically", 1);
 
-    const paragraph = selectWord("psychologically", 1);
-    await commitSelection(paragraph);
-
+    // The passive read already upgraded the surface: icon controls only.
     const popover = document.querySelector(".reader-selection-popover")!;
-    const sayItButton = popover.querySelector<HTMLButtonElement>(
-      "button.sayit-button",
-    );
-    expect(sayItButton).toBeTruthy();
-    expect(sayItButton!.textContent).toBe("");
-    expect(sayItButton!.getAttribute("aria-label")).toContain("psychologically");
-    expect(sayItButton!.getAttribute("title")).toBe("SayIt");
-
-    const retrieveCallsBefore = fetchMock.mock.calls.filter(
-      ([url]) => String(url) === "/api/retrieve",
-    ).length;
-
-    await act(async () => sayItButton!.click());
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-    });
-
-    const retrieveCallsAfter = fetchMock.mock.calls.filter(
-      ([url]) => String(url) === "/api/retrieve",
-    ).length;
-    expect(retrieveCallsAfter).toBe(retrieveCallsBefore);
-    expect(
-      document.querySelector('[data-testid="rendered"]')?.textContent,
-    ).toBe("interpret");
-    // An explicit SayIt action still behaves like a SayIt interaction.
-    expect(props.onSuccessfulSayIt).toHaveBeenCalledWith(
-      "psychologically",
-      interpretationResult,
-    );
+    expect(sayItButton()).toBeNull();
+    const speak = popover.querySelector<HTMLButtonElement>("button.speak-button");
+    const copy = popover.querySelector<HTMLButtonElement>("button.copy-button");
+    expect(speak?.textContent).toBe("");
+    expect(speak?.getAttribute("aria-label")).toBe("Listen to psychologically");
+    expect(copy?.textContent).toBe("");
+    expect(copy?.getAttribute("aria-label")).toBe("Copy psychologically");
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(0);
+    expect(props.onSuccessfulSayIt).not.toHaveBeenCalled();
   });
 
   it("does not reuse a context-specific phrase result in another context", async () => {
@@ -374,15 +574,12 @@ describe("Reader selection popover", () => {
     );
     props = baseProps({ sayItCache: cache });
     await openArticle();
-
-    const paragraph = selectWord("held rates steady", 1);
-    await commitSelection(paragraph);
+    await commitSelection("held rates steady", 1);
     expect(window.getSelection()?.toString()).toBe("held rates steady");
 
-    const sayItButton = document.querySelector<HTMLButtonElement>(
-      ".reader-selection-popover button.sayit-button",
-    );
-    await act(async () => sayItButton?.click());
+    // Context mismatch still needs an explicit SayIt press.
+    expect(detailedResultText()).toBe("");
+    await act(async () => sayItButton()?.click());
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
@@ -396,11 +593,14 @@ describe("Reader selection popover", () => {
       "The bank held rates steady after the vote.",
     );
 
-    // Repeating the same in-context phrase is now served from the shared cache.
-    await act(async () => sayItButton?.click());
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-    });
+    // The in-context answer is now cached; the same phrase in the same sentence
+    // resolves as a passive cache read with no further request.
+    await commitSelection("held rates steady", 1);
+    expect(
+      document.querySelector(".reader-selection-popover"),
+      `detail=${JSON.stringify(detailedResultText())}`,
+    ).toBeTruthy();
+    expect(detailedResultText()).toBe("interpret");
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/retrieve"),
     ).toHaveLength(1);
