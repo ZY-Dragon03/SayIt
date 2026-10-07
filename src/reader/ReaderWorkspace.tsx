@@ -31,6 +31,7 @@ import {
 } from "./api";
 import {
   buildReaderInterpretationInput,
+  expandSelectionToWordBoundaries,
   findContainingSentence,
   isSingleWordSelection,
 } from "./selection";
@@ -63,13 +64,9 @@ interface ReaderSelection {
   singleWord: boolean;
   left: number;
   top: number;
-}
-
-interface LocalWordResult {
-  surface: string;
-  primary: string;
-  secondary?: string;
   ipa: string | null;
+  definitionPrimary: string | null;
+  definitionSecondary: string | null;
 }
 
 export interface ReaderWorkspaceProps {
@@ -176,6 +173,7 @@ function formatDate(value: string): string {
 }
 
 function findSelectionDetails(articleBody: HTMLElement): ReaderSelection | null {
+  expandSelectionToWordBoundaries(articleBody);
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) return null;
   const text = selection.toString().trim().replace(/\s+/gu, " ");
@@ -191,13 +189,20 @@ function findSelectionDetails(articleBody: HTMLElement): ReaderSelection | null 
   if (!paragraph || !articleBody.contains(paragraph)) return null;
 
   const sentence = findContainingSentence(paragraph.textContent ?? "", text);
-  const rect = range.getBoundingClientRect();
+  const rect =
+    typeof range.getBoundingClientRect === "function"
+      ? range.getBoundingClientRect()
+      : { left: 12, bottom: 28, top: 12, right: 12, width: 0, height: 16 };
+  const width = 380;
   return {
     text,
     sentence,
     singleWord: isSingleWordSelection(text),
-    left: Math.min(Math.max(rect.left, 12), window.innerWidth - 150),
-    top: Math.max(12, rect.top - 44),
+    left: Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - width - 12)),
+    top: Math.max(12, rect.bottom + 8),
+    ipa: null,
+    definitionPrimary: null,
+    definitionSecondary: null,
   };
 }
 
@@ -253,8 +258,6 @@ export function ReaderWorkspace({
   } | null>(null);
   const [readerResultSaved, setReaderResultSaved] = useState(false);
   const [readerIpaByKey, setReaderIpaByKey] = useState<Record<string, string>>({});
-  const [localWordResult, setLocalWordResult] = useState<LocalWordResult | null>(null);
-  const [localWordLoading, setLocalWordLoading] = useState(false);
   const [progress, setProgress] = useState<ArticleProgress | null>(null);
 
   const articleBodyRef = useRef<HTMLElement>(null);
@@ -262,10 +265,13 @@ export function ReaderWorkspace({
   const selectedIssueRef = useRef<DailyIssue | null>(null);
   const selectedArticleRef = useRef<ReaderArticleSummary | null>(null);
   const selectedExpressionForRetryRef = useRef<ReaderSelection | null>(null);
+  const selectionTokenRef = useRef(0);
+  const ignoreSelectionChangeRef = useRef(false);
   const progressTimerRef = useRef<number | null>(null);
   const progressWriteRef = useRef<Promise<void>>(Promise.resolve());
   const restorePendingRef = useRef(false);
   const wasActiveRef = useRef(false);
+  const readerScrollRef = useRef(0);
 
   const enqueueProgressWrite = useCallback((nextProgress: ArticleProgress) => {
     const nextWrite = progressWriteRef.current
@@ -367,6 +373,17 @@ export function ReaderWorkspace({
   }, []);
 
   useEffect(() => {
+    if (!active) return;
+    const remember = () => {
+      const root = articleBodyRef.current?.closest(".reader-main");
+      if (root?.hasAttribute("hidden")) return;
+      readerScrollRef.current = window.scrollY;
+    };
+    window.addEventListener("scroll", remember, { passive: true });
+    return () => window.removeEventListener("scroll", remember);
+  }, [active]);
+
+  useLayoutEffect(() => {
     if (!active) {
       if (wasActiveRef.current) {
         wasActiveRef.current = false;
@@ -374,7 +391,12 @@ export function ReaderWorkspace({
       }
       return;
     }
+    const alreadyReading = Boolean(selectedArticleRef.current && articleBodyRef.current);
     wasActiveRef.current = true;
+    if (alreadyReading) {
+      window.scrollTo({ top: readerScrollRef.current, behavior: "auto" });
+      return;
+    }
     void refreshWorkspace(true);
   }, [active, flushProgressWrites, refreshWorkspace]);
 
@@ -386,7 +408,6 @@ export function ReaderWorkspace({
     setArticleLoading(true);
     setSelection(null);
     setReaderSayItResult(null);
-    setLocalWordResult(null);
     setSayItError(null);
     setReaderResultSaved(false);
     writePointer({
@@ -549,15 +570,18 @@ export function ReaderWorkspace({
   }, [articleResponse, selectedArticle]);
 
   useEffect(() => {
-    if (!active || !selectedArticle || !articleBodyRef.current) return;
-    const updateSelection = () => {
-      const body = articleBodyRef.current;
-      if (!body) return;
-      const next = findSelectionDetails(body);
-      setSelection(next);
+    if (!active || !selectedArticle) return;
+    const clearStaleSelection = () => {
+      if (ignoreSelectionChangeRef.current) return;
+      const current = window.getSelection();
+      if (current && !current.isCollapsed) return;
+      setSelection(null);
+      setSayItBusy(false);
+      setSayItError(null);
+      setReaderSayItResult(null);
     };
-    document.addEventListener("selectionchange", updateSelection);
-    return () => document.removeEventListener("selectionchange", updateSelection);
+    document.addEventListener("selectionchange", clearStaleSelection);
+    return () => document.removeEventListener("selectionchange", clearStaleSelection);
   }, [active, selectedArticle]);
 
   const savePreferences = async () => {
@@ -616,32 +640,54 @@ export function ReaderWorkspace({
     await loadArticle(issue, article);
   };
 
+  const enrichLocalSelection = useCallback(async (next: ReaderSelection, token: number) => {
+    let ipa: string | null = null;
+    let definitionPrimary: string | null = null;
+    let definitionSecondary: string | null = null;
+    try {
+      if (next.singleWord) {
+        await prefetchDictionary();
+        const definition = getDefinitionForSurface(next.text);
+        if (definition) {
+          definitionPrimary = definition.primary;
+          definitionSecondary = definition.secondary ?? null;
+        }
+      }
+      ipa = await getIPA(next.text, pronunciationAccent);
+    } catch {
+      // Local pronunciation and dictionary extras stay empty.
+    }
+    if (selectionTokenRef.current !== token) return;
+    setSelection((current) => {
+      if (!current || current.text !== next.text) return current;
+      return { ...current, ipa, definitionPrimary, definitionSecondary };
+    });
+  }, [pronunciationAccent]);
+
+  const finalizeSelection = useCallback(() => {
+    const body = articleBodyRef.current;
+    if (!body) return;
+    ignoreSelectionChangeRef.current = true;
+    const next = findSelectionDetails(body);
+    ignoreSelectionChangeRef.current = false;
+    const token = ++selectionTokenRef.current;
+    setSayItBusy(false);
+    setSayItError(null);
+    setReaderSayItResult(null);
+    setReaderResultSaved(false);
+    setSelection(next);
+    if (next) void enrichLocalSelection(next, token);
+  }, [enrichLocalSelection]);
+
   const handleSelectionAction = async (requestedSelection = selection) => {
     if (!requestedSelection || !requestedSelection.text.trim()) return;
     const currentSelection = requestedSelection;
     selectedExpressionForRetryRef.current = currentSelection;
-    setSelection(null);
     setSayItError(null);
     setReaderSayItResult(null);
     setReaderResultSaved(false);
-    setLocalWordResult(null);
     setSayItBusy(true);
     try {
-      if (currentSelection.singleWord) {
-        await prefetchDictionary();
-        const definition = getDefinitionForSurface(currentSelection.text);
-        if (definition) {
-          const ipa = await getIPA(currentSelection.text, pronunciationAccent);
-          setLocalWordResult({
-            surface: currentSelection.text,
-            primary: definition.primary,
-            secondary: definition.secondary,
-            ipa,
-          });
-          return;
-        }
-      }
-
       const input = buildReaderInterpretationInput(
         currentSelection.text,
         currentSelection.sentence,
@@ -667,11 +713,9 @@ export function ReaderWorkspace({
         setSayItError("SayIt returned an invalid result for this selection.");
         return;
       }
-      setReaderSayItResult({ input, result: parsed.data });
-      if (isSuccessfulResult(parsed.data)) {
-        onSuccessfulSayIt(input, parsed.data);
-      } else if (parsed.data.status === "success") {
-        onSuccessfulSayIt(input, parsed.data);
+      setReaderSayItResult({ input: currentSelection.text, result: parsed.data });
+      if (isSuccessfulResult(parsed.data) || parsed.data.status === "success") {
+        onSuccessfulSayIt(currentSelection.text, parsed.data);
       }
     } catch (error) {
       setSayItError(error instanceof Error ? error.message : "SayIt could not interpret this selection.");
@@ -690,23 +734,23 @@ export function ReaderWorkspace({
   const closeContextResult = useCallback(() => {
     setReaderSayItResult(null);
     setReaderResultSaved(false);
-    setLocalWordResult(null);
     setSayItError(null);
+    setSayItBusy(false);
     setSelection(null);
-    window.requestAnimationFrame(() => articleBodyRef.current?.focus());
+    window.requestAnimationFrame(() => articleBodyRef.current?.focus({ preventScroll: true }));
   }, []);
 
   useEffect(() => {
     if (!active) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (readerSayItResult || localWordResult || sayItError || selection) {
+      if (readerSayItResult || sayItError || selection) {
         closeContextResult();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [active, closeContextResult, localWordResult, readerSayItResult, sayItError, selection]);
+  }, [active, closeContextResult, readerSayItResult, sayItError, selection]);
 
   const closeArticle = () => {
     captureProgress();
@@ -716,7 +760,6 @@ export function ReaderWorkspace({
     setArticleError(null);
     setSelection(null);
     setReaderSayItResult(null);
-    setLocalWordResult(null);
     setSayItError(null);
   };
 
@@ -727,7 +770,6 @@ export function ReaderWorkspace({
     setArticleResponse(null);
     setSelection(null);
     setReaderSayItResult(null);
-    setLocalWordResult(null);
   };
 
   const selectPriorEdition = async (issue: DailyIssue, edition: number) => {
@@ -739,7 +781,6 @@ export function ReaderWorkspace({
       setArticleResponse(null);
       setSelection(null);
       setReaderSayItResult(null);
-      setLocalWordResult(null);
       onCloseArchive?.();
     } catch (error) {
       setWorkspaceError(
@@ -910,11 +951,10 @@ export function ReaderWorkspace({
                   ref={articleBodyRef}
                   tabIndex={-1}
                   aria-label="Article text. Select a word, phrase, or sentence to use SayIt."
-                  onMouseUp={() => {
-                    if (articleBodyRef.current) setSelection(findSelectionDetails(articleBodyRef.current));
-                  }}
-                  onKeyUp={() => {
-                    if (articleBodyRef.current) setSelection(findSelectionDetails(articleBodyRef.current));
+                  onMouseUp={() => finalizeSelection()}
+                  onKeyUp={(event) => {
+                    if (event.key === "Escape") return;
+                    finalizeSelection();
                   }}
                 >
                   {paragraphs.map((paragraph, index) => (
@@ -936,90 +976,80 @@ export function ReaderWorkspace({
               )}
             </article>
 
-            {selection && !readerSayItResult && !localWordResult && !sayItBusy && (
-              <div
-                className="reader-selection-toolbar"
+            {selection && (
+              <aside
+                className={`reader-selection-popover${sayItBusy ? " is-busy" : ""}`}
                 style={{ left: selection.left, top: selection.top }}
-                role="toolbar"
-                aria-label="SayIt selection actions"
+                aria-live="polite"
+                aria-label="Selection"
+                onMouseDown={(event) => event.preventDefault()}
               >
-                <span>{selection.text.length > 32 ? `${selection.text.slice(0, 29)}…` : selection.text}</span>
-                <button
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => void handleSelectionAction()}
-                  aria-label={`Use SayIt for ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
-                >
-                  SayIt <span aria-hidden="true">↗</span>
-                </button>
-              </div>
-            )}
-
-            {(sayItBusy || localWordLoading) && (
-              <aside className="reader-result-panel" aria-live="polite" aria-label="SayIt result">
                 <div className="reader-result-panel-header">
-                  <strong>{localWordLoading ? "Looking up locally…" : "SayIt"}</strong>
-                  <button type="button" className="reader-icon-close" aria-label="Close SayIt result" onClick={() => { setLocalWordLoading(false); setSayItBusy(false); closeContextResult(); }}>
+                  <div>
+                    {selection.singleWord && selection.definitionPrimary && !readerSayItResult && (
+                      <span className="reader-eyebrow">Local dictionary</span>
+                    )}
+                    <strong>{selection.text}</strong>
+                  </div>
+                  <button type="button" className="reader-icon-close" aria-label="Close selection" onClick={closeContextResult}>
                     ×
                   </button>
                 </div>
-                <p className="reader-muted">{localWordLoading ? "Checking the local dictionary and pronunciation." : "Checking the selected text with its article sentence."}</p>
-              </aside>
-            )}
-
-            {localWordResult && (
-              <aside className="reader-result-panel" aria-live="polite" aria-label="Local dictionary result">
-                <div className="reader-result-panel-header">
-                  <div>
-                    <span className="reader-eyebrow">Local dictionary</span>
-                    <strong>{localWordResult.surface}</strong>
+                {selection.ipa && <p className="reader-word-ipa">{selection.ipa}</p>}
+                {!readerSayItResult && selection.singleWord && selection.definitionPrimary && (
+                  <>
+                    <p className="reader-word-definition">{selection.definitionPrimary}</p>
+                    {selection.definitionSecondary && (
+                      <p className="reader-word-definition reader-word-definition--secondary">{selection.definitionSecondary}</p>
+                    )}
+                  </>
+                )}
+                {sayItBusy && (
+                  <p className="reader-selection-status" role="status">Interpreting in this article…</p>
+                )}
+                {sayItError && <p className="reader-inline-error" role="alert">{sayItError}</p>}
+                {readerSayItResult && (
+                  <div className="reader-selection-result">
+                    {renderSayItResult(
+                      readerSayItResult.result,
+                      readerSayItResult.input,
+                      readerResultSaved,
+                      handleSaveReaderResult,
+                      readerIpaByKey,
+                      () => void handleSelectionAction(selectedExpressionForRetryRef.current ?? selection),
+                    )}
                   </div>
-                  <button type="button" className="reader-icon-close" aria-label="Close SayIt result" onClick={closeContextResult}>×</button>
-                </div>
-                {localWordResult.ipa && <p className="reader-word-ipa">{localWordResult.ipa}</p>}
-                <p className="reader-word-definition">{localWordResult.primary}</p>
-                {localWordResult.secondary && <p className="reader-word-definition reader-word-definition--secondary">{localWordResult.secondary}</p>}
+                )}
                 <div className="reader-inline-actions">
-                  <button className={`reader-secondary-button ${speakingKey === "reader-word" ? "is-active" : ""}`} type="button" onClick={() => onSpeak(localWordResult.surface, "reader-word")}>
+                  <button
+                    className={`reader-secondary-button ${speakingKey === "reader-selection" ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => onSpeak(selection.text, "reader-selection")}
+                  >
                     Listen
                   </button>
-                  <button className="reader-secondary-button" type="button" onClick={() => void onCopy(localWordResult.surface, "Reader word")}>
-                    {copiedLabel === "Reader word" ? "Copied" : "Copy"}
+                  <button
+                    className="reader-secondary-button"
+                    type="button"
+                    onClick={() => void onCopy(selection.text, "Reader selection")}
+                  >
+                    {copiedLabel === "Reader selection" ? "Copied" : "Copy"}
                   </button>
+                  {!readerSayItResult && (
+                    <button
+                      className="reader-selection-sayit"
+                      type="button"
+                      onClick={() => void handleSelectionAction(selection)}
+                      aria-label={`Use SayIt for ${selection.singleWord ? "word" : "selected expression"} ${selection.text}`}
+                      disabled={sayItBusy}
+                    >
+                      SayIt
+                    </button>
+                  )}
                 </div>
-                {pronunciationErrorKey === "reader-word" && pronunciationError && <p className="reader-inline-error" role="status">{pronunciationError}</p>}
-              </aside>
-            )}
-
-            {readerSayItResult && (
-              <aside className="reader-result-panel" aria-live="polite" aria-label="SayIt result">
-                <div className="reader-result-panel-header">
-                  <div>
-                    <span className="reader-eyebrow">Selected from this article</span>
-                    <strong>{readerSayItResult.result.mode === "interpret" ? readerSayItResult.result.interpretation?.expression ?? "Interpretation" : readerSayItResult.result.best_match?.text ?? "SayIt result"}</strong>
-                  </div>
-                  <button type="button" className="reader-icon-close" aria-label="Close SayIt result and continue reading" onClick={closeContextResult}>
-                    ×
-                  </button>
-                </div>
-                {renderSayItResult(
-                  readerSayItResult.result,
-                  readerSayItResult.input,
-                  readerResultSaved,
-                  handleSaveReaderResult,
-                  readerIpaByKey,
-                  () => void handleSelectionAction(selectedExpressionForRetryRef.current),
+                {pronunciationErrorKey === "reader-selection" && pronunciationError && (
+                  <p className="reader-inline-error" role="status">{pronunciationError}</p>
                 )}
-              </aside>
-            )}
-
-            {sayItError && (
-              <aside className="reader-result-panel reader-result-panel--error" role="alert">
-                <div className="reader-result-panel-header">
-                  <strong>SayIt could not complete this action</strong>
-                  <button type="button" className="reader-icon-close" aria-label="Close message" onClick={closeContextResult}>×</button>
-                </div>
-                <p>{sayItError}</p>
               </aside>
             )}
           </>

@@ -1273,7 +1273,7 @@ summary:focus-visible {
 .reader-icon-close:focus-visible,
 .reader-article-open:focus-visible,
 .reader-archive-date:focus-visible,
-.reader-selection-toolbar button:focus-visible,
+.reader-selection-popover button:focus-visible,
 .reader-source-link:focus-visible,
 .reader-field input:focus-visible,
 .reader-field select:focus-visible {
@@ -1714,42 +1714,56 @@ summary:focus-visible {
   line-height: 1.55;
 }
 
-.reader-selection-toolbar {
+.reader-selection-popover {
   position: fixed;
-  z-index: 18;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  max-width: min(420px, calc(100vw - 24px));
-  padding: 5px;
+  z-index: 19;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(52vh, 480px);
+  padding: 14px;
+  overflow-y: auto;
   color: var(--text);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: 15px;
   background: var(--surface-solid);
-  box-shadow: var(--small-shadow);
+  box-shadow: var(--shadow);
 }
 
-.reader-selection-toolbar > span {
-  max-width: 230px;
-  overflow: hidden;
-  padding-left: 4px;
+.reader-selection-popover .reader-result-panel-header strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.reader-selection-status {
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
 }
 
-.reader-selection-toolbar button {
-  min-height: 30px;
-  padding: 0 10px;
+.reader-selection-popover .reader-inline-actions {
+  margin-top: 13px;
+}
+
+.reader-selection-sayit {
+  min-height: 32px;
+  padding: 0 12px;
   color: #fff;
   font: inherit;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 650;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--accent);
   cursor: pointer;
+}
+
+.reader-selection-sayit:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.reader-selection-popover.is-busy {
+  box-shadow: var(--shadow);
 }
 
 .reader-result-panel {
@@ -2060,8 +2074,9 @@ summary:focus-visible {
     max-height: min(57vh, 540px);
   }
 
-  .reader-selection-toolbar {
-    max-width: calc(100vw - 24px);
+  .reader-selection-popover {
+    width: calc(100vw - 20px);
+    max-height: min(57vh, 540px);
   }
 }
 

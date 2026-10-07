@@ -619,8 +619,8 @@ describe("Reader workspace", () => {
     const paragraph = container.querySelector(".reader-article-body p")!;
     const textNode = paragraph.firstChild!;
     const range = document.createRange();
-    range.setStart(textNode, 4);
-    range.setEnd(textNode, 10);
+    range.setStart(textNode, 6);
+    range.setEnd(textNode, 9);
     Object.defineProperty(range, "getBoundingClientRect", {
       value: () => ({ left: 80, right: 130, top: 180, bottom: 200, width: 50, height: 20, x: 80, y: 180, toJSON: () => ({}) }),
     });
@@ -629,16 +629,17 @@ describe("Reader workspace", () => {
     selection.addRange(range);
     await act(async () => {
       document.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
+
+    await act(async () => {
       paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
-
-    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
-      button.getAttribute("aria-label")?.includes("Use SayIt for word"),
-    );
-    expect(sayItButton).toBeTruthy();
-    await act(async () => sayItButton?.click());
     await flush();
 
+    expect(selection.toString()).toBe("policy");
+    expect(container.querySelector(".reader-selection-popover")).toBeTruthy();
     expect(container.textContent).toContain("Local dictionary");
     expect(container.textContent).toContain("A course or principle of action.");
     expect(container.textContent).toContain("/ˈpɑləsi/");
@@ -647,7 +648,19 @@ describe("Reader workspace", () => {
       button.textContent?.includes("Listen"),
     );
     await act(async () => listenButton?.click());
-    expect(props.onSpeak).toHaveBeenCalledWith("policy", "reader-word");
+    expect(props.onSpeak).toHaveBeenCalledWith("policy", "reader-selection");
+
+    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label")?.includes("Use SayIt for word"),
+    );
+    expect(sayItButton).toBeTruthy();
+    await act(async () => sayItButton?.click());
+    await flush();
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(true);
+    expect(props.onSuccessfulSayIt).toHaveBeenCalledWith("policy", interpretationResult);
+    expect(container.querySelector(".reader-selection-popover")).toBeTruthy();
+    expect(container.querySelector(".reader-result-panel")).toBeNull();
   });
 
   it("sends phrase interpretation with only the article sentence and keeps it local", async () => {
@@ -672,8 +685,8 @@ describe("Reader workspace", () => {
     const phrase = "held rates steady";
     const start = textNode.textContent!.indexOf(phrase);
     const range = document.createRange();
-    range.setStart(textNode, start);
-    range.setEnd(textNode, start + phrase.length);
+    range.setStart(textNode, start + 2);
+    range.setEnd(textNode, start + phrase.length - 3);
     Object.defineProperty(range, "getBoundingClientRect", {
       value: () => ({ left: 90, right: 230, top: 180, bottom: 202, width: 140, height: 22, x: 90, y: 180, toJSON: () => ({}) }),
     });
@@ -684,6 +697,10 @@ describe("Reader workspace", () => {
       document.dispatchEvent(new Event("selectionchange"));
       paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
+    await flush();
+    expect(window.getSelection()?.toString()).toBe(phrase);
+    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
     const sayItButton = [...container.querySelectorAll("button")].find((button) =>
       button.getAttribute("aria-label")?.includes("Use SayIt for selected expression"),
     );
@@ -698,7 +715,8 @@ describe("Reader workspace", () => {
     );
     expect(request.context).toEqual([]);
     expect(request.input.length).toBeLessThanOrEqual(500);
-    expect(props.onSuccessfulSayIt).toHaveBeenCalledWith(request.input, interpretationResult);
+    expect(props.onSuccessfulSayIt).toHaveBeenCalledWith(phrase, interpretationResult);
+    expect(container.querySelector(".reader-result-panel")).toBeNull();
     expect(container.querySelector('[data-testid="rendered-sayit-result"]')?.textContent).toBe("interpret");
     expect(window.scrollTo).not.toHaveBeenCalled();
   });
@@ -715,7 +733,7 @@ describe("Reader workspace", () => {
     const body = container.querySelector(".reader-article-body")!;
     await act(async () => body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
 
-    expect(container.querySelector(".reader-selection-toolbar")).toBeNull();
+    expect(container.querySelector(".reader-selection-popover")).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
   });
 

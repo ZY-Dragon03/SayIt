@@ -1,7 +1,92 @@
+import { segmentExplanatoryText } from "../lib/explanatory-text";
 import { MAX_INPUT_LENGTH } from "../shared/contract";
 
 export function isSingleWordSelection(value: string): boolean {
   return /^[\p{L}][\p{L}'’\-]*$/u.test(value.trim());
+}
+
+export function expandBoundaryOffset(
+  text: string,
+  offset: number,
+  edge: "start" | "end",
+): number {
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  const parts = segmentExplanatoryText(text);
+  if (!parts) return clamped;
+  for (const part of parts) {
+    if (!part.isWordLike) continue;
+    if (clamped > part.start && clamped < part.end) {
+      return edge === "start" ? part.start : part.end;
+    }
+  }
+  return clamped;
+}
+
+export function expandTextSelection(
+  text: string,
+  start: number,
+  end: number,
+): { start: number; end: number; text: string } {
+  const nextStart = expandBoundaryOffset(text, Math.min(start, end), "start");
+  const nextEnd = expandBoundaryOffset(text, Math.max(start, end), "end");
+  return {
+    start: nextStart,
+    end: nextEnd,
+    text: text.slice(nextStart, nextEnd),
+  };
+}
+
+function textPoint(
+  container: Node,
+  offset: number,
+  articleBody: HTMLElement,
+): { node: Text; offset: number } | null {
+  if (!articleBody.contains(container)) return null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    return { node: container as Text, offset };
+  }
+  if (container.nodeType !== Node.ELEMENT_NODE) return null;
+  const element = container as Element;
+  if (element.childNodes.length === 0) return null;
+  const childIndex = Math.min(offset, element.childNodes.length - 1);
+  const child = element.childNodes[childIndex];
+  if (!child || child.nodeType !== Node.TEXT_NODE) return null;
+  const node = child as Text;
+  const atChildStart = offset < element.childNodes.length && element.childNodes[offset] === child;
+  return { node, offset: atChildStart ? 0 : node.data.length };
+}
+
+export function expandSelectionToWordBoundaries(articleBody: HTMLElement): void {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  if (!articleBody.contains(range.commonAncestorContainer)) return;
+
+  const start = textPoint(range.startContainer, range.startOffset, articleBody);
+  const end = textPoint(range.endContainer, range.endOffset, articleBody);
+  if (!start || !end) return;
+
+  const nextStart = expandBoundaryOffset(start.node.data, start.offset, "start");
+  const nextEnd = expandBoundaryOffset(end.node.data, end.offset, "end");
+  if (
+    nextStart === range.startOffset &&
+    nextEnd === range.endOffset &&
+    start.node === range.startContainer &&
+    end.node === range.endContainer
+  ) {
+    return;
+  }
+
+  try {
+    const expanded = range.cloneRange();
+    expanded.setStart(start.node, nextStart);
+    expanded.setEnd(end.node, nextEnd);
+    if (expanded.collapsed) return;
+    selection.removeAllRanges();
+    selection.addRange(expanded);
+  } catch {
+    // Leave the browser selection unchanged when the endpoints cannot be expanded.
+  }
 }
 
 export function findContainingSentence(text: string, selected: string): string {
