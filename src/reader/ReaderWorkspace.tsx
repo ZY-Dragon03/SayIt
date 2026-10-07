@@ -39,7 +39,6 @@ import type {
   DailyIssue,
   ReaderArticleResponse,
   ReaderArticleSummary,
-  ReaderContentStatus,
   ReaderDifficulty,
   ReaderPreferences,
   RunAttempt,
@@ -92,6 +91,10 @@ export interface ReaderWorkspaceProps {
     onRetry: () => void,
   ) => ReactNode;
   onSaveRetrieval: (input: string, result: SayItResult) => boolean;
+  preferencesOpen?: boolean;
+  archiveOpen?: boolean;
+  onClosePreferences?: () => void;
+  onCloseArchive?: () => void;
 }
 
 function defaultPreferences(): ReaderPreferences {
@@ -145,19 +148,6 @@ function safeExternalUrl(value: string | null | undefined): string | null {
   }
 }
 
-function contentStatusLabel(status: ReaderContentStatus): string {
-  switch (status) {
-    case "FULL_TEXT":
-      return "Full text in Reader";
-    case "EXTERNAL_ONLY":
-      return "External reading";
-    case "SUMMARY":
-      return "Summary only";
-    case "UNAVAILABLE":
-      return "Source unavailable";
-  }
-}
-
 function issueStatusLabel(status: DailyIssue["status"] | null): string {
   if (status === "COMPLETE") return "Complete";
   if (status === "PARTIAL") return "Partial";
@@ -168,13 +158,7 @@ function formatReadingMinutes(minutes: number | null | undefined): string {
   if (typeof minutes !== "number" || !Number.isFinite(minutes)) {
     return "Reading time unavailable";
   }
-  return `${minutes.toFixed(1)} min · estimated`;
-}
-
-function cachePermissionLabel(permission: ReaderArticleSummary["cachePermission"]): string {
-  if (permission === "PERMITTED") return "Offline copy permitted";
-  if (permission === "NOT_PERMITTED") return "Offline copy not permitted";
-  return "Offline copy permission unknown";
+  return `${minutes.toFixed(1)} min`;
 }
 
 function difficultyForGrade(value: number): ReaderDifficulty {
@@ -244,12 +228,14 @@ export function ReaderWorkspace({
   onSuccessfulSayIt,
   renderSayItResult,
   onSaveRetrieval,
+  preferencesOpen = false,
+  archiveOpen = false,
+  onClosePreferences,
+  onCloseArchive,
 }: ReaderWorkspaceProps) {
   const [preferences, setPreferences] = useState<ReaderPreferences>(defaultPreferences);
   const [topicDraft, setTopicDraft] = useState("Politics, Economy, Finance, Geopolitics, Technology");
   const [todayIssue, setTodayIssue] = useState<DailyIssue | null>(null);
-  const [occurrence, setOccurrence] = useState<Awaited<ReturnType<typeof getTodayIssue>>["occurrence"]>(null);
-  const [attempts, setAttempts] = useState<RunAttempt[]>([]);
   const [archiveIssues, setArchiveIssues] = useState<DailyIssue[]>([]);
   const [selectedIssue, setSelectedIssue] = useState<DailyIssue | null>(null);
   const [articleResponse, setArticleResponse] = useState<ReaderArticleResponse | null>(null);
@@ -261,6 +247,7 @@ export function ReaderWorkspace({
   const [articleError, setArticleError] = useState<string | null>(null);
   const [preferenceNotice, setPreferenceNotice] = useState<string | null>(null);
   const [showRegenerateConfirmation, setShowRegenerateConfirmation] = useState(false);
+  const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [activeAttempt, setActiveAttempt] = useState<RunAttempt | null>(null);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
@@ -334,8 +321,6 @@ export function ReaderWorkspace({
     if (todayResult.status === "fulfilled") {
       nextToday = todayResult.value.issue;
       setTodayIssue(nextToday);
-      setOccurrence(todayResult.value.occurrence);
-      setAttempts(todayResult.value.attempts);
       const running = todayResult.value.attempts.find(isActiveAttempt) ?? null;
       setActiveAttempt(running);
     } else {
@@ -447,7 +432,6 @@ export function ReaderWorkspace({
       void getReaderRun(activeAttempt.id)
         .then(({ attempt, issue }) => {
           setActiveAttempt(isActiveAttempt(attempt) ? attempt : null);
-          setAttempts((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)]);
           if (issue) setTodayIssue(issue);
           if (!isActiveAttempt(attempt)) {
             void getReaderArchive(ARCHIVE_LIMIT)
@@ -609,7 +593,6 @@ export function ReaderWorkspace({
     try {
       if (trigger === "regenerate") await flushProgressWrites();
       const { attempt, issue } = await startReaderRun(trigger);
-      setAttempts((current) => [attempt, ...current.filter((item) => item.id !== attempt.id)]);
       setActiveAttempt(isActiveAttempt(attempt) ? attempt : null);
       if (issue) setTodayIssue(issue);
       if (!isActiveAttempt(attempt)) {
@@ -619,8 +602,6 @@ export function ReaderWorkspace({
         ]);
         if (today.status === "fulfilled") {
           setTodayIssue(today.value.issue);
-          setOccurrence(today.value.occurrence);
-          setAttempts(today.value.attempts);
         }
         if (archive.status === "fulfilled") setArchiveIssues(archive.value.issues);
       }
@@ -746,6 +727,7 @@ export function ReaderWorkspace({
   };
 
   const selectArchiveIssue = (issue: DailyIssue) => {
+    onCloseArchive?.();
     setSelectedIssue(issue);
     setSelectedArticle(null);
     setArticleResponse(null);
@@ -764,6 +746,7 @@ export function ReaderWorkspace({
       setSelection(null);
       setReaderSayItResult(null);
       setLocalWordResult(null);
+      onCloseArchive?.();
     } catch (error) {
       setWorkspaceError(
         error instanceof Error ? error.message : "That archive edition could not be opened.",
@@ -786,7 +769,6 @@ export function ReaderWorkspace({
     selectedArticle?.accessibleUrl || selectedArticle?.originalUrl,
   );
   const articleTitle = articleResponse?.article.title ?? selectedArticle?.title ?? "Article";
-  const articleStatus = articleResponse?.article.contentStatus ?? selectedArticle?.contentStatus;
   const articleFkgl = articleResponse?.article.fkgl ?? selectedArticle?.fkgl ?? null;
   const articleProgressRatio = progress?.scrollRatio ?? 0;
 
@@ -819,25 +801,53 @@ export function ReaderWorkspace({
                   <button type="button" className="reader-secondary-button" onClick={() => setSelectedIssue(null)}>
                     Today
                   </button>
-                ) : todayIssue?.status === "COMPLETE" ? (
-                  <button
-                    type="button"
-                    className="reader-secondary-button"
-                    disabled={regenerating || Boolean(activeAttempt)}
-                    onClick={() => setShowRegenerateConfirmation(true)}
-                  >
-                    Regenerate
-                  </button>
-                ) : !selectedIssue ? (
-                  <button
-                    type="button"
-                    className="reader-primary-button"
-                    disabled={regenerating || Boolean(activeAttempt)}
-                    onClick={() => void beginRun("manual")}
-                  >
-                    {activeAttempt ? "Collecting…" : "Run now"}
-                  </button>
-                ) : null}
+                ) : (
+                  <>
+                    {todayIssue?.status !== "COMPLETE" && (
+                      <button
+                        type="button"
+                        className="reader-primary-button"
+                        disabled={regenerating || Boolean(activeAttempt)}
+                        onClick={() => void beginRun("manual")}
+                      >
+                        {activeAttempt ? "Collecting…" : "Run now"}
+                      </button>
+                    )}
+                    {todayIssue?.status === "COMPLETE" && (
+                      <div className="reader-overflow">
+                        <button
+                          type="button"
+                          className={`icon-button utility-action ${issueMenuOpen ? "is-active" : ""}`}
+                          aria-label="Issue actions"
+                          aria-haspopup="menu"
+                          aria-expanded={issueMenuOpen}
+                          disabled={regenerating || Boolean(activeAttempt)}
+                          onClick={() => setIssueMenuOpen((open) => !open)}
+                        >
+                          <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="currentColor">
+                            <circle cx="3.25" cy="8" r="1.15" />
+                            <circle cx="8" cy="8" r="1.15" />
+                            <circle cx="12.75" cy="8" r="1.15" />
+                          </svg>
+                        </button>
+                        {issueMenuOpen && (
+                          <div className="reader-overflow-menu" role="menu" aria-label="Issue actions">
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setIssueMenuOpen(false);
+                                setShowRegenerateConfirmation(true);
+                              }}
+                            >
+                              Regenerate
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
@@ -863,16 +873,8 @@ export function ReaderWorkspace({
                 {issueStatusLabel(displayedIssue?.status ?? null)}
               </span>
               <span>{issueSummary(displayedIssue)}</span>
-              {!selectedIssue && occurrence && (
-                <span className="reader-occurrence-state">
-                  {occurrence.status.toLowerCase().replaceAll("_", " ")} · {occurrence.localTime} {occurrence.timezone}
-                </span>
-              )}
+              {activeAttempt && <span className="reader-occurrence-state">Collecting</span>}
             </div>
-
-            {displayedIssue?.unmetConstraints?.length ? (
-              <p className="reader-shortage">Still looking for: {displayedIssue.unmetConstraints.join(" · ")}</p>
-            ) : null}
 
             {workspaceLoading ? (
               <div className="reader-empty-state" role="status">Loading today’s reading…</div>
@@ -895,141 +897,6 @@ export function ReaderWorkspace({
               </div>
             )}
 
-            {displayedIssue?.priorEditions?.length ? (
-              <details className="reader-prior-editions">
-                <summary>Earlier editions</summary>
-                <ul className="reader-archive-list">
-                  {displayedIssue.priorEditions
-                    .slice()
-                    .sort((a, b) => b - a)
-                    .map((edition) => (
-                      <li key={edition}>
-                        <button
-                          type="button"
-                          className="reader-archive-date"
-                          onClick={() => void selectPriorEdition(displayedIssue, edition)}
-                        >
-                          <span>Edition {edition}</span>
-                          <span>Open archived articles</span>
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              </details>
-            ) : null}
-
-            <details className="reader-preferences">
-              <summary>Reading preferences</summary>
-              <form
-                className="reader-preferences-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void savePreferences();
-                }}
-              >
-                <label className="reader-field reader-field--wide">
-                  <span>Topics</span>
-                  <input
-                    value={topicDraft}
-                    onChange={(event) => setTopicDraft(event.target.value)}
-                    aria-label="Reading topics, comma separated"
-                    placeholder="Technology, Economy"
-                  />
-                  <small>Separate topics with commas.</small>
-                </label>
-                <label className="reader-field">
-                  <span>Articles each day</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={12}
-                    value={preferences.dailyArticleCount}
-                    onChange={(event) => setPreferences({ ...preferences, dailyArticleCount: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="reader-field">
-                  <span>Difficulty</span>
-                  <select
-                    value={preferences.difficulty}
-                    onChange={(event) => setPreferences({ ...preferences, difficulty: event.target.value as ReaderDifficulty })}
-                  >
-                    <option>Easy</option>
-                    <option>Intermediate</option>
-                    <option>Advanced</option>
-                  </select>
-                </label>
-                <label className="reader-field">
-                  <span>Reading budget (minutes)</span>
-                  <input
-                    type="number"
-                    min={5}
-                    max={180}
-                    value={preferences.readingBudgetMinutes}
-                    onChange={(event) => setPreferences({ ...preferences, readingBudgetMinutes: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="reader-field">
-                  <span>Collection time</span>
-                  <input
-                    type="time"
-                    value={preferences.collectionTime}
-                    onChange={(event) => setPreferences({ ...preferences, collectionTime: event.target.value })}
-                  />
-                </label>
-                <label className="reader-field reader-field--wide">
-                  <span>Time zone</span>
-                  <input
-                    value={preferences.timezone}
-                    onChange={(event) => setPreferences({ ...preferences, timezone: event.target.value })}
-                    aria-label="IANA time zone"
-                    placeholder="Asia/Shanghai"
-                  />
-                </label>
-                <div className="reader-preferences-footer">
-                  <span role="status">{preferenceNotice}</span>
-                  <button className="reader-secondary-button" type="submit" disabled={savingPreferences}>
-                    {savingPreferences ? "Saving…" : "Save preferences"}
-                  </button>
-                </div>
-              </form>
-            </details>
-
-            <section className="reader-archive" aria-labelledby="reader-archive-title">
-              <div className="reader-section-heading">
-                <h2 id="reader-archive-title">Archive</h2>
-                <span>{olderArchiveIssues.length ? `${olderArchiveIssues.length} days` : "No past issues"}</span>
-              </div>
-              {olderArchiveIssues.length > 0 ? (
-                <ul className="reader-archive-list">
-                  {olderArchiveIssues.map((issue) => (
-                      <li key={`${issue.id}-${issue.edition}`}>
-                        <button type="button" className="reader-archive-date" onClick={() => selectArchiveIssue(issue)}>
-                          <span>{formatDate(issue.localDate)}</span>
-                          <span>{issue.articles.length} articles · {issueStatusLabel(issue.status)}</span>
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="reader-muted reader-archive-empty">Earlier Daily Issues will collect here.</p>
-              )}
-            </section>
-
-            {attempts.length > 0 && (
-              <details className="reader-attempt-history">
-                <summary>Recent collection attempts</summary>
-                <ul>
-                  {attempts.slice(0, 5).map((attempt) => (
-                    <li key={attempt.id}>
-                      <span>{attempt.trigger}</span>
-                      <span>{attempt.state.toLowerCase()}</span>
-                      <time dateTime={attempt.startedAt}>{new Date(attempt.startedAt).toLocaleTimeString()}</time>
-                      {attempt.state === "FAILED" && attempt.failureReason && <span>{attempt.failureReason}</span>}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
           </>
         ) : (
           <>
@@ -1046,19 +913,12 @@ export function ReaderWorkspace({
                 <p className="reader-eyebrow">{selectedArticle.originalPublication || selectedArticle.accessiblePublication}</p>
                 <h1 id="reader-article-title">{articleTitle}</h1>
                 <div className="reader-article-meta">
+                  <span>{formatReadingMinutes(articleResponse?.article.readingMinutes ?? selectedArticle.readingMinutes)}</span>
                   <span>
-                    {articleResponse?.article.wordCount ?? selectedArticle.wordCount} whitespace-separated words ÷ 200 words/min = {formatReadingMinutes(articleResponse?.article.readingMinutes ?? selectedArticle.readingMinutes)}
+                    {articleResponse?.article.difficulty ??
+                      selectedArticle.difficulty ??
+                      (typeof articleFkgl === "number" ? difficultyForGrade(articleFkgl) : "Difficulty unavailable")}
                   </span>
-                  <span>
-                    FKGL inputs: {articleResponse?.article.fkglWordCount ?? selectedArticle.fkglWordCount} words · {articleResponse?.article.sentenceCount ?? selectedArticle.sentenceCount} sentences · {articleResponse?.article.syllableCount ?? selectedArticle.syllableCount} syllables
-                  </span>
-                  {typeof articleFkgl === "number" && (
-                    <span>
-                      FK grade {articleFkgl.toFixed(1)} · {articleResponse?.article.difficulty ?? selectedArticle.difficulty ?? difficultyForGrade(articleFkgl)} · estimated
-                    </span>
-                  )}
-                  <span>{cachePermissionLabel(articleResponse?.article.cachePermission ?? selectedArticle.cachePermission)}</span>
-                  {articleStatus && <span className={`reader-status reader-status--${articleStatus.toLowerCase()}`}>{contentStatusLabel(articleStatus)}</span>}
                 </div>
                 <SourceAttribution article={articleResponse?.article ?? selectedArticle} />
               </header>
@@ -1186,6 +1046,158 @@ export function ReaderWorkspace({
           </>
         )}
       </div>
+      {preferencesOpen && (
+        <div className="drawer-layer" role="presentation" onMouseDown={() => onClosePreferences?.()}>
+          <aside
+            className="saved-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reading preferences"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Reader</p>
+                <h2>Reading preferences</h2>
+              </div>
+              <button className="icon-button" type="button" aria-label="Close reading preferences" onClick={() => onClosePreferences?.()}>
+                ×
+              </button>
+            </div>
+            <form
+              className="reader-preferences-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void savePreferences();
+              }}
+            >
+              <label className="reader-field reader-field--wide">
+                <span>Topics</span>
+                <input
+                  value={topicDraft}
+                  onChange={(event) => setTopicDraft(event.target.value)}
+                  aria-label="Reading topics, comma separated"
+                  placeholder="Technology, Economy"
+                />
+                <small>Separate topics with commas.</small>
+              </label>
+              <label className="reader-field">
+                <span>Articles each day</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={preferences.dailyArticleCount}
+                  onChange={(event) => setPreferences({ ...preferences, dailyArticleCount: Number(event.target.value) })}
+                />
+              </label>
+              <label className="reader-field">
+                <span>Difficulty</span>
+                <select
+                  value={preferences.difficulty}
+                  onChange={(event) => setPreferences({ ...preferences, difficulty: event.target.value as ReaderDifficulty })}
+                >
+                  <option>Easy</option>
+                  <option>Intermediate</option>
+                  <option>Advanced</option>
+                </select>
+              </label>
+              <label className="reader-field">
+                <span>Reading budget (minutes)</span>
+                <input
+                  type="number"
+                  min={5}
+                  max={180}
+                  value={preferences.readingBudgetMinutes}
+                  onChange={(event) => setPreferences({ ...preferences, readingBudgetMinutes: Number(event.target.value) })}
+                />
+              </label>
+              <label className="reader-field">
+                <span>Collection time</span>
+                <input
+                  type="time"
+                  value={preferences.collectionTime}
+                  onChange={(event) => setPreferences({ ...preferences, collectionTime: event.target.value })}
+                />
+              </label>
+              <label className="reader-field reader-field--wide">
+                <span>Time zone</span>
+                <input
+                  value={preferences.timezone}
+                  onChange={(event) => setPreferences({ ...preferences, timezone: event.target.value })}
+                  aria-label="IANA time zone"
+                  placeholder="Asia/Shanghai"
+                />
+              </label>
+              <div className="reader-preferences-footer">
+                <span role="status">{preferenceNotice}</span>
+                <button className="reader-secondary-button" type="submit" disabled={savingPreferences}>
+                  {savingPreferences ? "Saving…" : "Save preferences"}
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
+      {archiveOpen && (
+        <div className="drawer-layer history-layer" role="presentation" onMouseDown={() => onCloseArchive?.()}>
+          <aside
+            className="saved-drawer history-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reader archive"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Earlier reading</p>
+                <h2>History</h2>
+              </div>
+              <button className="icon-button" type="button" aria-label="Close reader history" onClick={() => onCloseArchive?.()}>
+                ×
+              </button>
+            </div>
+            {olderArchiveIssues.length > 0 ? (
+              <ul className="reader-archive-list">
+                {olderArchiveIssues.map((issue) => (
+                  <li key={`${issue.id}-${issue.edition}`}>
+                    <button type="button" className="reader-archive-date" onClick={() => selectArchiveIssue(issue)}>
+                      <span>{formatDate(issue.localDate)}</span>
+                      <span>{issue.articles.length} articles · {issueStatusLabel(issue.status)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="drawer-empty">
+                <p>Earlier Daily Issues will collect here.</p>
+              </div>
+            )}
+            {displayedIssue?.priorEditions?.length ? (
+              <section className="reader-prior-editions" aria-label="Earlier editions">
+                <h3>Earlier editions</h3>
+                <ul className="reader-archive-list">
+                  {displayedIssue.priorEditions
+                    .slice()
+                    .sort((a, b) => b - a)
+                    .map((edition) => (
+                      <li key={edition}>
+                        <button
+                          type="button"
+                          className="reader-archive-date"
+                          onClick={() => void selectPriorEdition(displayedIssue, edition)}
+                        >
+                          <span>Edition {edition}</span>
+                          <span>{formatDate(displayedIssue.localDate)}</span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            ) : null}
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
@@ -1233,13 +1245,8 @@ function ArticleSummary({ article }: { article: ReaderArticleSummary }) {
         {accessibleDiffers && ` · accessible via ${article.accessiblePublication}`}
       </span>
       <span className="reader-article-details">
-        <span className={`reader-status reader-status--${article.contentStatus.toLowerCase()}`}>
-          {contentStatusLabel(article.contentStatus)}
-        </span>
         <span>{formatReadingMinutes(article.readingMinutes)}</span>
-        {typeof article.wordCount === "number" && <span>{article.wordCount} words</span>}
-        <span>{cachePermissionLabel(article.cachePermission)}</span>
-        {article.readState && <span>{article.readState.toLowerCase().replaceAll("_", " ")}</span>}
+        {article.difficulty && <span>{article.difficulty}</span>}
       </span>
     </>
   );

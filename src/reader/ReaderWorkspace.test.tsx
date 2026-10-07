@@ -325,7 +325,9 @@ describe("Reader workspace", () => {
     await flush();
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(false);
     expect(container.textContent).toContain("Today");
-    expect(container.textContent).toContain("1.6 min · estimated");
+    expect(container.textContent).toContain("1.6 min");
+    expect(container.textContent).not.toContain("Recent collection attempts");
+    expect(container.textContent).not.toContain("Reading preferences");
     expect(fetchMock).toHaveBeenCalledWith("/api/reader/preferences", expect.anything());
   });
 
@@ -497,6 +499,11 @@ describe("Reader workspace", () => {
     await act(async () => todayButton?.click());
     await flush();
 
+    const issueActions = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "Issue actions",
+    );
+    await act(async () => issueActions?.click());
+    await flush();
     const regenerateButton = [...container.querySelectorAll("button")].find((button) =>
       button.textContent?.trim() === "Regenerate",
     );
@@ -574,6 +581,11 @@ describe("Reader workspace", () => {
     await act(async () => todayButton?.click());
     await flush();
 
+    const issueActions = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label") === "Issue actions",
+    );
+    await act(async () => issueActions?.click());
+    await flush();
     const regenerateButton = [...container.querySelectorAll("button")].find((button) =>
       button.textContent?.trim() === "Regenerate",
     );
@@ -649,9 +661,12 @@ describe("Reader workspace", () => {
     await flush();
 
     const paragraphs = container.querySelectorAll(".reader-article-body p");
-    expect(container.textContent).toContain("320 whitespace-separated words ÷ 200 words/min = 1.6 min · estimated");
-    expect(container.textContent).toContain("FKGL inputs: 306 words · 18 sentences · 410 syllables");
-    expect(container.textContent).toContain("FK grade 9.2 · Intermediate · estimated");
+    expect(container.textContent).toContain("1.6 min");
+    expect(container.textContent).toContain("Intermediate");
+    expect(container.textContent).not.toContain("FKGL inputs");
+    expect(container.textContent).not.toContain("whitespace-separated words");
+    expect(container.textContent).not.toContain("Offline copy");
+    expect(container.textContent).not.toContain("Full text in Reader");
     const paragraph = paragraphs[1];
     const textNode = paragraph.firstChild!;
     const phrase = "held rates steady";
@@ -716,7 +731,7 @@ describe("Reader workspace", () => {
       if (url.endsWith("/editions/1")) return jsonResponse({ issue: priorIssue });
       throw new Error(`Unexpected archive test fetch: ${url}`);
     });
-    props = { ...props, active: true };
+    props = { ...props, active: true, archiveOpen: true };
     await render();
     await flush();
     const priorEditionButton = [...container.querySelectorAll("button")].find((button) =>

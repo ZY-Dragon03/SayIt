@@ -172,6 +172,8 @@ function App() {
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [readerActive, setReaderActive] = useState(false);
+  const [readerPreferencesOpen, setReaderPreferencesOpen] = useState(false);
+  const [readerArchiveOpen, setReaderArchiveOpen] = useState(false);
   const [pronunciationPreferences, setPronunciationPreferences] =
     useState<PronunciationPreferences>(loadPronunciationPreferences);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
@@ -532,6 +534,21 @@ function App() {
           </div>
           <div className="brand-name">SayIt</div>
         </div>
+        <button
+          className={`reader-mode-toggle ${readerActive ? "is-active" : ""}`}
+          type="button"
+          aria-pressed={readerActive}
+          aria-label={readerActive ? "Close Reader and return to SayIt" : "Open SayIt Reader"}
+          onClick={() => {
+            setDrawerOpen(false);
+            setHistoryDrawerOpen(false);
+            setReaderPreferencesOpen(false);
+            setReaderArchiveOpen(false);
+            setReaderActive((current) => !current);
+          }}
+        >
+          {readerActive ? "SayIt" : "Reader"}
+        </button>
         <div className="topbar-actions">
           {!readerActive && (
             <PronunciationControls
@@ -539,19 +556,6 @@ function App() {
               onChange={updatePronunciationPreferences}
             />
           )}
-          <button
-            className={`reader-mode-toggle ${readerActive ? "is-active" : ""}`}
-            type="button"
-            aria-pressed={readerActive}
-            aria-label={readerActive ? "Close Reader and return to SayIt" : "Open SayIt Reader"}
-            onClick={() => {
-              setDrawerOpen(false);
-              setHistoryDrawerOpen(false);
-              setReaderActive((current) => !current);
-            }}
-          >
-            {readerActive ? "SayIt" : "Reader"}
-          </button>
           <button
             className="icon-button"
             type="button"
@@ -561,38 +565,65 @@ function App() {
           >
             {theme === "dark" ? "☼" : "☾"}
           </button>
-          {!readerActive && <button
-            className={`icon-button utility-action ${historyDrawerOpen ? "is-active" : ""}`}
+          <button
+            className={`icon-button utility-action ${
+              readerActive ? (readerArchiveOpen ? "is-active" : "") : historyDrawerOpen ? "is-active" : ""
+            }`}
             type="button"
-            title={`History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
+            title={readerActive ? "History" : `History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
             onClick={() => {
+              if (readerActive) {
+                setReaderPreferencesOpen(false);
+                setReaderArchiveOpen(true);
+                return;
+              }
               setDrawerOpen(false);
               setHistoryDrawerOpen(true);
             }}
-            aria-expanded={historyDrawerOpen}
-            aria-label={`Open history, ${historyItems.length} recent items`}
+            aria-expanded={readerActive ? readerArchiveOpen : historyDrawerOpen}
+            aria-label={
+              readerActive
+                ? "Open reader history"
+                : `Open history, ${historyItems.length} recent items`
+            }
           >
             <HistoryIcon />
-            {historyItems.length > 0 && (
+            {!readerActive && historyItems.length > 0 && (
               <span className="saved-count">{historyItems.length}</span>
             )}
-          </button>}
-          {!readerActive && <button
-            className={`icon-button utility-action ${drawerOpen ? "is-active" : ""}`}
-            type="button"
-            title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
-            onClick={() => {
-              setHistoryDrawerOpen(false);
-              setDrawerOpen(true);
-            }}
-            aria-expanded={drawerOpen}
-            aria-label={`Open saved expressions, ${savedItems.length} saved`}
-          >
-            <BookmarkIcon />
-            {savedItems.length > 0 && (
-              <span className="saved-count">{savedItems.length}</span>
-            )}
-          </button>}
+          </button>
+          {readerActive ? (
+            <button
+              className={`icon-button utility-action ${readerPreferencesOpen ? "is-active" : ""}`}
+              type="button"
+              title="Reading preferences"
+              aria-label="Open reading preferences"
+              aria-expanded={readerPreferencesOpen}
+              onClick={() => {
+                setReaderArchiveOpen(false);
+                setReaderPreferencesOpen(true);
+              }}
+            >
+              <GearIcon />
+            </button>
+          ) : (
+            <button
+              className={`icon-button utility-action ${drawerOpen ? "is-active" : ""}`}
+              type="button"
+              title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
+              onClick={() => {
+                setHistoryDrawerOpen(false);
+                setDrawerOpen(true);
+              }}
+              aria-expanded={drawerOpen}
+              aria-label={`Open saved expressions, ${savedItems.length} saved`}
+            >
+              <BookmarkIcon />
+              {savedItems.length > 0 && (
+                <span className="saved-count">{savedItems.length}</span>
+              )}
+            </button>
+          )}
         </div>
       </header>
 
@@ -710,6 +741,10 @@ function App() {
         onSpeak={handleSpeak}
         onSuccessfulSayIt={handleReaderSuccessfulSayIt}
         onSaveRetrieval={handleSaveReaderResult}
+        preferencesOpen={readerPreferencesOpen}
+        archiveOpen={readerArchiveOpen}
+        onClosePreferences={() => setReaderPreferencesOpen(false)}
+        onCloseArchive={() => setReaderArchiveOpen(false)}
         renderSayItResult={(readerResult, readerInput, isSaved, onSave, readerIpaByKey, onRetry) => (
           <ResultView
             result={readerResult}
@@ -1667,6 +1702,15 @@ function HistoryIcon() {
     <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
       <circle cx="8" cy="8" r="5.75" />
       <path d="M8 4.5v3.75l2.5 1.5" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg aria-hidden="true" className="action-icon" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="2.25" />
+      <path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M12.6 3.4l-1.05 1.05M4.45 11.55l-1.05 1.05" />
     </svg>
   );
 }
