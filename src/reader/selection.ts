@@ -36,12 +36,23 @@ export function expandTextSelection(
   };
 }
 
+export type ReaderContextKind = "title" | "body";
+
+export interface ReaderSelectableSelection {
+  text: string;
+  context: string;
+  contextKind: ReaderContextKind;
+  singleWord: boolean;
+  left: number;
+  top: number;
+}
+
 function textPoint(
   container: Node,
   offset: number,
-  articleBody: HTMLElement,
+  selectableRoot: HTMLElement,
 ): { node: Text; offset: number } | null {
-  if (!articleBody.contains(container)) return null;
+  if (!selectableRoot.contains(container)) return null;
   if (container.nodeType === Node.TEXT_NODE) {
     return { node: container as Text, offset };
   }
@@ -56,14 +67,37 @@ function textPoint(
   return { node, offset: atChildStart ? 0 : node.data.length };
 }
 
-export function expandSelectionToWordBoundaries(articleBody: HTMLElement): void {
+function selectableRegion(node: Node, selectableRoot: HTMLElement): HTMLElement | null {
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  const region = element?.closest<HTMLElement>("[data-reader-selectable]");
+  if (!region || !selectableRoot.contains(region)) return null;
+  return region;
+}
+
+function selectionContextKind(
+  startRegion: HTMLElement,
+  endRegion: HTMLElement,
+): ReaderContextKind | null {
+  const startKind = startRegion.dataset.readerSelectable;
+  const endKind = endRegion.dataset.readerSelectable;
+  if (startKind !== "title" && startKind !== "body") return null;
+  if (startKind !== endKind) return null;
+  if (startKind === "title" && startRegion !== endRegion) return null;
+  return startKind;
+}
+
+export function expandSelectionToWordBoundaries(selectableRoot: HTMLElement): void {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
   const range = selection.getRangeAt(0);
-  if (!articleBody.contains(range.commonAncestorContainer)) return;
+  if (!selectableRoot.contains(range.commonAncestorContainer)) return;
 
-  const start = textPoint(range.startContainer, range.startOffset, articleBody);
-  const end = textPoint(range.endContainer, range.endOffset, articleBody);
+  const startRegion = selectableRegion(range.startContainer, selectableRoot);
+  const endRegion = selectableRegion(range.endContainer, selectableRoot);
+  if (!startRegion || !endRegion || !selectionContextKind(startRegion, endRegion)) return;
+
+  const start = textPoint(range.startContainer, range.startOffset, selectableRoot);
+  const end = textPoint(range.endContainer, range.endOffset, selectableRoot);
   if (!start || !end) return;
 
   const nextStart = expandBoundaryOffset(start.node.data, start.offset, "start");
@@ -87,6 +121,41 @@ export function expandSelectionToWordBoundaries(articleBody: HTMLElement): void 
   } catch {
     // Leave the browser selection unchanged when the endpoints cannot be expanded.
   }
+}
+
+export function readReaderSelection(selectableRoot: HTMLElement): ReaderSelectableSelection | null {
+  expandSelectionToWordBoundaries(selectableRoot);
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return null;
+  const text = selection.toString().trim().replace(/\s+/gu, " ");
+  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+  if (!text || !range || !selectableRoot.contains(range.commonAncestorContainer)) return null;
+
+  const startRegion = selectableRegion(range.startContainer, selectableRoot);
+  const endRegion = selectableRegion(range.endContainer, selectableRoot);
+  if (!startRegion || !endRegion) return null;
+  const contextKind = selectionContextKind(startRegion, endRegion);
+  if (!contextKind) return null;
+
+  const context =
+    contextKind === "title"
+      ? (startRegion.textContent ?? "").replace(/\s+/gu, " ").trim()
+      : findContainingSentence(startRegion.textContent ?? "", text);
+  if (!context) return null;
+
+  const rect =
+    typeof range.getBoundingClientRect === "function"
+      ? range.getBoundingClientRect()
+      : { left: 12, bottom: 28, top: 12, right: 12, width: 0, height: 16 };
+  const width = 380;
+  return {
+    text,
+    context,
+    contextKind,
+    singleWord: isSingleWordSelection(text),
+    left: Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - width - 12)),
+    top: Math.max(12, rect.bottom + 8),
+  };
 }
 
 export function findContainingSentence(text: string, selected: string): string {

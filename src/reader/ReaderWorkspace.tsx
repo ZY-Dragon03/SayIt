@@ -31,9 +31,8 @@ import {
 } from "./api";
 import {
   buildReaderInterpretationInput,
-  expandSelectionToWordBoundaries,
-  findContainingSentence,
-  isSingleWordSelection,
+  readReaderSelection,
+  type ReaderContextKind,
 } from "./selection";
 import type {
   ArticleProgress,
@@ -60,7 +59,8 @@ interface ReaderPointer {
 
 interface ReaderSelection {
   text: string;
-  sentence: string;
+  context: string;
+  contextKind: ReaderContextKind;
   singleWord: boolean;
   left: number;
   top: number;
@@ -172,40 +172,6 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
-function findSelectionDetails(articleBody: HTMLElement): ReaderSelection | null {
-  expandSelectionToWordBoundaries(articleBody);
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return null;
-  const text = selection.toString().trim().replace(/\s+/gu, " ");
-  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-  if (!text || !range) return null;
-
-  const startNode = range.startContainer;
-  const startElement =
-    startNode.nodeType === Node.ELEMENT_NODE
-      ? (startNode as Element)
-      : startNode.parentElement;
-  const paragraph = startElement?.closest<HTMLElement>("[data-reader-paragraph]");
-  if (!paragraph || !articleBody.contains(paragraph)) return null;
-
-  const sentence = findContainingSentence(paragraph.textContent ?? "", text);
-  const rect =
-    typeof range.getBoundingClientRect === "function"
-      ? range.getBoundingClientRect()
-      : { left: 12, bottom: 28, top: 12, right: 12, width: 0, height: 16 };
-  const width = 380;
-  return {
-    text,
-    sentence,
-    singleWord: isSingleWordSelection(text),
-    left: Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - width - 12)),
-    top: Math.max(12, rect.bottom + 8),
-    ipa: null,
-    definitionPrimary: null,
-    definitionSecondary: null,
-  };
-}
-
 function readApiError(payload: unknown): string | null {
   const parsed = apiErrorSchema.safeParse(payload);
   return parsed.success ? parsed.data.error.message : null;
@@ -260,6 +226,7 @@ export function ReaderWorkspace({
   const [readerIpaByKey, setReaderIpaByKey] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<ArticleProgress | null>(null);
 
+  const articleContentRef = useRef<HTMLElement>(null);
   const articleBodyRef = useRef<HTMLElement>(null);
   const lastProgressRef = useRef<ArticleProgress | null>(null);
   const selectedIssueRef = useRef<DailyIssue | null>(null);
@@ -665,10 +632,18 @@ export function ReaderWorkspace({
   }, [pronunciationAccent]);
 
   const finalizeSelection = useCallback(() => {
-    const body = articleBodyRef.current;
-    if (!body) return;
+    const content = articleContentRef.current;
+    if (!content) return;
     ignoreSelectionChangeRef.current = true;
-    const next = findSelectionDetails(body);
+    const details = readReaderSelection(content);
+    const next = details
+      ? {
+          ...details,
+          ipa: null,
+          definitionPrimary: null,
+          definitionSecondary: null,
+        }
+      : null;
     ignoreSelectionChangeRef.current = false;
     const token = ++selectionTokenRef.current;
     setSayItBusy(false);
@@ -690,7 +665,7 @@ export function ReaderWorkspace({
     try {
       const input = buildReaderInterpretationInput(
         currentSelection.text,
-        currentSelection.sentence,
+        currentSelection.context,
       );
       if (!input || input.length > MAX_INPUT_LENGTH) {
         setSayItError("Select a shorter expression so SayIt can include its article sentence.");
@@ -928,10 +903,19 @@ export function ReaderWorkspace({
                 {progress ? `${Math.round(articleProgressRatio * 100)}% read` : "Reading"}
               </span>
             </div>
-            <article className="reader-article" aria-labelledby="reader-article-title">
+            <article
+              className="reader-article"
+              ref={articleContentRef}
+              aria-labelledby="reader-article-title"
+              onMouseUp={() => finalizeSelection()}
+              onKeyUp={(event) => {
+                if (event.key === "Escape") return;
+                finalizeSelection();
+              }}
+            >
               <header className="reader-article-header">
                 <p className="reader-eyebrow">{selectedArticle.originalPublication || selectedArticle.accessiblePublication}</p>
-                <h1 id="reader-article-title">{articleTitle}</h1>
+                <h1 id="reader-article-title" data-reader-selectable="title">{articleTitle}</h1>
                 <div className="reader-article-meta">
                   <span>{formatReadingMinutes(articleResponse?.article.readingMinutes ?? selectedArticle.readingMinutes)}</span>
                   <span>
@@ -951,14 +935,9 @@ export function ReaderWorkspace({
                   ref={articleBodyRef}
                   tabIndex={-1}
                   aria-label="Article text. Select a word, phrase, or sentence to use SayIt."
-                  onMouseUp={() => finalizeSelection()}
-                  onKeyUp={(event) => {
-                    if (event.key === "Escape") return;
-                    finalizeSelection();
-                  }}
                 >
                   {paragraphs.map((paragraph, index) => (
-                    <p key={`${index}-${paragraph.slice(0, 20)}`} data-reader-paragraph={index}>
+                    <p key={`${index}-${paragraph.slice(0, 20)}`} data-reader-paragraph={index} data-reader-selectable="body">
                       {paragraph}
                     </p>
                   ))}

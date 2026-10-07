@@ -8,15 +8,23 @@ import type { ArticleProgress } from "./types";
 
 vi.mock("../lib/local-dictionary", () => ({
   prefetchDictionary: vi.fn().mockResolvedValue({}),
-  getDefinitionForSurface: vi.fn((surface: string) =>
-    surface.toLowerCase() === "policy"
-      ? { primary: "A course or principle of action.", secondary: "A governing plan." }
-      : null,
-  ),
+  getDefinitionForSurface: vi.fn((surface: string) => {
+    const word = surface.toLowerCase();
+    if (word === "policy") {
+      return { primary: "A course or principle of action.", secondary: "A governing plan." };
+    }
+    if (word === "investment") return { primary: "The act of investing money for profit." };
+    return null;
+  }),
 }));
 
 vi.mock("../lib/ipa", () => ({
-  getIPA: vi.fn().mockResolvedValue("/ˈpɑləsi/"),
+  getIPA: vi.fn(async (text: string) => {
+    const word = text.toLowerCase();
+    if (word === "policy") return "/ˈpɑləsi/";
+    if (word === "investment") return "/ɪnˈvɛstmənt/";
+    return null;
+  }),
   getIPACacheKey: vi.fn((text: string, accent: string) => `${accent}:${text.toLowerCase()}`),
 }));
 
@@ -260,6 +268,7 @@ describe("Reader workspace", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     storedProgress = null;
     requestedProgress = null;
+    article.title = "A closer look at policy";
     article.readState = "UNREAD";
     readerParagraphs = [
       "The policy shifted after the latest economic data arrived.",
@@ -719,6 +728,102 @@ describe("Reader workspace", () => {
     expect(container.querySelector(".reader-result-panel")).toBeNull();
     expect(container.querySelector('[data-testid="rendered-sayit-result"]')?.textContent).toBe("interpret");
     expect(window.scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("expands a partial title selection and keeps the local lookup off the API", async () => {
+    article.title = "Global investment markets reopen";
+    props = { ...props, active: true };
+    await render();
+    await flush();
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+
+    const title = container.querySelector("#reader-article-title")!;
+    const textNode = title.firstChild!;
+    const word = "investment";
+    const wordAt = textNode.textContent!.indexOf(word);
+    const range = document.createRange();
+    range.setStart(textNode, wordAt + 2);
+    range.setEnd(textNode, wordAt + 8);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(container.querySelector(".reader-selection-popover")).toBeNull();
+
+    await act(async () => {
+      title.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await flush();
+
+    expect(selection.toString()).toBe(word);
+    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(word);
+    expect(container.textContent).toContain("The act of investing money for profit.");
+    expect(container.textContent).toContain("/ɪnˈvɛstmənt/");
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
+
+    const sayItButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label")?.includes("Use SayIt for word"),
+    );
+    await act(async () => sayItButton?.click());
+    await flush();
+
+    const retrieveCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/retrieve");
+    const request = JSON.parse(String(retrieveCall?.[1]?.body)) as { input: string; context: unknown[] };
+    expect(request.input).toBe(
+      "Interpret the selected expression “investment” in the context of this article sentence: “Global investment markets reopen”",
+    );
+    expect(request.input).not.toContain("The policy shifted");
+    expect(request.context).toEqual([]);
+    expect(props.onSuccessfulSayIt).toHaveBeenCalledWith(word, interpretationResult);
+  });
+
+  it("expands both ends of a title phrase without calling SayIt", async () => {
+    article.title = "Global investment markets reopen";
+    props = { ...props, active: true };
+    await render();
+    await flush();
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(article.title),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+
+    const title = container.querySelector("#reader-article-title")!;
+    const textNode = title.firstChild!;
+    const phrase = "investment markets";
+    const start = textNode.textContent!.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(textNode, start + 2);
+    range.setEnd(textNode, start + phrase.length - 3);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => {
+      title.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    await flush();
+
+    expect(selection.toString()).toBe(phrase);
+    expect(container.querySelector(".reader-selection-popover")?.textContent).toContain(phrase);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
+
+    const eyebrow = container.querySelector(".reader-eyebrow")!;
+    const eyebrowNode = eyebrow.firstChild!;
+    const eyebrowRange = document.createRange();
+    eyebrowRange.setStart(eyebrowNode, 0);
+    eyebrowRange.setEnd(eyebrowNode, 5);
+    selection.removeAllRanges();
+    selection.addRange(eyebrowRange);
+    await act(async () => {
+      eyebrow.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+    expect(container.querySelector(".reader-selection-popover")).toBeNull();
   });
 
   it("does not show a selection action or request when selection is empty", async () => {
