@@ -61,14 +61,14 @@ The local IPA engine is approved for private/local Dogfood use only. Public dist
 Repeated successful SayIt queries are served from one shared local cache instead of spending another LLM call. It is used by both normal SayIt and Reader, and it is not History: History records what you asked and used, while the cache answers "do we already have a valid model answer for this request?".
 
 - a normalized single lexical word (`Psychologically`, ` psychologically `, `PSYCHOLOGICALLY`) is one context-free entry shared by both surfaces;
-- a Reader phrase or sentence also keys on its normalized article sentence, so a context-specific interpretation is never reused in an unrelated context;
+- a Reader phrase or sentence keys on BOTH its normalized selection and its normalized article sentence, so two different selections of the same length inside one sentence never share an entry, and a context-specific interpretation is never reused in an unrelated context;
 - only validated successful `SayItResult` objects are stored — clarification and no-match answers are always re-asked;
 - Reader reads the cache when a selection is finalized, so a word or phrase it already knows opens directly into the detailed SayIt result with no extra SayIt press and no `/api/retrieve` call; a selection it does not know keeps the lightweight local state (IPA, local dictionary, Listen, Copy, SayIt icon) until you press SayIt;
 - that passive cache read is not a SayIt interaction: it never writes History by itself;
 - an explicit SayIt action that hits the cache still behaves like a SayIt interaction and follows the normal History dedupe policy;
 - a local dictionary-only selection (no SayIt action) never writes History or the cache.
 
-The cache lives under the browser-local key `sayit.result-cache.v1`. Changing the retrieval prompt, model, or result shape MUST bump `SAYIT_CACHE_SCHEMA_VERSION` in `src/lib/sayit-cache.ts` so stale answers are invalidated.
+The cache lives under the browser-local key `sayit.result-cache.v2`. Changing the retrieval prompt, model, result shape, or cache identity policy MUST bump `SAYIT_CACHE_SCHEMA_VERSION` in `src/lib/sayit-cache.ts` and the storage key with it, so stale answers cannot be reused; a superseded `sayit.result-cache.v1` store is deleted on first use because its Reader phrase entries keyed on word count and are unsafe.
 
 Speech playback warms the Web Speech voice list at startup and reuses the selected US/UK voice, so pressing Listen does not pay a multi-second voice-discovery cost. The service only cancels the engine when playback is actually pending or speaking.
 

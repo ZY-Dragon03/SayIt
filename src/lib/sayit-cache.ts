@@ -15,10 +15,21 @@ import {
  * Both normal SayIt and Reader read and write this one cache.
  */
 
-export const SAYIT_CACHE_STORAGE_KEY = "sayit.result-cache.v1";
+export const SAYIT_CACHE_STORAGE_KEY = "sayit.result-cache.v2";
 
-/** Bump to invalidate older entries after prompt/model/result changes. */
-export const SAYIT_CACHE_SCHEMA_VERSION = 1 as const;
+/**
+ * Bump to invalidate older entries after prompt/model/result changes.
+ *
+ * Version 2 fixed Reader phrase identity: version 1 keyed contextual Reader
+ * entries on the selection's word count, so two different selections of equal
+ * length inside one sentence collided and could surface the wrong explanation
+ * passively. The storage key changes with the version, so version 1 entries
+ * (words included) are never read again.
+ */
+export const SAYIT_CACHE_SCHEMA_VERSION = 2 as const;
+
+/** Superseded cache storage that must not be consumed once version 2 is live. */
+export const SUPERSEDED_SAYIT_CACHE_STORAGE_KEYS = ["sayit.result-cache.v1"] as const;
 
 const MAX_CACHE_ENTRIES = 120;
 const MAX_CACHE_KEY_LENGTH = 640;
@@ -57,20 +68,23 @@ export type SayItCacheEntry = z.infer<typeof cacheEntrySchema>;
  * Cache identity policy:
  * - a single lexical word is context-free and shared across SayIt and Reader,
  *   so `Psychologically`, ` psychologically `, and `PSYCHOLOGICALLY` collide;
- * - a Reader phrase or sentence keeps a normalized context fingerprint so a
- *   context-specific interpretation is never reused in an unrelated context;
+ * - a Reader phrase or sentence keeps BOTH its normalized selection and a
+ *   normalized context fingerprint, so a context-specific interpretation is
+ *   never reused for a different selection in the same sentence, nor for the
+ *   same selection in a different context;
  * - an ordinary multi-word SayIt request is keyed on its normalized input.
  */
 export function buildSayItCacheIdentity(input: SayItCacheIdentityInput): string {
   const normalizedSelection = normalizeCacheText(input.selection);
-  const wordCount = normalizedSelection.split(" ").filter(Boolean).length;
 
-  if (isSingleWordSelection(input.selection) || wordCount === 1) {
+  if (isSingleWordSelection(input.selection)) {
     return `word:${normalizedSelection}`;
   }
   if (input.source === "reader") {
     const context = normalizeCacheText(input.context ?? "");
-    const bucket = context ? `reader:${wordCount}:${context}` : `reader:${wordCount}`;
+    // Both halves are required: the word count alone cannot tell two
+    // same-length selections inside one sentence apart.
+    const bucket = `reader:${normalizedSelection}:${context}`;
     return bucket.length > MAX_CACHE_KEY_LENGTH
       ? `${bucket.slice(0, MAX_CACHE_KEY_LENGTH - 9)}~${fingerprint(bucket)}`
       : bucket;
@@ -102,6 +116,23 @@ export class LocalSayItCacheRepository {
   constructor(storage?: Storage | null) {
     this.storage =
       storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+    this.discardSupersededStorage();
+  }
+
+  /**
+   * Remove cache storage written by an earlier schema version. Version 1
+   * contextual entries are unsafe (see SAYIT_CACHE_SCHEMA_VERSION), and the
+   * cache itself is a disposable optimization, so nothing needs migrating.
+   */
+  private discardSupersededStorage(): void {
+    if (!this.storage) return;
+    for (const key of SUPERSEDED_SAYIT_CACHE_STORAGE_KEYS) {
+      try {
+        this.storage.removeItem(key);
+      } catch {
+        // Cleanup is best-effort; the new key is never the old one.
+      }
+    }
   }
 
   get(identity: string): SayItResult | null {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   SAYIT_CACHE_SCHEMA_VERSION,
   SAYIT_CACHE_STORAGE_KEY,
+  SUPERSEDED_SAYIT_CACHE_STORAGE_KEYS,
   buildSayItCacheIdentity,
   LocalSayItCacheRepository,
 } from "./sayit-cache";
@@ -87,6 +88,9 @@ describe("SayIt cache identity", () => {
     });
 
     expect(firstSentence).not.toBe(secondSentence);
+    expect(firstSentence).toBe(
+      "reader:held rates steady:the bank held rates steady after the vote.",
+    );
     expect(
       buildSayItCacheIdentity({
         selection: "  Sort   ideas by shared traits ",
@@ -95,9 +99,64 @@ describe("SayIt cache identity", () => {
     ).toBe("sayit:sort ideas by shared traits");
   });
 
-  it("bumps the schema version independently of History storage", () => {
+  it("includes the selection so equal-length phrases in one sentence differ", () => {
+    const sentence = "The bank held rates steady after the vote.";
+    const heldRatesSteady = buildSayItCacheIdentity({
+      selection: "held rates steady",
+      source: "reader",
+      context: sentence,
+    });
+    const afterTheVote = buildSayItCacheIdentity({
+      selection: "after the vote",
+      source: "reader",
+      context: sentence,
+    });
+    const differentLength = buildSayItCacheIdentity({
+      selection: "the vote",
+      source: "reader",
+      context: sentence,
+    });
+
+    // Regression: the previous identity was `reader:<wordCount>:<context>`, so
+    // all three of these collapsed into the same entry.
+    expect(new Set([heldRatesSteady, afterTheVote, differentLength]).size).toBe(3);
+    expect(heldRatesSteady).toBe(
+      "reader:held rates steady:the bank held rates steady after the vote.",
+    );
+    expect(afterTheVote).toBe(
+      "reader:after the vote:the bank held rates steady after the vote.",
+    );
+    // Normal SayIt multi-word identity stays unchanged.
+    expect(
+      buildSayItCacheIdentity({ selection: "after the vote", source: "sayit" }),
+    ).toBe("sayit:after the vote");
+  });
+
+  it("bounds over-long contextual identities while keeping them distinct", () => {
+    const longContext = `${"word ".repeat(200)}end`.trim();
+    const first = buildSayItCacheIdentity({
+      selection: "held rates steady",
+      source: "reader",
+      context: longContext,
+    });
+    const second = buildSayItCacheIdentity({
+      selection: "after the vote",
+      source: "reader",
+      context: longContext,
+    });
+
+    expect(first.length).toBeLessThanOrEqual(640);
+    expect(second.length).toBeLessThanOrEqual(640);
+    expect(first).not.toBe(second);
+  });
+
+  it("carries a schema version that invalidates superseded contextual entries", () => {
     expect(SAYIT_CACHE_STORAGE_KEY).not.toContain("history");
-    expect(SAYIT_CACHE_SCHEMA_VERSION).toBe(1);
+    expect(SAYIT_CACHE_STORAGE_KEY).toBe("sayit.result-cache.v2");
+    expect(SAYIT_CACHE_SCHEMA_VERSION).toBe(2);
+    expect(SUPERSEDED_SAYIT_CACHE_STORAGE_KEYS).toContain(
+      "sayit.result-cache.v1",
+    );
   });
 });
 
@@ -114,7 +173,7 @@ describe("shared SayIt result cache", () => {
     expect(cache.get("word:psychologically")).toEqual(successResult);
   });
 
-  it("persists across repository instances and ignores stale schema versions", () => {
+  it("persists across repository instances and ignores a mismatched envelope version", () => {
     const storage = createStorage();
     const first = new LocalSayItCacheRepository(storage);
     first.put("word:psychologically", successResult);
@@ -124,9 +183,66 @@ describe("shared SayIt result cache", () => {
 
     storage.setItem(
       SAYIT_CACHE_STORAGE_KEY,
-      JSON.stringify({ version: 0, entries: [] }),
+      JSON.stringify({ version: 1, entries: [] }),
     );
-    expect(new LocalSayItCacheRepository(storage).get("word:psychologically")).toBeNull();
+    expect(
+      new LocalSayItCacheRepository(storage).get("word:psychologically"),
+    ).toBeNull();
+  });
+
+  it("does not consume superseded version 1 contextual entries", () => {
+    const storage = createStorage();
+    const sentence = "The bank held rates steady after the vote.";
+    // A version 1 entry as this app wrote it: word count instead of selection.
+    storage.setItem(
+      "sayit.result-cache.v1",
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            key: `reader:3:${sentence.toLowerCase()}`,
+            created_at: new Date().toISOString(),
+            result: successResult,
+          },
+          {
+            key: "word:psychologically",
+            created_at: new Date().toISOString(),
+            result: successResult,
+          },
+        ],
+      }),
+    );
+
+    const cache = new LocalSayItCacheRepository(storage);
+    const identity = buildSayItCacheIdentity({
+      selection: "held rates steady",
+      source: "reader",
+      context: sentence,
+    });
+
+    // Nothing from the old schema is readable, and the old key is discarded.
+    expect(cache.get(identity)).toBeNull();
+    expect(cache.get("word:psychologically")).toBeNull();
+    expect(storage.getItem("sayit.result-cache.v1")).toBeNull();
+    expect(cache.list()).toEqual([]);
+  });
+
+  it("keeps the context-free word entry shared across Reader and SayIt", () => {
+    const storage = createStorage();
+    const cache = new LocalSayItCacheRepository(storage);
+    const readerIdentity = buildSayItCacheIdentity({
+      selection: "  psychologically ",
+      source: "reader",
+      context: "She explained the result psychologically.",
+    });
+    const sayItIdentity = buildSayItCacheIdentity({
+      selection: "PSYCHOLOGICALLY",
+      source: "sayit",
+    });
+
+    expect(readerIdentity).toBe("word:psychologically");
+    expect(cache.put(readerIdentity, successResult)).toEqual(successResult);
+    expect(cache.get(sayItIdentity)).toEqual(successResult);
   });
 });
 
@@ -238,5 +354,134 @@ describe("resolveSayItRequest", () => {
     });
 
     expect(retrieve).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves the same Reader phrase and sentence from one entry", async () => {
+    const cache = new LocalSayItCacheRepository(createStorage());
+    const retrieve = vi.fn().mockResolvedValue(successResult);
+    const sentence = "The bank held rates steady after the vote.";
+
+    const first = await resolveSayItRequest({
+      selection: "held rates steady",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+    const second = await resolveSayItRequest({
+      selection: " held   rates steady ",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(true);
+    expect(second.result).toEqual(first.result);
+    expect(second.cacheIdentity).toBe(first.cacheIdentity);
+  });
+
+  it("never answers two same-length Reader selections in one sentence from one entry", async () => {
+    const cache = new LocalSayItCacheRepository(createStorage());
+    const sentence = "The bank held rates steady after the vote.";
+    const threeWordResult: SayItResult = {
+      ...successResult,
+      normalized_input: "held rates steady",
+      best_match: { text: "held rates steady", expression_type: "phrase" },
+    };
+    const otherThreeWordResult: SayItResult = {
+      ...successResult,
+      normalized_input: "after the vote",
+      best_match: { text: "after the vote", expression_type: "phrase" },
+    };
+    const retrieve = vi
+      .fn()
+      .mockResolvedValueOnce(threeWordResult)
+      .mockResolvedValueOnce(otherThreeWordResult);
+
+    const first = await resolveSayItRequest({
+      selection: "held rates steady",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+    const second = await resolveSayItRequest({
+      selection: "after the vote",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+
+    // Regression: identical word count in the same sentence used to collide, so
+    // the second selection was answered from the first selection's entry.
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(second.cacheHit).toBe(false);
+    expect(second.cacheIdentity).not.toBe(first.cacheIdentity);
+    expect(
+      second.result.mode === "retrieve"
+        ? second.result.best_match?.text
+        : second.result.interpretation?.expression,
+    ).toBe("after the vote");
+    expect(cache.list().map((entry) => entry.key)).toEqual(
+      expect.arrayContaining([
+        "reader:held rates steady:the bank held rates steady after the vote.",
+        "reader:after the vote:the bank held rates steady after the vote.",
+      ]),
+    );
+
+    // Both entries stay usable for their own selection.
+    const repeatFirst = await resolveSayItRequest({
+      selection: "held rates steady",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+    const repeatSecond = await resolveSayItRequest({
+      selection: "after the vote",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(
+      repeatFirst.result.mode === "retrieve"
+        ? repeatFirst.result.best_match?.text
+        : repeatFirst.result.interpretation?.expression,
+    ).toBe("held rates steady");
+    expect(
+      repeatSecond.result.mode === "retrieve"
+        ? repeatSecond.result.best_match?.text
+        : repeatSecond.result.interpretation?.expression,
+    ).toBe("after the vote");
+  });
+
+  it("never answers a different-length Reader selection from another entry", async () => {
+    const cache = new LocalSayItCacheRepository(createStorage());
+    const sentence = "The bank held rates steady after the vote.";
+    const retrieve = vi.fn().mockResolvedValue(successResult);
+
+    await resolveSayItRequest({
+      selection: "held rates steady",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+    const shorter = await resolveSayItRequest({
+      selection: "the vote",
+      source: "reader",
+      contextText: sentence,
+      cache,
+      retrieve,
+    });
+
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(shorter.cacheHit).toBe(false);
   });
 });

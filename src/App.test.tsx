@@ -342,7 +342,7 @@ describe("SayIt shared result cache and Reader isolation", () => {
     await submitInput("psychologically");
     expect(retrieveCallCount()).toBe(1);
 
-    const cacheRaw = window.localStorage.getItem("sayit.result-cache.v1");
+    const cacheRaw = window.localStorage.getItem("sayit.result-cache.v2");
     expect(cacheRaw).toBeTruthy();
     expect(
       (JSON.parse(cacheRaw!) as { entries: { key: string }[] }).entries.map(

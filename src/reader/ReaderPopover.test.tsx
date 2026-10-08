@@ -605,4 +605,37 @@ describe("Reader selection popover", () => {
       fetchMock.mock.calls.filter(([url]) => String(url) === "/api/retrieve"),
     ).toHaveLength(1);
   });
+
+  it("does not answer two same-length phrases in one sentence from one entry", async () => {
+    const cache = new LocalSayItCacheRepository(window.localStorage);
+    const sentence = "The bank held rates steady after the vote.";
+    // Only the second, same-length phrase of the same sentence is cached.
+    cache.put(
+      buildSayItCacheIdentity({
+        selection: "after the vote",
+        source: "reader",
+        context: sentence,
+      }),
+      phraseResult,
+    );
+    props = baseProps({ sayItCache: cache });
+    await openArticle();
+
+    // Selecting the other three-word phrase must not surface the wrong answer.
+    await commitSelection("held rates steady", 1);
+    expect(
+      document.querySelector(".reader-selection-popover"),
+      `detail=${JSON.stringify(detailedResultText())}`,
+    ).toBeTruthy();
+    expect(detailedResultText()).toBe("");
+    expect(sayItButton()).toBeTruthy();
+    expect(retrieveCalls()).toBe(0);
+    expect(props.onSuccessfulSayIt).not.toHaveBeenCalled();
+
+    // The phrase that does match the sentence still reads from cache.
+    await commitSelection("after the vote", 1);
+    expect(detailedResultText()).toBe("interpret");
+    expect(retrieveCalls()).toBe(0);
+    expect(sayItButton()).toBeNull();
+  });
 });
