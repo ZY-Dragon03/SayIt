@@ -58,6 +58,8 @@ const READER_COPY_LABEL = "Reader selection";
 const ARCHIVE_LIMIT = 60;
 const PROGRESS_SAVE_DELAY_MS = 500;
 const SCROLL_ANCHOR_PX = 128;
+/** How often an open Reader re-reads Today while no run is being polled. */
+const TODAY_REFRESH_INTERVAL_MS = 15_000;
 /** Horizontal breathing room kept between the popover and the viewport edge. */
 const POPOVER_VIEWPORT_MARGIN = 12;
 const POPOVER_GAP_PX = 8;
@@ -473,6 +475,45 @@ export const ReaderWorkspace = forwardRef<
           setWorkspaceError(error instanceof Error ? error.message : "Run status could not be checked.");
         });
     }, 1200);
+    return () => window.clearInterval(timer);
+  }, [active, activeAttempt]);
+
+  /**
+   * Keep Today fresh while Reader is open, so a scheduled collection finishing in
+   * the background becomes visible without switching workspaces or reloading.
+   *
+   * This only reads `/api/reader/issues/today` on a slow interval and only when
+   * nothing else is already polling a run; it never starts a collection or an
+   * LLM call, and it updates state only when the delivered issue actually
+   * changed.
+   */
+  useEffect(() => {
+    if (!active || (activeAttempt && isActiveAttempt(activeAttempt))) return;
+    const timer = window.setInterval(() => {
+      void getTodayIssue()
+        .then((response) => {
+          const fresh = response.issue;
+          if (fresh) {
+            setTodayIssue((current) => {
+              if (
+                current &&
+                current.updatedAt === fresh.updatedAt &&
+                current.status === fresh.status &&
+                current.actual.count === fresh.actual.count
+              ) {
+                return current;
+              }
+              return fresh;
+            });
+          }
+          const running = response.attempts.find(isActiveAttempt) ?? null;
+          setActiveAttempt((current) => {
+            if (current && running && current.id === running.id) return current;
+            return running;
+          });
+        })
+        .catch(() => undefined);
+    }, TODAY_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [active, activeAttempt]);
 

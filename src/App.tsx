@@ -291,7 +291,7 @@ function App() {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setDrawerOpen(false);
-        setHistoryOpen(false);
+        closeHistory();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -497,7 +497,7 @@ function App() {
     setActiveSavedId(item.id);
     setError(null);
     setDrawerOpen(false);
-    setHistoryOpen(false);
+    closeHistory();
   };
 
   const handleRestoreHistory = (item: HistoryRecord) => {
@@ -516,8 +516,7 @@ function App() {
     setPronunciationError(null);
     setPronunciationErrorKey(null);
     setDrawerOpen(false);
-    setHistoryOpen(false);
-    setHistoryPreview(null);
+    closeHistory();
   };
 
   /** Show a past result without entering SayIt or touching its session. */
@@ -525,21 +524,30 @@ function App() {
     setHistoryPreview(item);
   };
 
-  const handleOpenExpressionInSayIt = (item: HistoryRecord) => {
-    setHistoryPreview(null);
+  /**
+   * Closing History is the one dismissal for its expression preview, so the
+   * preview can never be left floating after the reader navigates away.
+   */
+  const closeHistory = () => {
     setHistoryOpen(false);
+    setHistoryPreview(null);
+  };
+
+  const handleOpenExpressionInSayIt = (item: HistoryRecord) => {
+    closeHistory();
     setReaderActive(false);
     handleRestoreHistory(item);
   };
 
   const handleOpenReading = (article: ReaderArticleSummary) => {
-    setHistoryPreview(null);
+    // The drawer must not cover the article the reader just chose.
+    closeHistory();
     setReaderActive(true);
     readerRef.current?.openArticle(article);
   };
 
   const handleHistoryShowToday = () => {
-    setHistoryPreview(null);
+    closeHistory();
     setReaderActive(true);
     readerRef.current?.showToday();
   };
@@ -582,8 +590,7 @@ function App() {
               aria-pressed={!readerActive}
               onClick={() => {
                 setDrawerOpen(false);
-                setHistoryOpen(false);
-                setHistoryPreview(null);
+                closeHistory();
                 setReaderPreferencesOpen(false);
                 setReaderActive(false);
               }}
@@ -596,8 +603,7 @@ function App() {
               aria-pressed={readerActive}
               onClick={() => {
                 setDrawerOpen(false);
-                setHistoryOpen(false);
-                setHistoryPreview(null);
+                closeHistory();
                 setReaderPreferencesOpen(false);
                 setReaderActive(true);
               }}
@@ -614,7 +620,7 @@ function App() {
             onClick={() => {
               setDrawerOpen(false);
               setReaderPreferencesOpen(false);
-              setHistoryPreview(null);
+              closeHistory();
               setHistoryOpen(true);
             }}
             aria-expanded={historyOpen}
@@ -644,7 +650,7 @@ function App() {
               type="button"
               title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
               onClick={() => {
-                setHistoryOpen(false);
+                closeHistory();
                 setDrawerOpen(true);
               }}
               aria-expanded={drawerOpen}
@@ -866,8 +872,8 @@ function App() {
         onOpenExpression={handleOpenExpressionInSayIt}
         onOpenReading={handleOpenReading}
         onShowToday={handleHistoryShowToday}
-        onReadArticle={() => setHistoryOpen(false)}
-        onClose={() => setHistoryOpen(false)}
+        onReadArticle={closeHistory}
+        onClose={closeHistory}
       />
 
       {drawerOpen && (

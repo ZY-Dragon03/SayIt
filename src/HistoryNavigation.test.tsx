@@ -87,6 +87,15 @@ function jsonResponse(value: unknown, status = 200): Response {
 describe("shared History navigation", () => {
   let container: HTMLDivElement;
   let root: Root;
+  const savedProgress = {
+    issueId: issue.id,
+    articleId: article.id,
+    edition: issue.edition,
+    scrollRatio: 0.42,
+    scrollTop: 1200,
+    firstVisibleParagraph: 1,
+    paragraphOffset: 12,
+  };
 
   beforeEach(() => {
     (
@@ -105,6 +114,8 @@ describe("shared History navigation", () => {
         removeEventListener: vi.fn(),
       })),
     );
+    vi.stubGlobal("scrollTo", vi.fn());
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 900 });
     Object.defineProperty(window, "speechSynthesis", {
       configurable: true,
       value: {
@@ -136,8 +147,11 @@ describe("shared History navigation", () => {
         if (url.startsWith("/api/reader/articles/")) {
           return jsonResponse({
             article,
-            paragraphs: ["The policy shifted after the latest economic data arrived."],
-            progress: null,
+            paragraphs: [
+              "The policy shifted after the latest economic data arrived.",
+              "The bank held rates steady after the vote.",
+            ],
+            progress: savedProgress,
           });
         }
         throw new Error(`Unexpected History test fetch: ${url}`);
@@ -291,10 +305,18 @@ describe("shared History navigation", () => {
     );
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(false);
 
-    // Closing History restores the Reader workspace untouched.
+    // Closing History dismisses its preview and restores the Reader workspace.
     await act(async () => buttonByLabel("Close history")?.click());
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(false);
-    expect(container.querySelector(".history-preview")).toBeTruthy();
+    expect(container.querySelector(".history-preview")).toBeNull();
+    expect(container.querySelector(".history-drawer")).toBeNull();
+    // The SayIt workspace is still untouched by the preview that was dismissed.
+    expect(container.querySelector<HTMLTextAreaElement>("#expression-input")?.value).toBe(
+      "psychologically",
+    );
+    expect(container.querySelector(".result-card")?.textContent).toContain(
+      "She approached the problem psychologically.",
+    );
   });
 
   it("deliberately switches to Reader when a reading article is opened from SayIt", async () => {
@@ -325,9 +347,20 @@ describe("shared History navigation", () => {
 
     // Reader is now shown with the chosen article, and the SayIt state survives.
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(false);
-    expect(container.querySelector(".reader-article-header h1")?.textContent).toBe(
-      article.title,
-    );
+    // The drawer must not be left covering the article it opened.
+    expect(container.querySelector(".history-drawer")).toBeNull();
+    expect(
+      container.querySelector(".reader-article-header h1")?.textContent,
+    ).toBe(article.title);
+    // The saved reading position is restored once the article body arrives.
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 40));
+    });
+    expect(window.scrollTo).toHaveBeenCalled();
+    const restoration = vi
+      .mocked(window.scrollTo as unknown as (options: ScrollToOptions) => void)
+      .mock.calls.slice(-1)[0]?.[0] as ScrollToOptions | undefined;
+    expect(Number(restoration?.top ?? 0)).toBeGreaterThan(0);
     expect(container.querySelector<HTMLTextAreaElement>("#expression-input")?.value).toBe(
       "psychologically",
     );

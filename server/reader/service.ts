@@ -399,6 +399,44 @@ export class ReaderService {
   }
 
   /**
+   * Return an occurrence whose run was interrupted to a schedulable state.
+   *
+   * Recovery must never become a reason to collect early: when the configured
+   * time is still ahead, a manual run leaves the occurrence waiting for its
+   * original schedule, and a scheduled run only re-arms its own bounded retry.
+   * Catch-up happens immediately only once that time has passed.
+   */
+  private restoreInterruptedOccurrence(
+    occurrence: Occurrence,
+    options: { now: Date; trigger: RunAttemptTrigger },
+  ): void {
+    const { now, trigger } = options;
+    const scheduledAt = new Date(occurrence.scheduledAt).getTime();
+    const isManual = trigger === "manual" || trigger === "regenerate";
+    if (Number.isFinite(scheduledAt) && scheduledAt > now.getTime()) {
+      if (isManual) {
+        occurrence.status = "WAITING";
+        occurrence.nextAttemptAt = null;
+        occurrence.updatedAt = now.toISOString();
+        return;
+      }
+      this.settleOccurrenceAfterRun(occurrence, {
+        now,
+        retryable: true,
+        retryDelayMs: occurrence.scheduledAttemptCount === 1 ? 5 * 60_000 : 15 * 60_000,
+      });
+      return;
+    }
+    // The configured time has passed, so catching up on this startup is the
+    // point of recovery and the retry is due immediately.
+    this.settleOccurrenceAfterRun(occurrence, {
+      now,
+      retryable: true,
+      retryDelayMs: 0,
+    });
+  }
+
+  /**
    * Recover runs that an unexpected service restart left behind.
    *
    * Collection tasks live in memory, so after a restart every persisted
@@ -435,20 +473,15 @@ export class ReaderService {
         if (issue?.status === "COMPLETE") continue;
         const occurrence = state.occurrences.find(
           (candidate) =>
-            candidate.localDate === issue?.localDate &&
-            candidate.timezone === issue?.timezone,
+            (issue
+              ? candidate.localDate === issue.localDate && candidate.timezone === issue.timezone
+              : candidate.id === attempt.issueId.replace("issue:", "occurrence:")),
         );
         if (!occurrence || isTerminalOccurrence(occurrence.status)) continue;
         if (occurrence.lastAttemptId === attempt.id) {
           occurrence.lastAttemptId = null;
         }
-        // An interrupted run is always worth retrying, and the retry is due
-        // immediately so catch-up happens on this startup rather than later.
-        this.settleOccurrenceAfterRun(occurrence, {
-          now,
-          retryable: true,
-          retryDelayMs: 0,
-        });
+        this.restoreInterruptedOccurrence(occurrence, { now, trigger: attempt.trigger });
       }
     });
   }
@@ -783,11 +816,14 @@ export class ReaderService {
       ) {
         // Reconciliation must never leave an occurrence RUNNING without a live
         // attempt: that state blocks scheduling and, before restart recovery
-        // existed, survived forever. An interrupted run is returned to the
-        // scheduler immediately so catch-up can happen on this startup.
-        occurrence.status = "RETRY_WAIT";
-        occurrence.nextAttemptAt = now.toISOString();
-        occurrence.updatedAt = now.toISOString();
+        // existed, survived forever. The schedule decides what happens next.
+        const trigger = state.attempts.find(
+          (attempt) => attempt.id === occurrence!.lastAttemptId,
+        )?.trigger;
+        this.restoreInterruptedOccurrence(occurrence, {
+          now,
+          trigger: trigger ?? "scheduled",
+        });
       }
       const issue = currentIssue(state.issues, today, preferences.timezone);
       if (

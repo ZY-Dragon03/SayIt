@@ -702,8 +702,8 @@ describe("Reader collection lifecycle", () => {
     await second.service.stop();
   });
 
-  it("recovers an interrupted manual run without consuming its scheduling budget", async () => {
-    const current = new Date("2026-10-05T09:00:00.000Z");
+  it("recovers an interrupted manual run before the scheduled time without collecting early", async () => {
+    let current = new Date("2026-10-05T09:00:00.000Z");
     const now = () => new Date(current);
     const store = await createStore(now);
     const collect = vi.fn(async () => collection([article()]));
@@ -711,18 +711,34 @@ describe("Reader collection lifecycle", () => {
     // Let the service create today's occurrence, then stop it as a restart would.
     const previous = makeService(store, now, collect);
     await previous.service.start();
-    expect(previous.service.today().occurrence?.status).toBe("WAITING");
+    expect(previous.service.today().occurrence).toMatchObject({
+      status: "WAITING",
+      scheduledAt: "2026-10-05T18:00:00.000Z",
+    });
     await previous.service.stop();
 
-    // A manual run was killed by a restart before the configured 18:00 time.
+    // A manual run was killed by a restart at 09:00, nine hours early. It left
+    // the issue it created and an orphaned RUNNING attempt behind.
     const manualId = "attempt:manual-interrupted";
+    const issueId = "issue:2026-10-05:UTC";
     await store.update((state) => {
-      const occurrence = state.occurrences.find(
-        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
-      )!;
+      state.issues.push({
+        id: issueId,
+        localDate: "2026-10-05",
+        timezone: "UTC",
+        edition: 1,
+        status: "NOT_DELIVERED",
+        target: state.preferences,
+        actual: { count: 0, topics: [], difficulty: null, readingMinutes: 0 },
+        unmetConstraints: ["No verified full-text articles have been delivered."],
+        articles: [],
+        createdAt: current.toISOString(),
+        updatedAt: current.toISOString(),
+        priorEditions: [],
+      });
       state.attempts.push({
         id: manualId,
-        issueId: occurrence.id.replace("occurrence:", "issue:"),
+        issueId,
         edition: 1,
         trigger: "manual" as const,
         state: "RUNNING" as const,
@@ -733,30 +749,137 @@ describe("Reader collection lifecycle", () => {
         deliveredCount: 0,
         traceId: "trace:manual-interrupted",
       });
+      const occurrence = state.occurrences.find(
+        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
+      )!;
       occurrence.status = "RUNNING";
       occurrence.lastAttemptId = manualId;
     });
 
+    // Restarting at 09:05 must clear the orphaned run but preserve the schedule.
+    const callsBeforeRestart = collect.mock.calls.length;
+    current = new Date("2026-10-05T09:05:00.000Z");
     const service = makeService(store, now, collect);
     await service.service.start();
     await service.service.waitForIdle();
 
-    // Recovery restores scheduling: the interrupted manual run is cleared and,
-    // because it happened after the configured time, catch-up runs once and
-    // fulfils the issue. Only that scheduled catch-up consumes the retry budget,
-    // so the count is 1 rather than the 2 the manual attempt would have caused.
+    expect(collect.mock.calls.length).toBe(callsBeforeRestart);
     expect(service.service.today().occurrence).toMatchObject({
-      status: "COMPLETED",
-      scheduledAttemptCount: 1,
+      status: "WAITING",
+      scheduledAt: "2026-10-05T18:00:00.000Z",
+      scheduledAttemptCount: 0,
+      nextAttemptAt: null,
     });
-    expect(collect).toHaveBeenCalledTimes(1);
-    expect(
-      service.service.today().attempts.some((attempt) => attempt.state === "RUNNING"),
-    ).toBe(false);
     const recovered = store
       .snapshot()
       .attempts.find((attempt) => attempt.id === manualId);
     expect(recovered).toMatchObject({ state: "FAILED", retryable: true });
+
+    // The original schedule still fires, and only then does collection run.
+    current = new Date("2026-10-05T18:00:00.000Z");
+    await service.service.pulse();
+    await service.service.waitForIdle();
+    expect(collect.mock.calls.length).toBe(callsBeforeRestart + 1);
+    expect(service.service.today().issue?.status).toBe("COMPLETE");
+    expect(service.service.today().occurrence).toMatchObject({
+      status: "COMPLETED",
+      scheduledAttemptCount: 1,
+    });
+    await service.service.stop();
+  });
+
+  it("recovers an orphaned RUNNING occurrence before the scheduled time without collecting early", async () => {
+    let current = new Date("2026-10-05T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const previous = makeService(store, now, collect);
+    await previous.service.start();
+    await previous.service.stop();
+
+    // The manual run died before it wrote an issue, so only the occurrence and
+    // its attempt id remain. Recovery must still not collect early.
+    const manualId = "attempt:orphan-without-issue";
+    await store.update((state) => {
+      state.attempts.push({
+        id: manualId,
+        issueId: "issue:2026-10-05:UTC",
+        edition: 1,
+        trigger: "manual" as const,
+        state: "RUNNING" as const,
+        startedAt: current.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: 0,
+        traceId: "trace:orphan-without-issue",
+      });
+      const occurrence = state.occurrences.find(
+        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
+      )!;
+      occurrence.status = "RUNNING";
+      occurrence.lastAttemptId = manualId;
+    });
+
+    const callsBeforeRestart = collect.mock.calls.length;
+    current = new Date("2026-10-05T09:05:00.000Z");
+    const service = makeService(store, now, collect);
+    await service.service.start();
+    await service.service.waitForIdle();
+
+    expect(collect.mock.calls.length).toBe(callsBeforeRestart);
+    expect(service.service.today().occurrence).toMatchObject({
+      status: "WAITING",
+      scheduledAttemptCount: 0,
+      nextAttemptAt: null,
+    });
+    await service.service.stop();
+  });
+
+  it("catches up an interrupted overnight run once the scheduled time has passed", async () => {
+    let current = new Date("2026-10-05T18:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const previous = makeService(store, now, collect);
+    await previous.service.start();
+    await previous.service.stop();
+
+    // The process died mid-collection at the scheduled instant and comes back
+    // two minutes later, so catch-up is exactly what should happen.
+    await store.update((state) => {
+      const occurrence = state.occurrences.find(
+        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
+      )!;
+      state.attempts.push({
+        id: "attempt:scheduled-interrupted",
+        issueId: occurrence.id.replace("occurrence:", "issue:"),
+        edition: 1,
+        trigger: "scheduled" as const,
+        state: "RUNNING" as const,
+        startedAt: current.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: 0,
+        traceId: "trace:scheduled-interrupted",
+      });
+      occurrence.status = "RUNNING";
+      occurrence.scheduledAttemptCount += 1;
+      occurrence.lastAttemptId = "attempt:scheduled-interrupted";
+    });
+
+    current = new Date("2026-10-05T18:02:00.000Z");
+    const service = makeService(store, now, collect);
+    await service.service.start();
+    await service.service.waitForIdle();
+
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(service.service.today().issue?.status).toBe("COMPLETE");
+    expect(service.service.today().occurrence).toMatchObject({
+      status: "ALREADY_FULFILLED",
+      scheduledAttemptCount: 2,
+    });
     await service.service.stop();
   });
 
