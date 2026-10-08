@@ -241,6 +241,7 @@ function baseProps(overrides: Partial<ReaderWorkspaceProps> = {}): ReaderWorkspa
     pronunciationErrorKey: null,
     pronunciationError: null,
     sayItCache: new LocalSayItCacheRepository(window.localStorage),
+    onArchiveChange: vi.fn(),
     onCopy: vi.fn().mockResolvedValue(undefined),
     onSpeak: vi.fn(),
     onSuccessfulSayIt: vi.fn(),
@@ -856,7 +857,7 @@ describe("Reader workspace", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/retrieve")).toBe(false);
   });
 
-  it("loads an immutable prior edition and shows its article list", async () => {
+  it("reports the Reading side of History and still loads a prior edition", async () => {
     const latestIssue = { ...issue, edition: 2, priorEditions: [1] };
     const archivedArticle = { ...article, id: "article-old", title: "The first edition article" };
     const priorIssue = { ...issue, edition: 1, articles: [archivedArticle], priorEditions: [] };
@@ -868,17 +869,18 @@ describe("Reader workspace", () => {
       if (url.endsWith("/editions/1")) return jsonResponse({ issue: priorIssue });
       throw new Error(`Unexpected archive test fetch: ${url}`);
     });
-    props = { ...props, active: true, archiveOpen: true };
+    props = { ...props, active: true };
     await render();
     await flush();
-    const priorEditionButton = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Edition 1"),
-    );
-    expect(priorEditionButton).toBeTruthy();
-    await act(async () => priorEditionButton?.click());
-    await flush();
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
 
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/editions/1"))).toBe(true);
-    expect(container.textContent).toContain("The first edition article");
+    // The shared History drawer reads this snapshot instead of a Reader drawer.
+    const archiveChange = vi.mocked(props.onArchiveChange);
+    expect(archiveChange).toHaveBeenCalled();
+    const snapshot = archiveChange.mock.calls[archiveChange.mock.calls.length - 1][0];
+    expect(snapshot.todayIssue?.edition).toBe(2);
+    expect(snapshot.archiveIssues.map((item) => item.edition)).toContain(2);
+    expect(snapshot.displayedIssue).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/reader/issues/archive"))).toBe(true);
   });
 });

@@ -144,6 +144,7 @@ function baseProps(
     pronunciationErrorKey: null,
     pronunciationError: null,
     sayItCache: new LocalSayItCacheRepository(window.localStorage),
+    onArchiveChange: vi.fn(),
     onCopy: vi.fn().mockResolvedValue(undefined),
     onSpeak: vi.fn(),
     onSuccessfulSayIt: vi.fn(),

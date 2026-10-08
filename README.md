@@ -72,6 +72,21 @@ The cache lives under the browser-local key `sayit.result-cache.v2`. Changing th
 
 Speech playback warms the Web Speech voice list at startup and reuses the selected US/UK voice, so pressing Listen does not pay a multi-second voice-discovery cost. The service only cancels the engine when playback is actually pending or speaking.
 
+### Reader collection recovery
+
+Collection work lives in memory, so after an unexpected service restart any attempt still stored as `RUNNING` is orphaned: nothing will ever finish it, while the scheduler and manual runs both refuse to start while one exists. On startup the service marks those attempts failed (retryable) and returns their occurrence to a schedulable state exactly once, which is idempotent and leaves issues, editions, delivered articles and reading progress untouched. Reconciliation never leaves an occurrence `RUNNING` without a live attempt.
+
+An occurrence is only `COMPLETED` when its Daily Issue actually reached `COMPLETE`. A run that finishes without fulfilling the issue stays inside the bounded retry budget (5 then 15 minutes, at most three scheduled attempts) and is only `EXHAUSTED` when that budget is spent, so a finished attempt is never confused with a successful delivery.
+
+### History navigation
+
+The top-right History icon opens one shared drawer in both workspaces, with two sections and a stable position:
+
+- **Reading** — Daily Issues, their delivered articles and reading progress;
+- **Expressions** — the SayIt query and interpretation history recorded by either workspace.
+
+The drawer defaults to the section belonging to the active mode and can switch sections without switching workspaces. Before the Reader has loaded once, the Reading section is empty and says so. Opening History never changes the mode or the reading position; opening an expression while reading shows a preview panel and leaves the main SayIt input, result and session untouched (the drawer offers "Open in SayIt" for that); opening a reading article from SayIt deliberately switches to Reader and preserves the SayIt state; closing History returns to the exact previous workspace and position. The two storage models stay separate.
+
 ## Verification
 
 ```powershell

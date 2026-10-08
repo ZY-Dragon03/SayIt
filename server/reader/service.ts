@@ -385,6 +385,10 @@ export class ReaderService {
     if (this.started) return;
     await this.store.initialize();
     this.started = true;
+    // Any attempt still marked RUNNING belongs to a previous process, because
+    // the work itself lived in memory. Clear it before scheduling so a single
+    // unexpected restart cannot block today's collection forever.
+    await this.recoverInterruptedRuns();
     await this.pulse("catch-up");
   }
 
@@ -392,6 +396,61 @@ export class ReaderService {
     this.started = false;
     if (this.timer) this.clearTimer(this.timer);
     this.timer = undefined;
+  }
+
+  /**
+   * Recover runs that an unexpected service restart left behind.
+   *
+   * Collection tasks live in memory, so after a restart every persisted
+   * RUNNING attempt is orphaned by definition: nothing will ever complete it,
+   * yet `startManualRun` and `beginScheduledRun` both refuse to start while a
+   * RUNNING attempt exists. This marks those attempts failed and returns their
+   * occurrence to a schedulable state exactly once, which makes recovery
+   * idempotent and keeps today's catch-up available. Existing issues, editions,
+   * delivered articles and reading progress are never touched.
+   */
+  private async recoverInterruptedRuns(): Promise<void> {
+    const now = this.now();
+    const interrupted = this.store
+      .snapshot()
+      .attempts.filter((attempt) => attempt.state === "RUNNING" && attempt.completedAt === null);
+    if (interrupted.length === 0) return;
+    const interruptedIds = new Set(interrupted.map((attempt) => attempt.id));
+
+    await this.store.update((state) => {
+      const recoveredAt = now.toISOString();
+      for (const attempt of state.attempts) {
+        if (!interruptedIds.has(attempt.id)) continue;
+        attempt.state = "FAILED";
+        attempt.completedAt = recoveredAt;
+        attempt.retryable = true;
+        attempt.failureReason =
+          "The collection was interrupted by a service restart and was recovered automatically.";
+      }
+      for (const attempt of interrupted) {
+        const issue = state.issues.find(
+          (candidate) =>
+            candidate.id === attempt.issueId && candidate.edition === attempt.edition,
+        );
+        if (issue?.status === "COMPLETE") continue;
+        const occurrence = state.occurrences.find(
+          (candidate) =>
+            candidate.localDate === issue?.localDate &&
+            candidate.timezone === issue?.timezone,
+        );
+        if (!occurrence || isTerminalOccurrence(occurrence.status)) continue;
+        if (occurrence.lastAttemptId === attempt.id) {
+          occurrence.lastAttemptId = null;
+        }
+        // An interrupted run is always worth retrying, and the retry is due
+        // immediately so catch-up happens on this startup rather than later.
+        this.settleOccurrenceAfterRun(occurrence, {
+          now,
+          retryable: true,
+          retryDelayMs: 0,
+        });
+      }
+    });
   }
 
   async waitForIdle(): Promise<void> {
@@ -716,6 +775,19 @@ export class ReaderService {
         occurrence.localTime = preferences.collectionTime;
         occurrence.scheduledAt = resolveScheduledTime(today, preferences.collectionTime, preferences.timezone).toISOString();
         occurrence.updatedAt = now.toISOString();
+      } else if (
+        occurrence.status === "RUNNING" &&
+        !state.attempts.some(
+          (attempt) => attempt.id === occurrence!.lastAttemptId && attempt.state === "RUNNING",
+        )
+      ) {
+        // Reconciliation must never leave an occurrence RUNNING without a live
+        // attempt: that state blocks scheduling and, before restart recovery
+        // existed, survived forever. An interrupted run is returned to the
+        // scheduler immediately so catch-up can happen on this startup.
+        occurrence.status = "RETRY_WAIT";
+        occurrence.nextAttemptAt = now.toISOString();
+        occurrence.updatedAt = now.toISOString();
       }
       const issue = currentIssue(state.issues, today, preferences.timezone);
       if (
@@ -892,9 +964,19 @@ export class ReaderService {
               item.timezone === replacement.timezone,
           );
           if (occurrence) {
-            occurrence.status = "COMPLETED";
-            occurrence.nextAttemptAt = null;
-            occurrence.updatedAt = now.toISOString();
+            if (replacement.status === "COMPLETE") {
+              occurrence.status = "COMPLETED";
+              occurrence.nextAttemptAt = null;
+              occurrence.updatedAt = now.toISOString();
+            } else {
+              // The run finished but the Issue was not fulfilled, so the
+              // occurrence must not claim success.
+              this.settleOccurrenceAfterRun(occurrence, {
+                now,
+                retryable: true,
+                retryDelayMs: occurrence.scheduledAttemptCount === 1 ? 5 * 60_000 : 15 * 60_000,
+              });
+            }
           }
         } else {
           const occurrence = state.occurrences.find(
@@ -971,6 +1053,30 @@ export class ReaderService {
         occurrence.updatedAt = now.toISOString();
       }
     });
+  }
+
+  /**
+   * Settle an occurrence whose run finished without fulfilling the issue.
+   *
+   * Completion of an attempt is not delivery: an occurrence may only become
+   * COMPLETED once the Daily Issue actually reached COMPLETE. Anything else
+   * stays inside the bounded retry budget, and is only exhausted when the
+   * budget is spent or the failure cannot be retried.
+   */
+  private settleOccurrenceAfterRun(
+    occurrence: Occurrence | undefined,
+    options: { now: Date; retryable: boolean; retryDelayMs: number },
+  ): void {
+    if (!occurrence) return;
+    const { now, retryable, retryDelayMs } = options;
+    if (retryable && occurrence.scheduledAttemptCount < occurrence.maxScheduledAttempts) {
+      occurrence.status = "RETRY_WAIT";
+      occurrence.nextAttemptAt = new Date(now.getTime() + retryDelayMs).toISOString();
+    } else {
+      occurrence.status = "EXHAUSTED";
+      occurrence.nextAttemptAt = null;
+    }
+    occurrence.updatedAt = now.toISOString();
   }
 
   private alreadyDeliveredContext(issue: DailyIssue): SemanticExistingArticleInput[] {

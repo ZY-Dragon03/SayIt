@@ -1593,6 +1593,159 @@ summary:focus-visible {
   margin-top: 12px;
 }
 
+/* One shared History drawer: Reading and Expressions side by side. */
+.history-sections {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 4px;
+}
+
+.history-section-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.history-section-tab:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.history-section-tab.is-active {
+  color: var(--accent-strong);
+  border-color: var(--border);
+  background: var(--accent-soft);
+}
+
+.history-section-count {
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.history-section-tab.is-active .history-section-count {
+  color: var(--accent-strong);
+}
+
+.history-reading-list li {
+  border-top: 1px solid var(--border);
+}
+
+.history-issue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 3px 2px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.history-article-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-article-list .reader-archive-date {
+  padding-left: 3px;
+}
+
+.history-issue-empty {
+  margin: 0;
+  padding: 4px 3px 10px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.history-inline-action {
+  min-height: 22px;
+  padding: 0 8px;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.history-inline-action:hover {
+  border-color: var(--border);
+  background: var(--surface-muted);
+}
+
+.history-return-action {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 14px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-solid);
+  cursor: pointer;
+}
+
+.history-return-action:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.history-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-list-item .saved-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Expression preview: readable from Reader without entering SayIt. */
+.history-preview {
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.history-preview-card {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(80vh, 680px);
+  margin-right: 24px;
+  padding: 17px;
+  overflow-y: auto;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.history-preview-open {
+  width: 100%;
+  margin-top: 14px;
+}
+
 .reader-attempt-history {
   margin-top: 17px;
   border-top: 1px solid var(--border);

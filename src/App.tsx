@@ -54,6 +54,12 @@ import { LocalSayItCacheRepository } from "./lib/sayit-cache";
 import { resolveSayItRequest } from "./lib/sayit-resolver";
 import { RetrievalApiError, requestRetrieval } from "./lib/sayit-request";
 import { ReaderWorkspace } from "./reader/ReaderWorkspace";
+import type {
+  ReaderArchiveSnapshot,
+  ReaderWorkspaceHandle,
+} from "./reader/ReaderWorkspace";
+import type { ReaderArticleSummary } from "./reader/types";
+import { HistoryDrawer } from "./HistoryDrawer";
 import "./App.css";
 
 type Theme = "light" | "dark";
@@ -162,11 +168,17 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyPreview, setHistoryPreview] = useState<HistoryRecord | null>(null);
+  const [readerArchive, setReaderArchive] = useState<ReaderArchiveSnapshot>({
+    todayIssue: null,
+    archiveIssues: [],
+    displayedIssue: null,
+  });
+  const readerRef = useRef<ReaderWorkspaceHandle | null>(null);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [readerActive, setReaderActive] = useState(false);
   const [readerPreferencesOpen, setReaderPreferencesOpen] = useState(false);
-  const [readerArchiveOpen, setReaderArchiveOpen] = useState(false);
   const [pronunciationPreferences, setPronunciationPreferences] =
     useState<PronunciationPreferences>(loadPronunciationPreferences);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
@@ -279,7 +291,7 @@ function App() {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setDrawerOpen(false);
-        setHistoryDrawerOpen(false);
+        setHistoryOpen(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -485,7 +497,7 @@ function App() {
     setActiveSavedId(item.id);
     setError(null);
     setDrawerOpen(false);
-    setHistoryDrawerOpen(false);
+    setHistoryOpen(false);
   };
 
   const handleRestoreHistory = (item: HistoryRecord) => {
@@ -504,7 +516,32 @@ function App() {
     setPronunciationError(null);
     setPronunciationErrorKey(null);
     setDrawerOpen(false);
-    setHistoryDrawerOpen(false);
+    setHistoryOpen(false);
+    setHistoryPreview(null);
+  };
+
+  /** Show a past result without entering SayIt or touching its session. */
+  const handlePreviewExpression = (item: HistoryRecord) => {
+    setHistoryPreview(item);
+  };
+
+  const handleOpenExpressionInSayIt = (item: HistoryRecord) => {
+    setHistoryPreview(null);
+    setHistoryOpen(false);
+    setReaderActive(false);
+    handleRestoreHistory(item);
+  };
+
+  const handleOpenReading = (article: ReaderArticleSummary) => {
+    setHistoryPreview(null);
+    setReaderActive(true);
+    readerRef.current?.openArticle(article);
+  };
+
+  const handleHistoryShowToday = () => {
+    setHistoryPreview(null);
+    setReaderActive(true);
+    readerRef.current?.showToday();
   };
 
   const handleReaderSuccessfulSayIt = (value: string, readerResult: SayItResult) => {
@@ -545,9 +582,9 @@ function App() {
               aria-pressed={!readerActive}
               onClick={() => {
                 setDrawerOpen(false);
-                setHistoryDrawerOpen(false);
+                setHistoryOpen(false);
+                setHistoryPreview(null);
                 setReaderPreferencesOpen(false);
-                setReaderArchiveOpen(false);
                 setReaderActive(false);
               }}
             >
@@ -559,9 +596,9 @@ function App() {
               aria-pressed={readerActive}
               onClick={() => {
                 setDrawerOpen(false);
-                setHistoryDrawerOpen(false);
+                setHistoryOpen(false);
+                setHistoryPreview(null);
                 setReaderPreferencesOpen(false);
-                setReaderArchiveOpen(false);
                 setReaderActive(true);
               }}
             >
@@ -571,29 +608,20 @@ function App() {
         </div>
         <div className="topbar-actions">
           <button
-            className={`icon-button utility-action ${
-              readerActive ? (readerArchiveOpen ? "is-active" : "") : historyDrawerOpen ? "is-active" : ""
-            }`}
+            className={`icon-button utility-action ${historyOpen ? "is-active" : ""}`}
             type="button"
-            title={readerActive ? "Reader history" : `History${historyItems.length > 0 ? ` · ${historyItems.length}` : ""}`}
+            title={`History · ${historyItems.length} expressions`}
             onClick={() => {
-              if (readerActive) {
-                setReaderPreferencesOpen(false);
-                setReaderArchiveOpen(true);
-                return;
-              }
               setDrawerOpen(false);
-              setHistoryDrawerOpen(true);
+              setReaderPreferencesOpen(false);
+              setHistoryPreview(null);
+              setHistoryOpen(true);
             }}
-            aria-expanded={readerActive ? readerArchiveOpen : historyDrawerOpen}
-            aria-label={
-              readerActive
-                ? "Open reader history"
-                : `Open history, ${historyItems.length} recent items`
-            }
+            aria-expanded={historyOpen}
+            aria-label={`Open history, ${historyItems.length} recent expressions`}
           >
             <HistoryIcon />
-            {!readerActive && historyItems.length > 0 && (
+            {historyItems.length > 0 && (
               <span className="saved-count">{historyItems.length}</span>
             )}
           </button>
@@ -605,7 +633,6 @@ function App() {
               aria-label="Open reading preferences"
               aria-expanded={readerPreferencesOpen}
               onClick={() => {
-                setReaderArchiveOpen(false);
                 setReaderPreferencesOpen(true);
               }}
             >
@@ -617,7 +644,7 @@ function App() {
               type="button"
               title={`Saved${savedItems.length > 0 ? ` · ${savedItems.length}` : ""}`}
               onClick={() => {
-                setHistoryDrawerOpen(false);
+                setHistoryOpen(false);
                 setDrawerOpen(true);
               }}
               aria-expanded={drawerOpen}
@@ -749,6 +776,7 @@ function App() {
       </main>
 
       <ReaderWorkspace
+        ref={readerRef}
         active={readerActive}
         pronunciationAccent={pronunciationPreferences.accent}
         copiedLabel={copiedLabel}
@@ -761,9 +789,8 @@ function App() {
         onSuccessfulSayIt={handleReaderSuccessfulSayIt}
         onSaveRetrieval={handleSaveReaderResult}
         preferencesOpen={readerPreferencesOpen}
-        archiveOpen={readerArchiveOpen}
         onClosePreferences={() => setReaderPreferencesOpen(false)}
-        onCloseArchive={() => setReaderArchiveOpen(false)}
+        onArchiveChange={setReaderArchive}
         renderSayItResult={(readerResult, readerInput, isSaved, onSave, readerIpaByKey) => (
           <ReaderResultBody
             result={readerResult}
@@ -782,63 +809,66 @@ function App() {
 
       {notice && <div className="toast" role="status">{notice}</div>}
 
-      {historyDrawerOpen && (
-        <div
-          className="drawer-layer history-layer"
-          role="presentation"
-          onMouseDown={() => setHistoryDrawerOpen(false)}
+      {historyPreview && (
+        <aside
+          className="history-preview drawer-layer"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Saved SayIt result"
         >
-          <aside
-            className="saved-drawer history-drawer"
-            aria-label="Recent interaction history"
-            role="dialog"
-            aria-modal="true"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
+          <div className="history-preview-card">
             <div className="drawer-header">
               <div>
-                <p className="eyebrow">Recent activity</p>
-                <h2>History</h2>
+                <p className="eyebrow">Saved SayIt result</p>
+                <h2>{historyTitle(historyPreview)}</h2>
               </div>
               <button
                 className="icon-button"
                 type="button"
-                aria-label="Close history"
-                onClick={() => setHistoryDrawerOpen(false)}
+                aria-label="Close preview"
+                onClick={() => setHistoryPreview(null)}
               >
                 ×
               </button>
             </div>
-            {historyItems.length === 0 ? (
-              <div className="drawer-empty">
-                <span className="empty-icon" aria-hidden="true">◷</span>
-                <p>Successful results will appear here automatically.</p>
-              </div>
-            ) : (
-              <ul className="saved-list history-list">
-                {historyItems.map((item) => (
-                  <li className="saved-list-item history-list-item" key={item.id}>
-                    <button
-                      className="saved-item history-item"
-                      type="button"
-                      onClick={() => handleRestoreHistory(item)}
-                    >
-                      <span className="history-item-meta">
-                        <span className="history-mode">{item.mode}</span>
-                        <time dateTime={item.created_at}>
-                          {formatHistoryTime(item.created_at)}
-                        </time>
-                      </span>
-                      <strong>{historyTitle(item)}</strong>
-                      <span>{historySummary(item)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </aside>
-        </div>
+            <ResultView
+              result={historyPreview.result}
+              isSaved={false}
+              copiedLabel={copiedLabel}
+              onCopy={handleCopy}
+              onSave={() => undefined}
+              onRetry={() => undefined}
+              onSpeak={handleSpeak}
+              speakingKey={speakingKey}
+              pronunciationErrorKey={pronunciationErrorKey}
+              pronunciationAccent={pronunciationPreferences.accent}
+              ipaByKey={ipaByKey}
+            />
+            <button
+              type="button"
+              className="secondary-button history-preview-open"
+              onClick={() => handleOpenExpressionInSayIt(historyPreview)}
+            >
+              Open in SayIt
+            </button>
+          </div>
+        </aside>
       )}
+
+      <HistoryDrawer
+        open={historyOpen}
+        mode={readerActive ? "reader" : "sayit"}
+        readingArticleOpen={readerArchive.displayedIssue !== null}
+        todayIssue={readerArchive.todayIssue}
+        archiveIssues={readerArchive.archiveIssues}
+        historyItems={historyItems}
+        onPreviewExpression={handlePreviewExpression}
+        onOpenExpression={handleOpenExpressionInSayIt}
+        onOpenReading={handleOpenReading}
+        onShowToday={handleHistoryShowToday}
+        onReadArticle={() => setHistoryOpen(false)}
+        onClose={() => setHistoryOpen(false)}
+      />
 
       {drawerOpen && (
         <div className="drawer-layer" role="presentation" onMouseDown={() => setDrawerOpen(false)}>

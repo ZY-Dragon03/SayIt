@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -92,6 +94,8 @@ export interface ReaderWorkspaceProps {
   onCopy: (text: string, label: string) => Promise<void>;
   onSpeak: (text: string, key: string) => void;
   onSuccessfulSayIt: (input: string, result: SayItResult) => void;
+  /** Report the Reading side of History so the shared drawer can show it. */
+  onArchiveChange: (snapshot: ReaderArchiveSnapshot) => void;
   renderSayItResult: (
     result: SayItResult,
     input: string,
@@ -102,9 +106,21 @@ export interface ReaderWorkspaceProps {
   ) => ReactNode;
   onSaveRetrieval: (input: string, result: SayItResult) => boolean;
   preferencesOpen?: boolean;
-  archiveOpen?: boolean;
   onClosePreferences?: () => void;
-  onCloseArchive?: () => void;
+}
+
+/** The Reading side of the shared History drawer. */
+export interface ReaderArchiveSnapshot {
+  todayIssue: DailyIssue | null;
+  archiveIssues: DailyIssue[];
+  /** The issue currently open, or null when the reading list is shown. */
+  displayedIssue: DailyIssue | null;
+}
+
+/** Operations the shared History drawer asks the open Reader to perform. */
+export interface ReaderWorkspaceHandle {
+  openArticle: (article: ReaderArticleSummary) => void;
+  showToday: () => void;
 }
 
 function defaultPreferences(): ReaderPreferences {
@@ -158,12 +174,6 @@ function safeExternalUrl(value: string | null | undefined): string | null {
   }
 }
 
-function readProgressLabel(state: ReaderArticleSummary["readState"]): string {
-  if (state === "READ") return "read";
-  if (state === "IN_PROGRESS") return "in progress";
-  return "unread";
-}
-
 function formatReadingMinutes(minutes: number | null | undefined): string {
   if (typeof minutes !== "number" || !Number.isFinite(minutes)) {
     return "Reading time unavailable";
@@ -189,7 +199,10 @@ function isActiveAttempt(attempt: RunAttempt): boolean {
   return isRunAttemptRunning(attempt);
 }
 
-export function ReaderWorkspace({
+export const ReaderWorkspace = forwardRef<
+  ReaderWorkspaceHandle,
+  ReaderWorkspaceProps
+>(function ReaderWorkspace({
   active,
   pronunciationAccent,
   copiedLabel,
@@ -200,13 +213,12 @@ export function ReaderWorkspace({
   onCopy,
   onSpeak,
   onSuccessfulSayIt,
+  onArchiveChange,
   renderSayItResult,
   onSaveRetrieval,
   preferencesOpen = false,
-  archiveOpen = false,
   onClosePreferences,
-  onCloseArchive,
-}: ReaderWorkspaceProps) {
+}, ref) {
   const [preferences, setPreferences] = useState<ReaderPreferences>(defaultPreferences);
   const [topicDraft, setTopicDraft] = useState("Politics, Economy, Finance, Geopolitics, Technology");
   const [todayIssue, setTodayIssue] = useState<DailyIssue | null>(null);
@@ -279,7 +291,7 @@ export function ReaderWorkspace({
     selectedArticleRef.current = selectedArticle;
   }, [selectedArticle]);
 
-  const displayedIssue = selectedIssue ?? todayIssue;  const issueArticles = displayedIssue?.articles ?? [];
+  const displayedIssue = selectedIssue ?? todayIssue;
   const paragraphs = articleResponse?.paragraphs ?? null;
 
   const refreshWorkspace = useCallback(async (restoreLastOpened: boolean) => {
@@ -363,6 +375,25 @@ export function ReaderWorkspace({
     return () => window.removeEventListener("scroll", remember);
   }, [active]);
 
+  /**
+   * Refresh the Today view and archive without disturbing the open article.
+   * Reader resumes the last opened article on activation, so this is what keeps
+   * a background scheduled run observable instead of showing stale data.
+   */
+  const refreshTodaySurface = useCallback(async () => {
+    const [todayResult, archiveResult] = await Promise.allSettled([
+      getTodayIssue(),
+      getReaderArchive(ARCHIVE_LIMIT),
+    ]);
+    if (todayResult.status === "fulfilled") {
+      setTodayIssue(todayResult.value.issue);
+      setActiveAttempt(todayResult.value.attempts.find(isActiveAttempt) ?? null);
+    }
+    if (archiveResult.status === "fulfilled") {
+      setArchiveIssues(archiveResult.value.issues);
+    }
+  }, []);
+
   useLayoutEffect(() => {
     if (!active) {
       if (wasActiveRef.current) {
@@ -375,10 +406,13 @@ export function ReaderWorkspace({
     wasActiveRef.current = true;
     if (alreadyReading) {
       window.scrollTo({ top: readerScrollRef.current, behavior: "auto" });
+      // Resuming an article must not skip today's state: a scheduled or
+      // catch-up run may have completed while Reader was in the background.
+      void refreshTodaySurface();
       return;
     }
     void refreshWorkspace(true);
-  }, [active, flushProgressWrites, refreshWorkspace]);
+  }, [active, flushProgressWrites, refreshTodaySurface, refreshWorkspace]);
 
   const loadArticle = useCallback(async (issue: DailyIssue, summary: ReaderArticleSummary) => {
     setSelectedIssue(issue);
@@ -796,34 +830,6 @@ export function ReaderWorkspace({
     setSayItError(null);
   };
 
-  const selectArchiveIssue = (issue: DailyIssue) => {
-    onCloseArchive?.();
-    setSelectedIssue(issue);
-    setSelectedArticle(null);
-    setArticleResponse(null);
-    setSelection(null);
-    setReaderSayItResult(null);
-    setPassiveCacheResult(false);
-  };
-
-  const selectPriorEdition = async (issue: DailyIssue, edition: number) => {
-    setWorkspaceError(null);
-    try {
-      const response = await getReaderEdition(issue.id, edition);
-      setSelectedIssue(response.issue);
-      setSelectedArticle(null);
-      setArticleResponse(null);
-      setSelection(null);
-      setReaderSayItResult(null);
-      setPassiveCacheResult(false);
-      onCloseArchive?.();
-    } catch (error) {
-      setWorkspaceError(
-        error instanceof Error ? error.message : "That archive edition could not be opened.",
-      );
-    }
-  };
-
   const uniqueArchiveIssues = useMemo(() => {
     const byDate = new Map<string, DailyIssue>();
     for (const issue of [todayIssue, ...archiveIssues]) {
@@ -831,6 +837,48 @@ export function ReaderWorkspace({
     }
     return [...byDate.values()].sort((a, b) => b.localDate.localeCompare(a.localDate));
   }, [archiveIssues, todayIssue]);
+
+  // Publish the Reading side of History to the shared drawer.
+  useEffect(() => {
+    onArchiveChange({
+      todayIssue,
+      archiveIssues: uniqueArchiveIssues,
+      displayedIssue: selectedArticle ? selectedIssue ?? todayIssue : null,
+    });
+  }, [onArchiveChange, selectedArticle, selectedIssue, todayIssue, uniqueArchiveIssues]);
+
+  // Opening a past article from History must load it here, without discarding
+  // the reading progress or the Reader's own state.
+  useImperativeHandle(
+    ref,
+    () => ({
+      openArticle: (nextArticle: ReaderArticleSummary) => {
+        const issue =
+          uniqueArchiveIssues.find((candidate) =>
+            candidate.articles.some((item) => item.id === nextArticle.id),
+          ) ?? todayIssue;
+        if (!issue) return;
+        // Honour the article the reader picked; an earlier edition may not have
+        // its body on hand, so fall back to that issue's first delivered one.
+        const chosen =
+          issue.articles.find((item) => item.id === nextArticle.id) ??
+          issue.articles.find((item) => item.contentStatus === "FULL_TEXT") ??
+          nextArticle;
+        void loadArticle(issue, chosen);
+      },
+      showToday: () => {
+        setSelectedIssue(null);
+        setSelectedArticle(null);
+        selectedArticleRef.current = null;
+        setArticleResponse(null);
+        setArticleError(null);
+        setSelection(null);
+        setReaderSayItResult(null);
+        setPassiveCacheResult(false);
+      },
+    }),
+    [loadArticle, todayIssue, uniqueArchiveIssues],
+  );
 
   const selectedSourceUrl = safeExternalUrl(
     selectedArticle?.accessibleUrl || selectedArticle?.originalUrl,
@@ -1139,85 +1187,9 @@ export function ReaderWorkspace({
           </aside>
         </div>
       )}
-      {archiveOpen && (
-        <div className="drawer-layer history-layer" role="presentation" onMouseDown={() => onCloseArchive?.()}>
-          <aside
-            className="saved-drawer history-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Reader archive"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="drawer-header">
-              <div>
-                <p className="eyebrow">Earlier reading</p>
-                <h2>History</h2>
-              </div>
-              <button className="icon-button" type="button" aria-label="Close reader history" onClick={() => onCloseArchive?.()}>
-                ×
-              </button>
-            </div>
-            {uniqueArchiveIssues.length > 0 ? (
-              <ul className="reader-archive-list">
-                {uniqueArchiveIssues.map((issue) => (
-                  <li key={`${issue.id}-${issue.edition}`}>
-                    <button
-                      type="button"
-                      className="reader-archive-date"
-                      onClick={() => {
-                        if (issue.id === todayIssue?.id && issue.edition === todayIssue.edition) {
-                          setSelectedIssue(null);
-                          onCloseArchive?.();
-                          return;
-                        }
-                        selectArchiveIssue(issue);
-                      }}
-                    >
-                      <span>{formatDate(issue.localDate)}</span>
-                      <span>
-                        {issue.articles.length > 0
-                          ? issue.articles
-                              .map((article) => `${article.title} · ${readProgressLabel(article.readState)}`)
-                              .join(" · ")
-                          : "No delivered articles"}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="drawer-empty">
-                <p>Earlier Daily Issues will collect here.</p>
-              </div>
-            )}
-            {displayedIssue?.priorEditions?.length ? (
-              <section className="reader-prior-editions" aria-label="Earlier editions">
-                <h3>Earlier editions</h3>
-                <ul className="reader-archive-list">
-                  {displayedIssue.priorEditions
-                    .slice()
-                    .sort((a, b) => b - a)
-                    .map((edition) => (
-                      <li key={edition}>
-                        <button
-                          type="button"
-                          className="reader-archive-date"
-                          onClick={() => void selectPriorEdition(displayedIssue, edition)}
-                        >
-                          <span>Edition {edition}</span>
-                          <span>{formatDate(displayedIssue.localDate)}</span>
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              </section>
-            ) : null}
-          </aside>
-        </div>
-      )}
     </main>
   );
-}
+});
 
 interface ReaderSelectionPopoverProps {
   selection: ReaderSelection;

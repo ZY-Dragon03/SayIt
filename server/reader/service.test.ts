@@ -577,6 +577,218 @@ describe("Reader collection lifecycle", () => {
     await service.stop();
   });
 
+  it("does not mark an occurrence completed when its run delivered nothing", async () => {
+    let current = new Date("2026-10-04T18:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([]));
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+
+    // The attempt itself finished, but the Daily Issue was not fulfilled, so the
+    // occurrence must stay inside its retry budget instead of claiming success.
+    expect(service.today().attempts[0]).toMatchObject({
+      state: "SUCCEEDED",
+      deliveredCount: 0,
+    });
+    expect(service.today().issue?.status).toBe("NOT_DELIVERED");
+    expect(service.today().occurrence).toMatchObject({
+      status: "RETRY_WAIT",
+      scheduledAttemptCount: 1,
+    });
+    expect(service.today().occurrence?.status).not.toBe("COMPLETED");
+
+    // The retry is bounded: two more attempts, then the occurrence is exhausted.
+    current = new Date("2026-10-04T18:05:00.000Z");
+    await service.pulse();
+    await service.waitForIdle();
+    expect(service.today().occurrence).toMatchObject({
+      status: "RETRY_WAIT",
+      scheduledAttemptCount: 2,
+    });
+
+    current = new Date("2026-10-04T18:20:00.000Z");
+    await service.pulse();
+    await service.waitForIdle();
+    expect(service.today().occurrence).toMatchObject({
+      status: "EXHAUSTED",
+      scheduledAttemptCount: 3,
+    });
+    expect(collect).toHaveBeenCalledTimes(3);
+    expect(service.today().issue?.status).toBe("NOT_DELIVERED");
+    await service.stop();
+  });
+
+  it("marks an occurrence completed only once its run fulfils the issue", async () => {
+    const current = new Date("2026-10-04T18:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+
+    expect(service.today().issue?.status).toBe("COMPLETE");
+    expect(service.today().occurrence).toMatchObject({
+      status: "COMPLETED",
+      scheduledAttemptCount: 1,
+    });
+    await service.stop();
+  });
+
+  it("recovers a run interrupted by a restart and lets catch-up proceed", async () => {
+    let current = new Date("2026-10-04T18:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const first = makeService(store, now, collect);
+    await first.service.start();
+    await first.service.waitForIdle();
+    expect(first.service.today().occurrence?.status).toBe("COMPLETED");
+
+    // A second day, with the process killed while its collection was running:
+    // the attempt is persisted as RUNNING and the occurrence as RUNNING.
+    current = new Date("2026-10-05T18:00:00.000Z");
+    await first.service.pulse();
+    await first.service.waitForIdle();
+    const runningId = "attempt:interrupted";
+    const secondIssue = store
+      .snapshot()
+      .issues.find((issue) => issue.localDate === "2026-10-05")!;
+    await store.update((state) => {
+      const occurrence = state.occurrences.find(
+        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
+      )!;
+      state.attempts.push({
+        id: runningId,
+        issueId: secondIssue.id,
+        edition: secondIssue.edition,
+        trigger: "scheduled" as const,
+        state: "RUNNING" as const,
+        startedAt: current.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: 0,
+        traceId: "trace:interrupted",
+      });
+      occurrence.status = "RUNNING";
+      occurrence.scheduledAttemptCount += 1;
+      occurrence.lastAttemptId = runningId;
+    });
+    await first.service.stop();
+
+    // Restarting the service must clear the orphaned run instead of blocking.
+    current = new Date("2026-10-05T18:02:00.000Z");
+    const second = makeService(store, now, collect);
+    await second.service.start();
+    await second.service.waitForIdle();
+
+    const recovered = store
+      .snapshot()
+      .attempts.find((attempt) => attempt.id === runningId);
+    expect(recovered).toMatchObject({ state: "FAILED", retryable: true });
+    expect(recovered?.completedAt).not.toBeNull();
+    expect(recovered?.failureReason).toContain("restart");
+    // The orphaned RUNNING marker is gone, and the interrupted run is not
+    // recorded as a delivery.
+    expect(
+      second.service.today().attempts.some((attempt) => attempt.state === "RUNNING"),
+    ).toBe(false);
+    expect(recovered?.deliveredCount).toBe(0);
+    await second.service.stop();
+  });
+
+  it("recovers an interrupted manual run without consuming its scheduling budget", async () => {
+    const current = new Date("2026-10-05T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+
+    // Let the service create today's occurrence, then stop it as a restart would.
+    const previous = makeService(store, now, collect);
+    await previous.service.start();
+    expect(previous.service.today().occurrence?.status).toBe("WAITING");
+    await previous.service.stop();
+
+    // A manual run was killed by a restart before the configured 18:00 time.
+    const manualId = "attempt:manual-interrupted";
+    await store.update((state) => {
+      const occurrence = state.occurrences.find(
+        (item) => item.localDate === "2026-10-05" && item.timezone === "UTC",
+      )!;
+      state.attempts.push({
+        id: manualId,
+        issueId: occurrence.id.replace("occurrence:", "issue:"),
+        edition: 1,
+        trigger: "manual" as const,
+        state: "RUNNING" as const,
+        startedAt: current.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: 0,
+        traceId: "trace:manual-interrupted",
+      });
+      occurrence.status = "RUNNING";
+      occurrence.lastAttemptId = manualId;
+    });
+
+    const service = makeService(store, now, collect);
+    await service.service.start();
+    await service.service.waitForIdle();
+
+    // Recovery restores scheduling: the interrupted manual run is cleared and,
+    // because it happened after the configured time, catch-up runs once and
+    // fulfils the issue. Only that scheduled catch-up consumes the retry budget,
+    // so the count is 1 rather than the 2 the manual attempt would have caused.
+    expect(service.service.today().occurrence).toMatchObject({
+      status: "COMPLETED",
+      scheduledAttemptCount: 1,
+    });
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(
+      service.service.today().attempts.some((attempt) => attempt.state === "RUNNING"),
+    ).toBe(false);
+    const recovered = store
+      .snapshot()
+      .attempts.find((attempt) => attempt.id === manualId);
+    expect(recovered).toMatchObject({ state: "FAILED", retryable: true });
+    await service.service.stop();
+  });
+
+  it("is idempotent when recovery runs again on already-recovered state", async () => {
+    const current = new Date("2026-10-05T18:02:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+
+    const first = makeService(store, now, collect);
+    await first.service.start();
+    await first.service.waitForIdle();
+    const afterFirst = store.snapshot().attempts.map((attempt) => ({
+      id: attempt.id,
+      state: attempt.state,
+      completedAt: attempt.completedAt,
+    }));
+    await first.service.stop();
+
+    // A second start with no new RUNNING attempt must not touch anything.
+    const second = makeService(store, now, collect);
+    await second.service.start();
+    await second.service.waitForIdle();
+    const afterSecond = store.snapshot().attempts.map((attempt) => ({
+      id: attempt.id,
+      state: attempt.state,
+      completedAt: attempt.completedAt,
+    }));
+    expect(afterSecond).toEqual(afterFirst);
+    await second.service.stop();
+  });
+
   it("keeps rejected and external candidates out of the delivered Daily Issue", async () => {
     const now = () => new Date("2026-10-04T09:00:00.000Z");
     const store = await createStore(now);
