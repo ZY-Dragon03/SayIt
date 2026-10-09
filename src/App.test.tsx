@@ -157,7 +157,19 @@ describe("SayIt shared result cache and Reader isolation", () => {
           return jsonResponse({ preferences: issue.target });
         }
         if (url === "/api/reader/issues/today") {
-          return jsonResponse({ issue, occurrence: null, attempts: [] });
+          return jsonResponse({
+            issue,
+            latest: {
+              date: issue.localDate,
+              issue,
+              occurrence: null,
+              delivered: true,
+              latestDeliveredDate: issue.localDate,
+            },
+            calendarDate: issue.localDate,
+            occurrence: null,
+            attempts: [],
+          });
         }
         if (url.startsWith("/api/reader/issues/archive")) {
           return jsonResponse({ issues: [issue] });

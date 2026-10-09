@@ -174,6 +174,9 @@ function App() {
     todayIssue: null,
     archiveIssues: [],
     displayedIssue: null,
+    viewState: "LATEST_ISSUE_LIST",
+    latestDate: null,
+    calendarDate: null,
   });
   const readerRef = useRef<ReaderWorkspaceHandle | null>(null);
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
@@ -620,7 +623,9 @@ function App() {
             onClick={() => {
               setDrawerOpen(false);
               setReaderPreferencesOpen(false);
-              closeHistory();
+              // Opening must be last: closing first clears any preview and must
+              // not overwrite the open flag in the same update.
+              setHistoryPreview(null);
               setHistoryOpen(true);
             }}
             aria-expanded={historyOpen}
@@ -865,13 +870,16 @@ function App() {
         open={historyOpen}
         mode={readerActive ? "reader" : "sayit"}
         readingArticleOpen={readerArchive.displayedIssue !== null}
+        readingLatestDate={readerArchive.latestDate}
+        readingIsHistorical={readerArchive.viewState === "VIEWING_HISTORICAL_ISSUE"}
+        calendarDate={readerArchive.calendarDate}
         todayIssue={readerArchive.todayIssue}
         archiveIssues={readerArchive.archiveIssues}
         historyItems={historyItems}
         onPreviewExpression={handlePreviewExpression}
         onOpenExpression={handleOpenExpressionInSayIt}
         onOpenReading={handleOpenReading}
-        onShowToday={handleHistoryShowToday}
+        onLatest={handleHistoryShowToday}
         onReadArticle={closeHistory}
         onClose={closeHistory}
       />

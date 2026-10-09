@@ -133,12 +133,35 @@ function createFetchMock() {
     const url = String(input);
     if (url === "/api/reader/preferences") return jsonResponse({ preferences });
     if (url === "/api/reader/issues/today") {
+      const current = regeneratedIssue ?? issue;
       return jsonResponse({
-        issue: regeneratedIssue ?? issue,
+        issue: current,
+        latest: {
+          date: current.localDate,
+          issue: current,
+          occurrence: {
+            id: "occurrence-2026-10-04",
+            localDate: current.localDate,
+            timezone: current.timezone,
+            localTime: "18:00",
+            scheduledAt: "2026-10-04T10:00:00.000Z",
+            status: "ALREADY_FULFILLED",
+            scheduledAttemptCount: 0,
+            maxScheduledAttempts: 3,
+            nextAttemptAt: null,
+            lastAttemptId: null,
+            updatedAt: "2026-10-04T10:00:00.000Z",
+          },
+          delivered: current.articles.some(
+            (item) => item.contentStatus === "FULL_TEXT",
+          ),
+          latestDeliveredDate: current.localDate,
+        },
+        calendarDate: current.localDate,
         occurrence: {
           id: "occurrence-2026-10-04",
-          localDate: issue.localDate,
-          timezone: issue.timezone,
+          localDate: current.localDate,
+          timezone: current.timezone,
           localTime: "18:00",
           scheduledAt: "2026-10-04T10:00:00.000Z",
           status: "ALREADY_FULFILLED",
@@ -329,6 +352,15 @@ describe("Reader workspace", () => {
     });
   }
 
+  /** Reader opens on the latest issue list; a test enters an article from it. */
+  async function openFirstArticle() {
+    const openArticle = [...container.querySelectorAll("button")].find((button) =>
+      button.classList.contains("reader-article-open"),
+    );
+    await act(async () => openArticle?.click());
+    await flush();
+  }
+
   it("starts hidden and does not load Reader service data before activation", async () => {
     await render();
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(true);
@@ -338,7 +370,7 @@ describe("Reader workspace", () => {
     await render();
     await flush();
     expect(container.querySelector(".reader-main")?.hasAttribute("hidden")).toBe(false);
-    expect(container.textContent).toContain("Today");
+    expect(container.textContent).toContain("Latest issue");
     expect(container.textContent).toContain("1.6 min");
     expect(container.textContent).not.toContain("Recent collection attempts");
     expect(container.textContent).not.toContain("Reading preferences");
@@ -351,11 +383,7 @@ describe("Reader workspace", () => {
     await render();
     await flush();
 
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
 
     originalInnerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
     originalScrollYDescriptor = Object.getOwnPropertyDescriptor(window, "scrollY");
@@ -441,6 +469,17 @@ describe("Reader workspace", () => {
     expect(storedProgress?.scrollRatio).toBeCloseTo(0.6529, 4);
     expect(storedProgress?.scrollTop).toBe(2549);
     expect(storedProgress?.firstVisibleParagraph).toBe(15);
+
+    // Reader reopens on the latest issue list: the persisted position is a
+    // bookmark offered there, not an instruction to re-enter the article.
+    expect(container.querySelector(".reader-article-body")).toBeNull();
+    const resume = container.querySelector<HTMLButtonElement>(".reader-resume-bookmark");
+    expect(resume, container.textContent?.slice(0, 200) ?? "").toBeTruthy();
+    expect(resume?.textContent).toContain(article.title);
+
+    // Choosing the bookmark restores that saved position.
+    await act(async () => resume?.click());
+    await flush();
     const restoration = vi.mocked(window.scrollTo).mock.calls.slice(-1)[0]?.[0] as
       | ScrollToOptions
       | undefined;
@@ -462,11 +501,7 @@ describe("Reader workspace", () => {
     await render();
     await flush();
 
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
 
     originalInnerHeightDescriptor = Object.getOwnPropertyDescriptor(window, "innerHeight");
     originalScrollYDescriptor = Object.getOwnPropertyDescriptor(window, "scrollY");
@@ -579,11 +614,7 @@ describe("Reader workspace", () => {
     await render();
     await flush();
 
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
     const backButton = [...container.querySelectorAll("button")].find((button) =>
       button.getAttribute("aria-label") === "Back to reading list",
     );
@@ -630,8 +661,7 @@ describe("Reader workspace", () => {
     expect(openArticle).toBeTruthy();
     await act(async () => openArticle?.click());
     await flush();
-    const paragraph = container.querySelector(".reader-article-body p")!;
-    const textNode = paragraph.firstChild!;
+    const paragraph = container.querySelector(".reader-article-body p")!;    const textNode = paragraph.firstChild!;
     const range = document.createRange();
     range.setStart(textNode, 6);
     range.setEnd(textNode, 9);
@@ -689,11 +719,7 @@ describe("Reader workspace", () => {
     props = { ...props, active: true };
     await render();
     await flush();
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
 
     const paragraphs = container.querySelectorAll(".reader-article-body p");
     expect(container.textContent).toContain("1.6 min");
@@ -750,11 +776,7 @@ describe("Reader workspace", () => {
     props = { ...props, active: true };
     await render();
     await flush();
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
 
     const title = container.querySelector("#reader-article-title")!;
     const textNode = title.firstChild!;
@@ -803,11 +825,7 @@ describe("Reader workspace", () => {
     props = { ...props, active: true };
     await render();
     await flush();
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
 
     const title = container.querySelector("#reader-article-title")!;
     const textNode = title.firstChild!;
@@ -845,11 +863,7 @@ describe("Reader workspace", () => {
     props = { ...props, active: true };
     await render();
     await flush();
-    const openArticle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes(article.title),
-    );
-    await act(async () => openArticle?.click());
-    await flush();
+    await openFirstArticle();
     const body = container.querySelector(".reader-article-body")!;
     await act(async () => body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
 

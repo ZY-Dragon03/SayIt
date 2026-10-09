@@ -1641,6 +1641,47 @@ summary:focus-visible {
   border-top: 1px solid var(--border);
 }
 
+/* One predictable way back to the latest issue, instead of a control per row. */
+.history-latest-action {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  margin: 12px 0 2px;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  cursor: pointer;
+}
+
+.history-latest-action:hover {
+  border-color: var(--border-strong);
+}
+
+/* A bookmark on the issue list: the reader chooses to resume, it never auto-opens. */
+.reader-resume-bookmark {
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  cursor: pointer;
+}
+
+.reader-resume-bookmark:hover {
+  border-color: var(--border-strong);
+}
+
 .history-issue-head {
   display: flex;
   align-items: center;

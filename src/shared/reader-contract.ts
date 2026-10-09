@@ -194,6 +194,8 @@ export const runAttemptTriggerSchema = z.enum([
   "scheduled",
   "catch-up",
   "regenerate",
+  /** An explicitly dated recovery of an earlier, unfulfilled issue. */
+  "backfill",
 ]);
 export type RunAttemptTrigger = z.infer<typeof runAttemptTriggerSchema>;
 
@@ -276,6 +278,25 @@ export const putPreferencesRequestSchema = z
 export const todayResponseSchema = z
   .object({
     issue: dailyIssueSchema.nullable(),
+    /**
+     * The issue the Reader should present as the latest scheduled one: the most
+     * recent date whose configured collection time has already passed. It is
+     * reported with its honesty flags so the UI never shows an older date as if
+     * it were the current one.
+     */
+    latest: z
+      .object({
+        date: z.string(),
+        issue: dailyIssueSchema.nullable(),
+        occurrence: occurrenceSchema.nullable(),
+        delivered: z.boolean(),
+        latestDeliveredDate: z.string().nullable(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    /** The current calendar date in the configured timezone. */
+    calendarDate: z.string().nullable().default(null),
     occurrence: occurrenceSchema.nullable(),
     attempts: z.array(runAttemptSchema),
   })

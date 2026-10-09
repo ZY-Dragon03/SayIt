@@ -99,6 +99,16 @@ export interface ReaderServiceOptions {
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   fetchArticle?: EditorialCollectorOptions["fetchArticle"];
   semanticClient?: JsonCompletionClient;
+  /**
+   * Whether this process owns future scheduled runs.
+   *
+   * Exactly one owner may exist: the Windows scheduled task. The development
+   * server still recovers interrupted runs and catches up an overdue date when
+   * it starts, but it must not arm its own timer, or a merely open browser
+   * would compete with the scheduled task. When false, `armTimer` never
+   * schedules work and a still-due occurrence is picked up by the task instead.
+   */
+  scheduleRuns?: boolean;
 }
 
 export class ReaderServiceError extends Error {
@@ -154,14 +164,38 @@ function normalizedArticleUrl(value: string): string {
   }
 }
 
+/** How many preceding days count for the cross-day duplicate check. */
+const DUPLICATE_WINDOW_DAYS = 7;
+
+function articleDayNumber(localDate: string): number {
+  return Math.floor(Date.parse(`${localDate}T00:00:00.000Z`) / 86_400_000);
+}
+
+function withinDays(candidateDate: string, issueDate: string, days: number): boolean {
+  const candidate = articleDayNumber(candidateDate);
+  const issue = articleDayNumber(issueDate);
+  if (!Number.isFinite(candidate) || !Number.isFinite(issue)) return false;
+  const gap = issue - candidate;
+  return gap > 0 && gap <= days;
+}
+
+/** Titles are compared ignoring case, punctuation and spacing noise. */
+function normalizedArticleTitle(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N} ]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 function emptyIssue(
   localDate: string,
   preferences: ReaderPreferences,
   now: Date,
   edition = 1,
   priorEditions: number[] = [],
-): DailyIssue {
-  return dailyIssueSchema.parse({
+): DailyIssue {  return dailyIssueSchema.parse({
     id: stableIssueId(localDate, preferences.timezone),
     localDate,
     timezone: preferences.timezone,
@@ -240,6 +274,31 @@ function deliveredReadingIssue(issue: DailyIssue): DailyIssue {
   const articles = issue.articles.filter(isFullText);
   if (articles.length === issue.articles.length) return issue;
   return { ...issue, articles };
+}
+
+function isFullTextIssue(issue: DailyIssue): boolean {
+  return issue.articles.some(isFullText);
+}
+
+/**
+ * The calendar date before `localDate`, taken from the days the store already
+ * knows about so no timezone arithmetic is invented here.
+ */
+function previousCalendarDate(
+  localDate: string,
+  state: ReturnType<ReaderStore["snapshot"]>,
+): string {
+  const known = new Set<string>();
+  for (const issue of state.issues) known.add(issue.localDate);
+  for (const occurrence of state.occurrences) known.add(occurrence.localDate);
+  known.delete(localDate);
+  let previous: string | null = null;
+  for (const candidate of known) {
+    if (candidate >= localDate) continue;
+    if (!previous || candidate > previous) previous = candidate;
+  }
+  // With no earlier day recorded, the previous day is the only sensible answer.
+  return previous ?? addLocalDays(localDate, -1);
 }
 
 function isSuitable(article: ArticleSummary, preferences: ReaderPreferences): boolean {
@@ -366,6 +425,7 @@ export class ReaderService {
   private readonly reopenArticle?: ArticleReopener;
   private readonly bodies = new Map<string, BodyRecord>();
   private readonly tasks = new Map<string, Promise<void>>();
+  private readonly scheduleRuns: boolean;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private started = false;
   private pulseQueue: Promise<void> = Promise.resolve();
@@ -373,6 +433,7 @@ export class ReaderService {
   constructor(options: ReaderServiceOptions = {}) {
     this.store = options.store ?? new ReaderStore();
     this.now = options.now ?? (() => new Date());
+    this.scheduleRuns = options.scheduleRuns ?? true;
     this.setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
     this.fetchArticle = options.fetchArticle ?? ((url) => safeFetchArticle(url));
@@ -508,17 +569,67 @@ export class ReaderService {
 
   today() {
     const state = this.requireStore().snapshot();
-    const date = localDateTime(this.now(), state.preferences.timezone).date;
-    const issue = currentIssue(state.issues, date, state.preferences.timezone);
+    const preferences = state.preferences;
+    const now = this.now();
+    const calendarDate = localDateTime(now, preferences.timezone).date;
+    const date = calendarDate;
+    const issue = currentIssue(state.issues, date, preferences.timezone);
     return {
       issue: issue ? deliveredReadingIssue(issue) : null,
+      latest: this.latestIssueStatus(state, now),
+      calendarDate,
       occurrence:
         state.occurrences.find(
-          (item) => item.localDate === date && item.timezone === state.preferences.timezone,
+          (item) => item.localDate === date && item.timezone === preferences.timezone,
         ) ?? null,
       attempts: state.attempts
-        .filter((attempt) => attempt.issueId === stableIssueId(date, state.preferences.timezone))
+        .filter((attempt) => attempt.issueId === stableIssueId(date, preferences.timezone))
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt)),
+    };
+  }
+
+  /**
+   * Which issue the Reader should present as "the latest scheduled issue".
+   *
+   * That is the most recent date whose configured collection time has already
+   * passed. Before today's collection time it is yesterday, so a failed or
+   * skipped run is reported honestly instead of showing an older date as if it
+   * were current.
+   */
+  private latestIssueStatus(
+    state: ReturnType<ReaderStore["snapshot"]>,
+    now: Date,
+  ): {
+    date: string;
+    issue: DailyIssue | null;
+    occurrence: Occurrence | null;
+    delivered: boolean;
+    latestDeliveredDate: string | null;
+  } {
+    const preferences = state.preferences;
+    const today = localDateTime(now, preferences.timezone).date;
+    const scheduledToday = resolveScheduledTime(
+      today,
+      preferences.collectionTime,
+      preferences.timezone,
+    ).getTime();
+    const date =
+      now.getTime() >= scheduledToday ? today : previousCalendarDate(today, state);
+    const issue = currentIssue(state.issues, date, preferences.timezone);
+    const occurrence =
+      state.occurrences.find(
+        (item) => item.localDate === date && item.timezone === preferences.timezone,
+      ) ?? null;
+    // The most recent issue that actually delivered readable articles, which may
+    // be an older date than the latest scheduled one.
+    const latestDelivered =
+      this.archive(60).find((candidate) => candidate.articles.some(isFullText)) ?? null;
+    return {
+      date,
+      issue: issue ? deliveredReadingIssue(issue) : null,
+      occurrence,
+      delivered: Boolean(issue && isFullTextIssue(issue)),
+      latestDeliveredDate: latestDelivered?.localDate ?? null,
     };
   }
 
@@ -534,6 +645,164 @@ export class ReaderService {
       .sort((left, right) => right.localDate.localeCompare(left.localDate))
       .slice(0, limit)
       .map(deliveredReadingIssue);
+  }
+
+  /**
+   * What one scheduled check decided, for the scheduler's own log.
+   *
+   * This is the observability the previous setup lacked: a missed or crashed
+   * schedule used to leave nothing behind but an unchanged state file.
+   */
+  todayDecision(): {
+    localDate: string;
+    occurrenceStatus: string | null;
+    occurrenceScheduledAt: string | null;
+    nextAttemptAt: string | null;
+    scheduledAttemptCount: number | null;
+    issueStatus: string | null;
+    deliveredCount: number;
+    runningAttemptId: string | null;
+    lastAttemptState: string | null;
+    lastAttemptReason: string | null;
+  } {
+    const state = this.requireStore().snapshot();
+    const preferences = state.preferences;
+    const date = localDateTime(this.now(), preferences.timezone).date;
+    const issueId = stableIssueId(date, preferences.timezone);
+    const issue = currentIssue(state.issues, date, preferences.timezone);
+    const occurrence =
+      state.occurrences.find(
+        (item) => item.localDate === date && item.timezone === preferences.timezone,
+      ) ?? null;
+    const attempts = state.attempts
+      .filter((item) => item.issueId === issueId)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+    const last = attempts[attempts.length - 1] ?? null;
+    return {
+      localDate: date,
+      occurrenceStatus: occurrence?.status ?? null,
+      occurrenceScheduledAt: occurrence?.scheduledAt ?? null,
+      nextAttemptAt: occurrence?.nextAttemptAt ?? null,
+      scheduledAttemptCount: occurrence?.scheduledAttemptCount ?? null,
+      issueStatus: issue?.status ?? null,
+      deliveredCount: issue?.actual.count ?? 0,
+      runningAttemptId:
+        state.attempts.find((item) => item.issueId === issueId && item.state === "RUNNING")
+          ?.id ?? null,
+      lastAttemptState: last?.state ?? null,
+      lastAttemptReason: last?.failureReason ?? null,
+    };
+  }
+
+  /**
+   * Recover one explicitly named historical issue through the normal collection
+   * path.
+   *
+   * Only an unfulfilled day can be recovered, and the recovered articles are
+   * discovered now and belong to the issue of the date that is named here, so
+   * nothing is misdated and a completed earlier issue is never overwritten.
+   */
+  async backfillIssue(localDate: string): Promise<{
+    localDate: string;
+    issueStatus: string | null;
+    deliveredCount: number;
+    attemptId: string | null;
+    refusal: string | null;
+  }> {
+    this.assertStarted();
+    const state = this.store.snapshot();
+    const preferences = state.preferences;
+    const issue = currentIssue(state.issues, localDate, preferences.timezone);
+    if (issue && issue.status === "COMPLETE" && issue.actual.count > 0) {
+      return {
+        localDate,
+        issueStatus: issue.status,
+        deliveredCount: issue.actual.count,
+        attemptId: null,
+        refusal: "This issue is already fulfilled; backfill never replaces it.",
+      };
+    }
+
+    const trigger: RunAttemptTrigger = "backfill";
+    const now = this.now();
+    const issueId = stableIssueId(localDate, preferences.timezone);
+    const started = await this.store.update((next) => {
+      let target = currentIssue(next.issues, localDate, preferences.timezone);
+      if (!target) {
+        target = emptyIssue(localDate, preferences, now);
+        next.issues.push(target);
+      }
+      let occurrence = next.occurrences.find(
+        (item) => item.localDate === localDate && item.timezone === preferences.timezone,
+      );
+      if (!occurrence) {
+        occurrence = occurrenceSchema.parse({
+          id: occurrenceId(localDate, preferences.timezone),
+          localDate,
+          timezone: preferences.timezone,
+          localTime: preferences.collectionTime,
+          scheduledAt: resolveScheduledTime(
+            localDate,
+            preferences.collectionTime,
+            preferences.timezone,
+          ).toISOString(),
+          status: "WAITING",
+          scheduledAttemptCount: 0,
+          maxScheduledAttempts: 3,
+          nextAttemptAt: null,
+          lastAttemptId: null,
+          updatedAt: now.toISOString(),
+        });
+        next.occurrences.push(occurrence);
+      }
+      if (
+        next.attempts.some(
+          (item) => item.issueId === issueId && item.state === "RUNNING",
+        )
+      ) {
+        return null;
+      }
+      const attempt = runAttemptSchema.parse({
+        id: createId("attempt"),
+        issueId,
+        edition: target.edition,
+        trigger,
+        state: "RUNNING",
+        startedAt: now.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: target.actual.count,
+        traceId: createId("trace"),
+      });
+      next.attempts.push(attempt);
+      occurrence.lastAttemptId = attempt.id;
+      occurrence.updatedAt = now.toISOString();
+      return { attempt, issue: target, preferences: next.preferences };
+    });
+
+    if (!started) {
+      return {
+        localDate,
+        issueStatus: issue?.status ?? null,
+        deliveredCount: issue?.actual.count ?? 0,
+        attemptId: null,
+        refusal: "A collection for this issue is already running.",
+      };
+    }
+    await this.collectAndRecord(started);
+    const after = currentIssue(
+      this.store.snapshot().issues,
+      localDate,
+      preferences.timezone,
+    );
+    return {
+      localDate,
+      issueStatus: after?.status ?? null,
+      deliveredCount: after?.actual.count ?? 0,
+      attemptId: started.attempt.id,
+      refusal: null,
+    };
   }
 
   edition(issueId: string, edition: number): DailyIssue | null {
@@ -950,6 +1219,32 @@ export class ReaderService {
             normalizedArticleUrl(article.accessibleUrl),
           ]),
         );
+        // Bounded cross-day duplicate check: today's issue should not re-deliver
+        // an article an earlier Daily Issue already used, even when the readable
+        // title changed or the URL gained tracking parameters.
+        const recentArticleIds = new Set<string>();
+        const recentTitles = new Set<string>();
+        const recentlyRead = new Set(
+          [...state.issues]
+            .filter(
+              (candidate) =>
+                candidate.id !== issue.id &&
+                candidate.localDate < issue.localDate &&
+                withinDays(candidate.localDate, issue.localDate, DUPLICATE_WINDOW_DAYS),
+            )
+            .map((candidate) => candidate.localDate),
+        );
+        for (const candidate of state.issues) {
+          if (!recentlyRead.has(candidate.localDate)) continue;
+          for (const delivered of candidate.articles) {
+            if (!isFullText(delivered)) continue;
+            recentArticleIds.add(delivered.id);
+            selectedUrls.add(normalizedArticleUrl(delivered.originalUrl));
+            selectedUrls.add(normalizedArticleUrl(delivered.accessibleUrl));
+            const title = normalizedArticleTitle(delivered.title);
+            if (title) recentTitles.add(title);
+          }
+        }
         for (const candidate of result.articles) {
           const summary = scopeSummary(candidate, issue.id, issue.edition);
           if (!isSuitable(summary, started.preferences)) continue;
@@ -958,12 +1253,17 @@ export class ReaderService {
             normalizedArticleUrl(summary.accessibleUrl),
           ];
           if (urlKeys.some((key) => selectedUrls.has(key))) continue;
+          if (recentArticleIds.has(summary.id)) continue;
+          const title = normalizedArticleTitle(summary.title);
+          if (title && recentTitles.has(title)) continue;
           if (selected.length >= started.preferences.dailyArticleCount) break;
           const elapsed = selected.reduce((total, article) => total + article.wordCount / 200, 0);
           const duration = summary.wordCount / 200;
           if (elapsed + duration > started.preferences.readingBudgetMinutes) continue;
           selected.push(summary);
           urlKeys.forEach((key) => selectedUrls.add(key));
+          if (title) recentTitles.add(title);
+          recentArticleIds.add(summary.id);
           if (candidate.paragraphs?.length && candidate.bodyHash) {
             bodyRecords.push({ summary, body: { paragraphs: candidate.paragraphs, bodyHash: candidate.bodyHash } });
           }
@@ -1184,6 +1484,10 @@ export class ReaderService {
   private armTimer(): void {
     if (!this.started) return;
     if (this.timer) this.clearTimer(this.timer);
+    this.timer = undefined;
+    // A process that does not own scheduling still serves the UI and still
+    // recovers on startup, but it never arms a competing timer.
+    if (!this.scheduleRuns) return;
     const state = this.store.snapshot();
     const preferences = state.preferences;
     const now = this.now();

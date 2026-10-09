@@ -135,7 +135,19 @@ describe("Today auto-refresh while Reader is open", () => {
         }
         if (url === "/api/reader/issues/today") {
           todayCalls += 1;
-          return jsonResponse({ issue: currentIssue, occurrence: null, attempts: [] });
+          return jsonResponse({
+            issue: currentIssue,
+            latest: {
+              date: currentIssue.localDate,
+              issue: currentIssue,
+              occurrence: null,
+              delivered: true,
+              latestDeliveredDate: currentIssue.localDate,
+            },
+            calendarDate: currentIssue.localDate,
+            occurrence: null,
+            attempts: [],
+          });
         }
         if (url.startsWith("/api/reader/issues/archive")) {
           return jsonResponse({ issues: [currentIssue] });

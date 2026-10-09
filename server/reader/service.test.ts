@@ -521,38 +521,56 @@ describe("Reader collection lifecycle", () => {
     await service.stop();
   });
 
-  it("scopes article identity across dates when the same original URL is delivered again", async () => {
+  it("does not re-deliver yesterday's article, but allows it again beyond the bounded window", async () => {
     let current = new Date("2026-10-04T09:00:00.000Z");
     const now = () => new Date(current);
     const store = await createStore(now);
-    const collect = vi
-      .fn<EditorialCollector>()
-      .mockResolvedValueOnce(collection([article({ paragraphs: ["Day one body."], bodyHash: "1".repeat(64) })]))
-      .mockResolvedValueOnce(collection([article({ paragraphs: ["Day two body."], bodyHash: "2".repeat(64) })]));
+    const collect = vi.fn<EditorialCollector>(async () => collection([article()]));
     const { service } = makeService(store, now, collect);
 
     await service.start();
-    const firstRun = await service.startManualRun("manual");
+    await service.startManualRun("manual");
     await service.waitForIdle();
     const firstArticle = service.today().issue!.articles[0]!;
+    expect(firstArticle.originalUrl).toBe(article().originalUrl);
 
+    // The next day returns the very same article: it must not be re-delivered,
+    // even when the readable title picked up extra wording.
     current = new Date("2026-10-05T09:00:00.000Z");
     await service.pulse();
-    const secondRun = await service.startManualRun("manual");
+    await service.startManualRun("manual");
     await service.waitForIdle();
-    const secondArticle = service.today().issue!.articles[0]!;
+    expect(service.today().issue?.articles ?? []).toHaveLength(0);
+    expect(service.today().issue?.status).toBe("NOT_DELIVERED");
+    expect(service.today().issue?.unmetConstraints.join(" ")).toContain(
+      "Verified full-text article count is 0 of 1",
+    );
 
-    expect(secondRun.issue.id).not.toBe(firstRun.issue.id);
-    expect(firstArticle.originalUrl).toBe(secondArticle.originalUrl);
-    expect(firstArticle.id).not.toBe(secondArticle.id);
-    await expect(service.article(firstArticle.id, 1)).resolves.toMatchObject({
-      article: { id: firstArticle.id },
-      paragraphs: ["Day one body."],
-    });
-    await expect(service.article(secondArticle.id, 1)).resolves.toMatchObject({
-      article: { id: secondArticle.id },
-      paragraphs: ["Day two body."],
-    });
+    // A genuinely different article is still delivered the same day.
+    collect.mockImplementation(async () =>
+      collection([
+        article({
+          id: "article-technology-2",
+          title: "Grid storage changes the energy market",
+          originalUrl: "https://news.example/story/storage",
+          accessibleUrl: "https://news.example/story/storage",
+        }),
+      ]),
+    );
+    await service.startManualRun("regenerate", true);
+    await service.waitForIdle();
+    expect(service.today().issue?.articles[0]?.title).toBe(
+      "Grid storage changes the energy market",
+    );
+
+    // Far enough in the future the bounded window no longer applies.
+    collect.mockImplementation(async () => collection([article()]));
+    current = new Date("2026-10-13T09:00:00.000Z");
+    await service.pulse();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    expect(service.today().issue?.articles[0]?.originalUrl).toBe(article().originalUrl);
+    expect(service.today().issue?.articles[0]?.id).not.toBe(firstArticle.id);
     await service.stop();
   });
 
@@ -910,6 +928,70 @@ describe("Reader collection lifecycle", () => {
     }));
     expect(afterSecond).toEqual(afterFirst);
     await second.service.stop();
+  });
+
+  it("never arms its own timer when scheduling belongs to the Windows task", async () => {
+    let current = new Date("2026-10-04T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const timers = fakeTimers();
+    const service = new ReaderService({
+      store,
+      now,
+      collect,
+      scheduleRuns: false,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      reopenArticle: async () => ({ article: null, reason: "offline" }),
+    });
+
+    await service.start();
+    // Before the configured time nothing runs, and no timer is armed, so an open
+    // browser cannot compete with the scheduled task.
+    expect(collect).not.toHaveBeenCalled();
+    expect(timers.callbacks).toHaveLength(0);
+    expect(service.today().occurrence).toMatchObject({
+      status: "WAITING",
+      scheduledAt: "2026-10-04T18:00:00.000Z",
+    });
+
+    // The due check itself still works: the task drives it when it fires.
+    current = new Date("2026-10-04T18:00:00.000Z");
+    await service.pulse();
+    await service.waitForIdle();
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(service.today().occurrence).toMatchObject({ status: "COMPLETED" });
+    expect(timers.callbacks).toHaveLength(0);
+    await service.stop();
+  });
+
+  it("arms its own timer when this process owns scheduling", async () => {
+    const current = new Date("2026-10-04T09:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const timers = fakeTimers();
+    const events: string[] = [];
+    const service = new ReaderService({
+      store,
+      now,
+      collect,
+      scheduleRuns: true,
+      setTimer: (callback, delay) => {
+        events.push(`arm:${delay}`);
+        return timers.setTimer(callback, delay);
+      },
+      clearTimer: timers.clearTimer,
+      reopenArticle: async () => ({ article: null, reason: "offline" }),
+    });
+
+    await service.start();
+    expect(collect).not.toHaveBeenCalled();
+    // The owner process arms exactly one wake-up for the configured time.
+    expect(events.filter((event) => event.startsWith("arm:"))).toHaveLength(1);
+    expect(events[0]).toBe(`arm:${Date.parse("2026-10-04T18:00:00.000Z") - current.getTime()}`);
+    await service.stop();
   });
 
   it("keeps rejected and external candidates out of the delivered Daily Issue", async () => {

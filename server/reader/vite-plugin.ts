@@ -10,11 +10,19 @@ export interface ReaderServicePluginOptions {
 }
 
 /**
- * Starts the local Reader scheduler with the SayIt Vite service, independent of
+ * Starts the local Reader service with the SayIt Vite service, independent of
  * whether the Reader workspace is mounted or visible in the browser.
+ *
+ * This process is NOT the scheduler: future scheduled runs belong to the
+ * Windows scheduled task (`server/reader/scheduler-main.ts`). The service here
+ * still recovers interrupted runs, still catches up an already-overdue date at
+ * startup, and still serves manual runs, but it never arms a competing timer, so
+ * a merely open browser neither blocks nor duplicates the daily collection.
  */
 export function readerServicePlugin(options: ReaderServicePluginOptions = {}): Plugin {
-  const service = options.service ?? new ReaderService(options.serviceOptions);
+  const service =
+    options.service ??
+    new ReaderService({ scheduleRuns: false, ...options.serviceOptions });
   const handleReader = createReaderHandler(service);
   const enableProxy = options.enableProxy ?? enableProxyFromEnvironment;
 

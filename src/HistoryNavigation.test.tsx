@@ -139,7 +139,19 @@ describe("shared History navigation", () => {
           return jsonResponse({ preferences: issue.target });
         }
         if (url === "/api/reader/issues/today") {
-          return jsonResponse({ issue, occurrence: null, attempts: [] });
+          return jsonResponse({
+            issue,
+            latest: {
+              date: issue.localDate,
+              issue,
+              occurrence: null,
+              delivered: true,
+              latestDeliveredDate: issue.localDate,
+            },
+            calendarDate: "2026-10-09",
+            occurrence: null,
+            attempts: [],
+          });
         }
         if (url.startsWith("/api/reader/issues/archive")) {
           return jsonResponse({ issues: [issue] });
@@ -265,7 +277,9 @@ describe("shared History navigation", () => {
     expect(
       historyDrawer()?.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
     ).toContain("Reading");
-    expect(historyDrawer()?.textContent).toContain("Today");
+    // The latest scheduled issue is present, plainly dated, and offered by the
+    // one global Latest action rather than a Today button on every row.
+    expect(historyDrawer()?.textContent).toContain("Latest · Oct 8, 2026");
     expect(historyDrawer()?.textContent).toContain(article.title);
   });
 
@@ -374,6 +388,59 @@ describe("shared History navigation", () => {
     expect(container.querySelector(".result-card")?.textContent).toContain(
       "She approached the problem psychologically.",
     );
+  });
+
+  it("stays on the latest issue list across a SayIt round trip", async () => {
+    await render();
+    await act(async () => buttonByText("Reader")?.click());
+    await flush();
+    expect(container.querySelector(".reader-heading-row .reader-eyebrow")?.textContent).toBe(
+      "Latest issue",
+    );
+    expect(container.querySelector(".reader-article-body")).toBeNull();
+
+    await act(async () => buttonByText("SayIt")?.click());
+    await act(async () => buttonByText("Reader")?.click());
+    await flush();
+
+    // No stale last-opened article is resurrected by the persisted pointer.
+    expect(container.querySelector(".reader-article-body")).toBeNull();
+    expect(container.querySelector(".reader-heading-row .reader-eyebrow")?.textContent).toBe(
+      "Latest issue",
+    );
+  });
+
+  it("shows one Latest action in History instead of a Today button per date", async () => {
+    await render();
+    await act(async () => buttonByText("Reader")?.click());
+    await flush();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    await act(async () => buttonByLabel(openHistory)?.click());
+    await flush();
+
+    const historyButton = [...container.querySelectorAll("button")].find((button) =>
+      button.getAttribute("aria-label")?.startsWith("Open history"),
+    );
+    await act(async () => historyButton?.click());
+    await flush();
+
+    const drawer = historyDrawer();
+    expect(drawer).toBeTruthy();
+    const latestActions = drawer!.querySelectorAll(".history-latest-action");
+    expect(latestActions).toHaveLength(1);
+    expect(latestActions[0].textContent).toContain("Oct 8, 2026");
+    // No repetitive per-date Today button, and no row claims to be Today when
+    // the calendar date is another day.
+    const perDateToday = [...drawer!.querySelectorAll(".history-issue-head button")].filter(
+      (button) => button.textContent?.trim() === "Today",
+    );
+    expect(perDateToday).toHaveLength(0);
+    expect(drawer!.querySelector(".history-issue-head")?.textContent).not.toContain(
+      "Today",
+    );
+    expect(drawer!.querySelector(".history-issue-head")?.textContent).toContain("Latest");
   });
 
   it("keeps one stable History icon position in both modes", async () => {

@@ -10,6 +10,11 @@ export interface HistoryDrawerProps {
   mode: "sayit" | "reader";
   /** True while the Reader workspace is showing an open article. */
   readingArticleOpen: boolean;
+  /** The reading issue Reader presents as latest, and whether an earlier one is open. */
+  readingLatestDate: string | null;
+  readingIsHistorical: boolean;
+  /** Current calendar date in the configured timezone, when known. */
+  calendarDate: string | null;
   todayIssue: DailyIssue | null;
   archiveIssues: DailyIssue[];
   historyItems: HistoryRecord[];
@@ -17,7 +22,8 @@ export interface HistoryDrawerProps {
   onPreviewExpression: (record: HistoryRecord) => void;
   onOpenExpression: (record: HistoryRecord) => void;
   onOpenReading: (article: ReaderArticleSummary) => void;
-  onShowToday: () => void;
+  /** Return the Reader to the latest issue list. */
+  onLatest: () => void;
   onReadArticle: () => void;
   onClose: () => void;
 }
@@ -63,13 +69,16 @@ export function HistoryDrawer({
   open,
   mode,
   readingArticleOpen,
+  readingLatestDate,
+  readingIsHistorical,
+  calendarDate,
   todayIssue,
   archiveIssues,
   historyItems,
   onPreviewExpression,
   onOpenExpression,
   onOpenReading,
-  onShowToday,
+  onLatest,
   onReadArticle,
   onClose,
 }: HistoryDrawerProps) {
@@ -77,6 +86,8 @@ export function HistoryDrawer({
     mode === "reader" ? "reading" : "expressions",
   );
   const wasOpenRef = useRef(false);
+  void readingArticleOpen;
+  const latestDate = readingLatestDate;
 
   // Follow the active mode when the drawer is opened, but never while it is
   // already open: switching sections must not fight the reader.
@@ -100,7 +111,6 @@ export function HistoryDrawer({
   const readingIssues = [...byDate.values()].sort((left, right) =>
     right.localDate.localeCompare(left.localDate),
   );
-  const todayDate = todayIssue?.localDate ?? null;
 
   const openExpression = (record: HistoryRecord) => {
     if (mode === "reader") {
@@ -163,48 +173,61 @@ export function HistoryDrawer({
 
         {section === "reading" ? (
           readingIssues.length > 0 ? (
-            <ul className="reader-archive-list history-reading-list">
-              {readingIssues.map((issue) => {
-                const isToday = issue.localDate === todayDate;
-                return (
-                  <li key={`${issue.id}-${issue.edition}`}>
-                    <div className="history-issue-head">
-                      <span>{isToday ? `Today · ${formatDate(issue.localDate)}` : formatDate(issue.localDate)}</span>
-                      {!isToday && (
-                        <button
-                          type="button"
-                          className="history-inline-action"
-                          onClick={onShowToday}
-                        >
-                          Today
-                        </button>
+            <>
+              {latestDate && (
+                <button
+                  type="button"
+                  className="history-latest-action"
+                  onClick={onLatest}
+                >
+                  {readingIsHistorical
+                    ? `Back to latest · ${formatDate(latestDate)}`
+                    : `Latest · ${formatDate(latestDate)}`}
+                </button>
+              )}
+              <ul className="reader-archive-list history-reading-list">
+                {readingIssues.map((issue) => {
+                  // Only the actual current calendar date is labelled Today; a
+                  // date heading otherwise shows the issue's own date.
+                  const isCalendarToday = Boolean(
+                    calendarDate && issue.localDate === calendarDate,
+                  );
+                  const isLatest = Boolean(latestDate && issue.localDate === latestDate);
+                  return (
+                    <li key={`${issue.id}-${issue.edition}`}>
+                      <div className="history-issue-head">
+                        <span>
+                          {formatDate(issue.localDate)}
+                          {isCalendarToday ? " · Today" : ""}
+                          {isLatest ? " · Latest" : ""}
+                        </span>
+                      </div>
+                      {issue.articles.length > 0 ? (
+                        <ul className="history-article-list">
+                          {issue.articles.map((article) => (
+                            <li key={article.id}>
+                              <button
+                                type="button"
+                                className="reader-archive-date"
+                                onClick={() => onOpenReading(article)}
+                              >
+                                <span>{article.title}</span>
+                                <span>
+                                  {article.originalPublication || article.accessiblePublication || "Publisher unknown"}
+                                  {` · ${article.readState === "READ" ? "read" : article.readState === "IN_PROGRESS" ? "in progress" : "unread"}`}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="history-issue-empty">No delivered articles</p>
                       )}
-                    </div>
-                    {issue.articles.length > 0 ? (
-                      <ul className="history-article-list">
-                        {issue.articles.map((article) => (
-                          <li key={article.id}>
-                            <button
-                              type="button"
-                              className="reader-archive-date"
-                              onClick={() => onOpenReading(article)}
-                            >
-                              <span>{article.title}</span>
-                              <span>
-                                {article.originalPublication || article.accessiblePublication || "Publisher unknown"}
-                                {` · ${article.readState === "READ" ? "read" : article.readState === "IN_PROGRESS" ? "in progress" : "unread"}`}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="history-issue-empty">No delivered articles</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : (
             <div className="drawer-empty">
               <p>Daily Issues will collect here.</p>

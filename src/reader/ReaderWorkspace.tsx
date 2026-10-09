@@ -50,6 +50,7 @@ import type {
   ReaderDifficulty,
   ReaderPreferences,
   RunAttempt,
+  TodayIssueResponse,
 } from "./types";
 
 const READER_POINTER_KEY = "sayit.reader.last-opened.v1";
@@ -60,6 +61,11 @@ const PROGRESS_SAVE_DELAY_MS = 500;
 const SCROLL_ANCHOR_PX = 128;
 /** How often an open Reader re-reads Today while no run is being polled. */
 const TODAY_REFRESH_INTERVAL_MS = 15_000;
+
+/** Session-scoped key for an article body already loaded in this workspace. */
+function articleCacheKey(articleId: string, edition: number): string {
+  return `${articleId}|${edition}`;
+}
 /** Horizontal breathing room kept between the popover and the viewport edge. */
 const POPOVER_VIEWPORT_MARGIN = 12;
 const POPOVER_GAP_PX = 8;
@@ -117,7 +123,25 @@ export interface ReaderArchiveSnapshot {
   archiveIssues: DailyIssue[];
   /** The issue currently open, or null when the reading list is shown. */
   displayedIssue: DailyIssue | null;
+  /** Reader's explicit view state, so History can name where the reader is. */
+  viewState: ReaderViewState;
+  /** Date the latest-issue list represents; the single Latest target. */
+  latestDate: string | null;
+  /** Current calendar date in the configured timezone, when known. */
+  calendarDate: string | null;
 }
+
+/** Which issue Reader presents as the latest scheduled one. */
+export type LatestIssueStatus = NonNullable<TodayIssueResponse["latest"]>;
+
+/**
+ * Reader's explicit view states. The workspace is either offering the latest
+ * issue list, reading an article, or showing an earlier issue's list.
+ */
+export type ReaderViewState =
+  | "LATEST_ISSUE_LIST"
+  | "READING_ARTICLE"
+  | "VIEWING_HISTORICAL_ISSUE";
 
 /** Operations the shared History drawer asks the open Reader to perform. */
 export interface ReaderWorkspaceHandle {
@@ -225,6 +249,10 @@ export const ReaderWorkspace = forwardRef<
   const [topicDraft, setTopicDraft] = useState("Politics, Economy, Finance, Geopolitics, Technology");
   const [todayIssue, setTodayIssue] = useState<DailyIssue | null>(null);
   const [archiveIssues, setArchiveIssues] = useState<DailyIssue[]>([]);
+  const [latestIssue, setLatestIssue] = useState<LatestIssueStatus | null>(null);
+  const [calendarDate, setCalendarDate] = useState<string | null>(null);
+  /** The bookmark offered on the issue list; never entered automatically. */
+  const [resumableArticle, setResumableArticle] = useState<ReaderArticleSummary | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<DailyIssue | null>(null);
   const [articleResponse, setArticleResponse] = useState<ReaderArticleResponse | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<ReaderArticleSummary | null>(null);
@@ -266,7 +294,13 @@ export const ReaderWorkspace = forwardRef<
   const progressWriteRef = useRef<Promise<void>>(Promise.resolve());
   const restorePendingRef = useRef(false);
   const wasActiveRef = useRef(false);
+  /** True while the SayIt workspace owns the screen. */
+  const inactiveRef = useRef(!active);
   const readerScrollRef = useRef(0);
+  /** Article bodies loaded in this session, so reopening does not refetch. */
+  const articleBodyCacheRef = useRef(
+    new Map<string, ReaderArticleResponse>(),
+  );
 
   const enqueueProgressWrite = useCallback((nextProgress: ArticleProgress) => {
     const nextWrite = progressWriteRef.current
@@ -296,6 +330,16 @@ export const ReaderWorkspace = forwardRef<
   const displayedIssue = selectedIssue ?? todayIssue;
   const paragraphs = articleResponse?.paragraphs ?? null;
 
+  /**
+   * Reader's explicit view state: reading an article, looking at an earlier
+   * issue's list, or on the latest issue list.
+   */
+  const viewState: ReaderViewState = selectedArticle
+    ? "READING_ARTICLE"
+    : selectedIssue && selectedIssue.localDate !== (latestIssue?.date ?? calendarDate)
+      ? "VIEWING_HISTORICAL_ISSUE"
+      : "LATEST_ISSUE_LIST";
+
   const refreshWorkspace = useCallback(async (restoreLastOpened: boolean) => {
     setWorkspaceLoading(true);
     setWorkspaceError(null);
@@ -315,6 +359,8 @@ export const ReaderWorkspace = forwardRef<
     if (todayResult.status === "fulfilled") {
       nextToday = todayResult.value.issue;
       setTodayIssue(nextToday);
+      setLatestIssue(todayResult.value.latest);
+      setCalendarDate(todayResult.value.calendarDate);
       const running = todayResult.value.attempts.find(isActiveAttempt) ?? null;
       setActiveAttempt(running);
     } else {
@@ -331,37 +377,14 @@ export const ReaderWorkspace = forwardRef<
 
     setWorkspaceLoading(false);
     if (restoreLastOpened) {
+      // A persisted pointer is a bookmark, not an instruction to enter an
+      // article. Reader opens on the latest issue list, and the pointer is
+      // offered there as a clearly labelled way back into the last article.
       const pointer = readPointer();
       if (pointer) {
-        const matchingIssue =
-          [nextToday, ...nextArchive].find(
-            (issue): issue is DailyIssue =>
-              issue !== null &&
-              (issue.id === pointer.issueId || issue.localDate === pointer.localDate),
-          ) ?? null;
-        if (matchingIssue) {
-          if (matchingIssue.edition === pointer.edition) {
-            setSelectedIssue(matchingIssue);
-            setSelectedArticle(pointer.article);
-            restorePendingRef.current = true;
-            void loadArticle(matchingIssue, pointer.article);
-          } else {
-            void getReaderEdition(matchingIssue.id, pointer.edition)
-              .then(({ issue }) => {
-                setSelectedIssue(issue);
-                setSelectedArticle(pointer.article);
-                restorePendingRef.current = true;
-                void loadArticle(issue, pointer.article);
-              })
-              .catch((error) => {
-                setWorkspaceError(
-                  error instanceof Error
-                    ? error.message
-                    : "The previous Reader edition could not be restored.",
-                );
-              });
-          }
-        }
+        setResumableArticle(pointer.article);
+      } else {
+        setResumableArticle(null);
       }
     }
   }, []);
@@ -389,6 +412,8 @@ export const ReaderWorkspace = forwardRef<
     ]);
     if (todayResult.status === "fulfilled") {
       setTodayIssue(todayResult.value.issue);
+      setLatestIssue(todayResult.value.latest);
+      setCalendarDate(todayResult.value.calendarDate);
       setActiveAttempt(todayResult.value.attempts.find(isActiveAttempt) ?? null);
     }
     if (archiveResult.status === "fulfilled") {
@@ -404,20 +429,26 @@ export const ReaderWorkspace = forwardRef<
       }
       return;
     }
-    const alreadyReading = Boolean(selectedArticleRef.current && articleBodyRef.current);
+    const wasActive = wasActiveRef.current;
     wasActiveRef.current = true;
-    if (alreadyReading) {
+    // Mode switching is handled by the in-memory view state: an article the
+    // reader opened in this session stays open at its position without
+    // refetching, and the issue list stays the issue list.
+    if (selectedArticleRef.current && articleBodyRef.current) {
       window.scrollTo({ top: readerScrollRef.current, behavior: "auto" });
-      // Resuming an article must not skip today's state: a scheduled or
-      // catch-up run may have completed while Reader was in the background.
       void refreshTodaySurface();
       return;
     }
+    if (wasActive) {
+      void refreshTodaySurface();
+      return;
+    }
+    // First activation in this session still rebuilds from persisted state, but
+    // it opens on the latest issue list rather than a stale article pointer.
     void refreshWorkspace(true);
   }, [active, flushProgressWrites, refreshTodaySurface, refreshWorkspace]);
 
-  const loadArticle = useCallback(async (issue: DailyIssue, summary: ReaderArticleSummary) => {
-    setSelectedIssue(issue);
+  const loadArticle = useCallback(async (issue: DailyIssue, summary: ReaderArticleSummary) => {    setSelectedIssue(issue);
     setSelectedArticle(summary);
     setArticleResponse(null);
     setArticleError(null);
@@ -436,7 +467,29 @@ export const ReaderWorkspace = forwardRef<
     });
     try {
       await flushProgressWrites().catch(() => undefined);
+      // Reuse a body that is already loaded in this session. Nothing restricted
+      // is persisted for speed: this is the same in-memory response the server
+      // would return, kept only while the workspace is mounted.
+      const cached = articleBodyCacheRef.current.get(articleCacheKey(summary.id, issue.edition));
+      if (cached) {
+        setArticleResponse(cached);
+        setProgress(cached.progress);
+        lastProgressRef.current = cached.progress;
+        restorePendingRef.current = Boolean(cached.progress);
+        if (!cached.paragraphs) {
+          setArticleError(
+            cached.article.contentStatus === "FULL_TEXT"
+              ? "Verified article text is unavailable now. Check the source link for access."
+              : "This item is available from its publisher, but Reader does not have verified full text.",
+          );
+        }
+        return;
+      }
       const response = await getReaderArticle(summary.id, issue.edition);
+      articleBodyCacheRef.current.set(
+        articleCacheKey(summary.id, issue.edition),
+        response,
+      );
       setArticleResponse(response);
       setProgress(response.progress);
       lastProgressRef.current = response.progress;
@@ -457,6 +510,28 @@ export const ReaderWorkspace = forwardRef<
       setArticleLoading(false);
     }
   }, [flushProgressWrites]);
+
+  /**
+   * Resume the bookmarked article, refreshing its saved position first.
+   *
+   * The session body cache is reused so reopening does not refetch the text, but
+   * the saved position may have moved since it was cached, so it is refreshed
+   * from the service in the background before the article is shown.
+   */
+  const resumeBookmarkedArticle = useCallback(
+    (issue: DailyIssue, article: ReaderArticleSummary) => {
+      const key = articleCacheKey(article.id, issue.edition);
+      void getReaderArticle(article.id, issue.edition)
+        .then((response) => {
+          articleBodyCacheRef.current.set(key, response);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          void loadArticle(issue, article);
+        });
+    },
+    [loadArticle],
+  );
 
   useEffect(() => {
     if (!active || !activeAttempt || !isActiveAttempt(activeAttempt)) return;
@@ -779,6 +854,10 @@ export const ReaderWorkspace = forwardRef<
   const handleSelectionAction = async (requestedSelection = selection) => {
     if (!requestedSelection || !requestedSelection.text.trim()) return;
     const currentSelection = requestedSelection;
+    // A new explicit action supersedes any pending one, and the token is bumped
+    // again when Reader is deactivated so a late response cannot reopen the
+    // popover while SayIt is on screen.
+    const token = ++selectionTokenRef.current;
     selectedExpressionForRetryRef.current = currentSelection;
     setSayItError(null);
     setReaderResultSaved(false);
@@ -814,6 +893,7 @@ export const ReaderWorkspace = forwardRef<
         requestInput: input,
         cache: sayItCache,
       });
+      if (selectionTokenRef.current !== token) return;
       setReaderSayItResult({
         input: currentSelection.text,
         result: resolved.result,
@@ -822,11 +902,14 @@ export const ReaderWorkspace = forwardRef<
         onSuccessfulSayIt(currentSelection.text, resolved.result);
       }
     } catch (error) {
+      if (selectionTokenRef.current !== token) return;
       setSayItError(
         error instanceof Error ? error.message : "SayIt could not interpret this selection.",
       );
     } finally {
-      setSayItBusy(false);
+      if (selectionTokenRef.current === token) {
+        setSayItBusy(false);
+      }
     }
   };
 
@@ -846,6 +929,27 @@ export const ReaderWorkspace = forwardRef<
     setSelection(null);
     window.requestAnimationFrame(() => articleBodyRef.current?.focus({ preventScroll: true }));
   }, []);
+
+  /**
+   * Leaving Reader dismisses its transient selection presentation.
+   *
+   * The popover is portaled into `document.body`, so without this it would stay
+   * on screen over SayIt. The open article, its position, the shared result
+   * cache and History are untouched. Bumping the selection token also
+   * invalidates any in-flight local enrichment, and `inactiveRef` stops a
+   * pending SayIt response from recreating the popup while SayIt is active.
+   */
+  useEffect(() => {
+    inactiveRef.current = !active;
+    if (active) return;
+    selectionTokenRef.current += 1;
+    setSelection(null);
+    setReaderSayItResult(null);
+    setPassiveCacheResult(false);
+    setReaderResultSaved(false);
+    setSayItBusy(false);
+    setSayItError(null);
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
@@ -869,6 +973,11 @@ export const ReaderWorkspace = forwardRef<
     setReaderSayItResult(null);
     setPassiveCacheResult(false);
     setSayItError(null);
+    // Closing an article belongs to the issue it came from; the latest issue
+    // goes back to the latest list rather than pinning an older date.
+    if (selectedIssue && selectedIssue.localDate === (latestIssue?.date ?? calendarDate)) {
+      setSelectedIssue(null);
+    }
   };
 
   const uniqueArchiveIssues = useMemo(() => {
@@ -885,8 +994,20 @@ export const ReaderWorkspace = forwardRef<
       todayIssue,
       archiveIssues: uniqueArchiveIssues,
       displayedIssue: selectedArticle ? selectedIssue ?? todayIssue : null,
+      viewState,
+      latestDate: latestIssue?.date ?? calendarDate,
+      calendarDate,
     });
-  }, [onArchiveChange, selectedArticle, selectedIssue, todayIssue, uniqueArchiveIssues]);
+  }, [
+    calendarDate,
+    latestIssue,
+    onArchiveChange,
+    selectedArticle,
+    selectedIssue,
+    todayIssue,
+    uniqueArchiveIssues,
+    viewState,
+  ]);
 
   // Opening a past article from History must load it here, without discarding
   // the reading progress or the Reader's own state.
@@ -899,8 +1020,8 @@ export const ReaderWorkspace = forwardRef<
             candidate.articles.some((item) => item.id === nextArticle.id),
           ) ?? todayIssue;
         if (!issue) return;
-        // Honour the article the reader picked; an earlier edition may not have
-        // its body on hand, so fall back to that issue's first delivered one.
+        // Honour the reader's picked article: it may belong to the most recent
+        // delivered issue rather than the latest scheduled one.
         const chosen =
           issue.articles.find((item) => item.id === nextArticle.id) ??
           issue.articles.find((item) => item.contentStatus === "FULL_TEXT") ??
@@ -928,6 +1049,48 @@ export const ReaderWorkspace = forwardRef<
   const articleFkgl = articleResponse?.article.fkgl ?? selectedArticle?.fkgl ?? null;
   const articleProgressRatio = progress?.scrollRatio ?? 0;
 
+  // The latest scheduled issue is the most recent date whose configured
+  // collection time has passed; earlier issues stay plainly dated.
+  const latestDate = latestIssue?.date ?? calendarDate;
+  const latestDeliveredDate = latestIssue?.latestDeliveredDate ?? null;
+  const isCurrentCalendarDate = (value: string | null) =>
+    Boolean(value && calendarDate && value === calendarDate);
+  const listDate = selectedIssue?.localDate ?? latestDate;
+  const issueForDate = useCallback(
+    (date: string | null): DailyIssue | null => {
+      if (!date) return null;
+      return (
+        uniqueArchiveIssues.find((issue) => issue.localDate === date) ??
+        (todayIssue?.localDate === date ? todayIssue : null)
+      );
+    },
+    [todayIssue, uniqueArchiveIssues],
+  );
+  const browsingIssue = useMemo(
+    () => issueForDate(listDate),
+    [issueForDate, listDate],
+  );
+  const browsingArticles = (browsingIssue?.articles ?? []).filter(
+    (article) => article.contentStatus === "FULL_TEXT",
+  );
+  // When the latest scheduled issue delivered nothing, the most recent issue
+  // that did is offered right below it, plainly dated, so the reader is not left
+  // on a dead end.
+  const fallbackIssue =
+    !selectedIssue && browsingArticles.length === 0 && latestDeliveredDate
+      ? issueForDate(latestDeliveredDate)
+      : null;
+  const fallbackArticles = (fallbackIssue?.articles ?? []).filter(
+    (article) => article.contentStatus === "FULL_TEXT",
+  );
+  const latestOccurrenceFailed = Boolean(
+    !selectedIssue &&
+      latestIssue &&
+      !latestIssue.delivered &&
+      latestIssue.occurrence &&
+      ["EXHAUSTED", "MISSED", "COMPLETED"].includes(latestIssue.occurrence.status),
+  );
+
   return (
     <main className="reader-main" hidden={!active} aria-label="SayIt Reader workspace">
       <div className="reader-shell">
@@ -944,14 +1107,21 @@ export const ReaderWorkspace = forwardRef<
           <>
             <div className="reader-heading-row">
               <div>
-                <h1>{selectedIssue ? formatDate(selectedIssue.localDate) : "Today"}</h1>
+                <p className="reader-eyebrow">
+                  {isCurrentCalendarDate(listDate) && !selectedIssue
+                    ? "Latest issue · Today"
+                    : selectedIssue
+                      ? "Earlier issue"
+                      : "Latest issue"}
+                </p>
+                <h1>{listDate ? formatDate(listDate) : "Reading"}</h1>
               </div>
               <div className="reader-run-actions">
                 {selectedIssue ? (
                   <button type="button" className="reader-text-button" onClick={() => setSelectedIssue(null)}>
-                    Today
+                    Back to latest
                   </button>
-                ) : todayIssue?.status === "COMPLETE" ? (
+                ) : browsingIssue?.status === "COMPLETE" ? (
                   <div className="reader-overflow">
                     <button
                       type="button"
@@ -999,7 +1169,7 @@ export const ReaderWorkspace = forwardRef<
             {showRegenerateConfirmation && (
               <div className="reader-confirmation" role="group" aria-label="Confirm regenerate issue">
                 <div>
-                  <strong>Replace today’s collection?</strong>
+                  <strong>Replace this collection?</strong>
                   <p>Reader will create a new edition and keep earlier articles and reading progress in the archive.</p>
                 </div>
                 <div className="reader-inline-actions">
@@ -1013,27 +1183,54 @@ export const ReaderWorkspace = forwardRef<
               </div>
             )}
 
-            {displayedIssue && displayedIssue.status !== "COMPLETE" && (
-              <p className="reader-quiet-status">
-                {displayedIssue.actual.count} of {displayedIssue.target.dailyArticleCount} ready
+            {activeAttempt && <p className="reader-quiet-status">Collecting</p>}
+
+            {resumableArticle && browsingArticles.some((article) => article.id === resumableArticle.id) && (
+              <button
+                type="button"
+                className="reader-resume-bookmark"
+                onClick={() => {
+                  const issue = browsingIssue;
+                  if (issue) resumeBookmarkedArticle(issue, resumableArticle);
+                }}
+              >
+                Continue where you left off: {resumableArticle.title}
+              </button>
+            )}
+
+            {latestOccurrenceFailed && (
+              <p className="reader-quiet-status" role="status">
+                No verified full-text articles were delivered for {listDate ? formatDate(listDate) : "this issue"}.
+                {fallbackIssue
+                  ? ` Showing ${formatDate(fallbackIssue.localDate)}, the most recent delivered issue.`
+                  : ""}
               </p>
             )}
-            {activeAttempt && <p className="reader-quiet-status">Collecting</p>}
 
             {workspaceLoading ? (
               <div className="reader-empty-state" role="status">Loading today’s reading…</div>
-            ) : displayedIssue && displayedIssue.articles.some((article) => article.contentStatus === "FULL_TEXT") ? (
-              <ul className="reader-article-list" aria-label={`${displayedIssue.localDate} articles`}>
-                {displayedIssue.articles
-                  .filter((article) => article.contentStatus === "FULL_TEXT")
+            ) : browsingArticles.length > 0 && browsingIssue ? (
+              <ul className="reader-article-list" aria-label={`${browsingIssue.localDate} articles`}>
+                {browsingArticles
                   .map((article) => (
                     <ArticleListItem
                       key={article.id}
                       article={article}
-                      issue={displayedIssue}
+                      issue={browsingIssue}
                       onOpen={selectArticle}
                     />
                   ))}
+              </ul>
+            ) : fallbackIssue && fallbackArticles.length > 0 ? (
+              <ul className="reader-article-list" aria-label={`${fallbackIssue.localDate} articles`}>
+                {fallbackArticles.map((article) => (
+                  <ArticleListItem
+                    key={article.id}
+                    article={article}
+                    issue={fallbackIssue}
+                    onOpen={selectArticle}
+                  />
+                ))}
               </ul>
             ) : (
               <div className="reader-empty-state">
@@ -1046,7 +1243,7 @@ export const ReaderWorkspace = forwardRef<
           <>
             <div className="reader-article-toolbar reader-article-toolbar--sticky">
               <button className="reader-back-button" type="button" onClick={closeArticle} aria-label="Back to reading list">
-                <span aria-hidden="true">←</span> {selectedIssue?.localDate === todayIssue?.localDate ? "Today" : selectedIssue ? formatDate(selectedIssue.localDate) : "Reading list"}
+                <span aria-hidden="true">←</span> {selectedIssue ? formatDate(selectedIssue.localDate) : "Latest issue"}
               </button>
               <span className="reader-article-position">
                 {progress ? `${Math.round(articleProgressRatio * 100)}% read` : "Reading"}
