@@ -22,10 +22,12 @@ afterEach(async () => {
   await Promise.all(
     harnesses.splice(0).map(async (harness) => {
       await harness.service.stop();
+      // SQLite keeps the state file open until the store is closed.
+      harness.service.close();
       await new Promise<void>((resolve, reject) => {
         harness.server.close((error) => (error ? reject(error) : resolve()));
       });
-      await rm(harness.directory, { recursive: true, force: true });
+      await rm(harness.directory, { recursive: true, force: true, maxRetries: 5 });
     }),
   );
 });
@@ -324,6 +326,8 @@ describe("Reader local API", () => {
       expect.any(Function),
     );
     await restarted.stop();
+    // A second store on the same directory holds its own SQLite handle.
+    restarted.close();
     current = new Date("2026-10-05T09:00:00.000Z");
   });
 

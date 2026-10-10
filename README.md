@@ -72,6 +72,16 @@ The cache lives under the browser-local key `sayit.result-cache.v2`. Changing th
 
 Speech playback warms the Web Speech voice list at startup and reuses the selected US/UK voice, so pressing Listen does not pay a multi-second voice-discovery cost. The service only cancels the engine when playback is actually pending or speaking.
 
+### Reader state integrity
+
+Reader state lives in one SQLite database, `reader-state.db` in the Reader directory, in WAL mode. Every mutation runs inside `BEGIN IMMEDIATE`, which takes the write lock before the state is read, so the development server and the scheduled task cannot both read one version, compute independent mutations and overwrite each other. A failed read always raises an error; it never falls back to a process's in-memory copy, because that copy is what would silently resurrect lost data. Reads on the request path adopt the newest committed state first, so the UI never serves the snapshot a long-lived process happened to load at startup.
+
+An existing `reader-state.json` is imported exactly once on first start and kept as the operator's record; a later edit to it is not adopted. Permitted article bodies live in the same database, so a body and its metadata commit or roll back together, and nothing outside a permitted record is ever persisted. `ReaderStore.close()` releases the file, which the one-shot scheduled task does at exit.
+
+### Reader run ownership
+
+A collection attempt is owned by the process running it, through a claim recorded with the attempt in the same transaction and refreshed by a heartbeat. Only one process can hold a claim, so two simultaneous "Collect now" presses, or a scheduled run racing a manual one, resolve to a single collection. A process that starts while another process's run is live leaves that run alone: it is not failed, not recovered and not duplicated. An attempt whose owner stopped heartbeating is treated as an orphan after the claim window lapses, and only then is it recovered and its occurrence made schedulable again — so a crash is repaired without a live peer ever being interrupted.
+
 ### Reader collection recovery
 
 Collection work lives in memory, so after an unexpected service restart any attempt still stored as `RUNNING` is orphaned: nothing will ever finish it, while the scheduler and manual runs both refuse to start while one exists. On startup the service marks those attempts failed (retryable) and returns their occurrence to a schedulable state exactly once, which is idempotent and leaves issues, editions, delivered articles and reading progress untouched. Reconciliation never leaves an occurrence `RUNNING` without a live attempt.
@@ -97,6 +107,12 @@ A dated recovery of an earlier, unfulfilled issue is available explicitly and ne
 ```powershell
 npx vite-node server/reader/scheduler-main.ts --backfill 2026-10-09 --json
 ```
+
+A dated recovery only accepts articles the publisher states were published on or before the named date, and refuses an article whose publication date its page does not state. Discovery always runs at the present moment, so without that bound a newly published article could be presented as an older day's reading.
+
+### Article supply and difficulty
+
+FKGL is an approximate reading-difficulty estimator, not proof that a text is unsuitable, so it guides selection instead of gating it. An article within one difficulty tier of the saved preference is eligible and the article nearest the saved difficulty is chosen first, so the tolerance never displaces a better match within the daily reading budget. An article two tiers away is still refused, and Reader reports the shortage rather than padding the issue.
 
 ### Reader navigation
 

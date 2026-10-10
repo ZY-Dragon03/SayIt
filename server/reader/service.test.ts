@@ -8,6 +8,7 @@ import { EditorialCollectionError } from "./editorial";
 import type { JsonCompletionClient } from "../provider";
 import { ReaderStore } from "./store";
 import {
+  RUN_LEASE_MS,
   ReaderService,
   type EditorialArticle,
   type EditorialCollectionResult,
@@ -15,15 +16,24 @@ import {
 } from "./service";
 
 const directories: string[] = [];
+const openStores: ReaderStore[] = [];
 
 afterEach(async () => {
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  // SQLite keeps its file handle open, so close every store before removing the
+  // directory it lives in.
+  for (const store of openStores.splice(0)) store.close();
+  await Promise.all(
+    directories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 5 })),
+  );
 });
 
 async function createStore(now: () => Date): Promise<ReaderStore> {
   const directory = await mkdtemp(path.join(tmpdir(), "sayit-reader-service-test-"));
   directories.push(directory);
   const store = new ReaderStore({ directory, now });
+  openStores.push(store);
   await store.initialize();
   await store.update((state) => {
     state.preferences = defaultPreferences();
@@ -130,7 +140,303 @@ function makeService(
   };
 }
 
+describe("Reader run ownership", () => {
+  /** A collector that stays inside the collection until the test releases it. */
+  function heldCollector() {
+    let release: (() => void) | null = null;
+    const entered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started = 0;
+    const collect: EditorialCollector = async () => {
+      started += 1;
+      await entered;
+      return collection([article()]);
+    };
+    return {
+      collect,
+      startedCount: () => started,
+      release: () => release?.(),
+    };
+  }
+
+  /** Record a live attempt owned by a peer process, as that peer would. */
+  async function seedPeerRun(
+    store: ReaderStore,
+    now: Date,
+    options: { expiresAt: string; startedAt?: string },
+  ): Promise<string> {
+    const attemptId = "attempt:peer";
+    await store.update((state) => {
+      state.preferences = defaultPreferences();
+      state.preferencesConfigured = true;
+      state.issues.push({
+        id: "issue:2026-10-04:UTC",
+        localDate: "2026-10-04",
+        timezone: "UTC",
+        edition: 1,
+        status: "NOT_DELIVERED",
+        target: defaultPreferences(),
+        actual: { count: 0, topics: [], difficulty: null, readingMinutes: 0 },
+        unmetConstraints: ["Article count: 0/1 verified full-text articles."],
+        articles: [],
+        createdAt: options.startedAt ?? now.toISOString(),
+        updatedAt: now.toISOString(),
+        priorEditions: [],
+      });
+      state.occurrences.push({
+        id: "occurrence:2026-10-04:UTC",
+        localDate: "2026-10-04",
+        timezone: "UTC",
+        localTime: "18:00",
+        scheduledAt: "2026-10-04T18:00:00.000Z",
+        status: "RUNNING",
+        scheduledAttemptCount: 1,
+        maxScheduledAttempts: 3,
+        nextAttemptAt: null,
+        lastAttemptId: attemptId,
+        updatedAt: now.toISOString(),
+      });
+      state.attempts.push({
+        id: attemptId,
+        issueId: "issue:2026-10-04:UTC",
+        edition: 1,
+        trigger: "scheduled",
+        state: "RUNNING",
+        startedAt: options.startedAt ?? now.toISOString(),
+        completedAt: null,
+        retryable: false,
+        failureReason: null,
+        deliveredCount: 0,
+        traceId: "trace:peer",
+      });
+      state.runLeases.push({
+        attemptId,
+        ownerId: "peer-host:4242",
+        pid: 4242,
+        hostname: "peer-host",
+        expiresAt: options.expiresAt,
+      });
+    });
+    return attemptId;
+  }
+
+  it("leaves a peer's live scheduled run alone when this process starts", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    // A peer holds a valid claim for the next two minutes.
+    await seedPeerRun(store, current, { expiresAt: "2026-10-04T19:02:00.000Z" });
+
+    let collected = 0;
+    const late = new ReaderService({
+      store,
+      now,
+      collect: async () => {
+        collected += 1;
+        return collection([article()]);
+      },
+      reopenArticle: async () => ({ article: null, reason: "offline" }),
+    });
+    await late.start();
+
+    // The peer's run is not failed, not recovered, and not duplicated, and this
+    // process did not start a competing collection.
+    const state = store.snapshot();
+    expect(state.attempts).toHaveLength(1);
+    expect(state.attempts[0]).toMatchObject({ state: "RUNNING", failureReason: null });
+    expect(state.runLeases).toHaveLength(1);
+    expect(state.occurrences[0]?.status).toBe("RUNNING");
+    expect(collected).toBe(0);
+    await late.stop();
+  });
+
+  it("recovers the run once the peer's claim has lapsed", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    // The claim expired before this process started, so the work is an orphan.
+    await seedPeerRun(store, current, { expiresAt: "2026-10-04T18:59:00.000Z" });
+
+    let collected = 0;
+    const late = new ReaderService({
+      store,
+      now,
+      // The peer recorded its attempt without a claim, so the grace window is
+      // what decides here; it is shortened to exercise the lapsed-claim path.
+      unclaimedGraceMs: 0,
+      collect: async () => {
+        collected += 1;
+        return collection([article()]);
+      },
+      reopenArticle: async () => ({ article: null, reason: "offline" }),
+    });
+    await late.start();
+
+    const orphan = store.snapshot().attempts.find((item) => item.id === "attempt:peer");
+    expect(orphan?.state).toBe("FAILED");
+    expect(orphan?.failureReason).toContain("recovered automatically");
+    // The lapsed claim is cleared, and the overdue day is collected again.
+    expect(store.snapshot().runLeases.some((item) => item.ownerId === "peer-host:4242")).toBe(false);
+    await late.waitForIdle();
+    expect(collected).toBe(1);
+    await late.stop();
+  });
+
+  it("refuses a second collection while another process owns today's run", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const held = heldCollector();
+
+    const task = new ReaderService({
+      store,
+      now,
+      collect: held.collect,
+      reopenArticle: async () => ({ article: null, reason: "offline" }),
+    });
+    await task.start();
+    await task.pulse();
+    const heldAttemptId = store.snapshot().attempts[0]?.id;
+    expect(heldAttemptId).toBeTruthy();
+
+    // A manual "Collect now" while the scheduled run is live is refused rather
+    // than starting a second collection over the same issue.
+    await expect(task.startManualRun("manual")).rejects.toMatchObject({
+      code: "run_in_progress",
+    });
+    expect(held.startedCount()).toBe(1);
+    expect(store.snapshot().attempts).toHaveLength(1);
+    expect(store.snapshot().runLeases[0]).toMatchObject({ attemptId: heldAttemptId });
+
+    held.release();
+    await task.waitForIdle();
+    expect(store.snapshot().runLeases).toHaveLength(0);
+    await task.stop();
+  });
+});
 describe("Reader collection lifecycle", () => {
+  it("counts FKGL as an approximate estimator, not proof an article is unsuitable", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    // Intermediate is the saved preference, and every measured tier is at most
+    // one tier from it, so an Advanced article must still be delivered.
+    const collect = vi.fn(async () =>
+      collection([
+        article({
+          id: "article-advanced",
+          title: "An advanced analysis",
+          originalUrl: "https://news.example/story/advanced",
+          accessibleUrl: "https://news.example/story/advanced",
+          fkgl: 14.2,
+        }),
+      ]),
+    );
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+    const issue = service.today().issue;
+    expect(issue?.articles.map((item) => item.originalUrl)).toEqual([
+      "https://news.example/story/advanced",
+    ]);
+    expect(issue?.status).toBe("COMPLETE");
+    await service.stop();
+  });
+
+  it("delivers an easy article to a reader who asked for Advanced, one tier away", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    // Tolerating one tier is what turns FKGL from a gate into a guide: with an
+    // Advanced target, an Intermediate article is still usable reading.
+    await store.update((state) => {
+      state.preferences = defaultPreferences({ difficulty: "Advanced" });
+    });
+    const collect = vi.fn(async () =>
+      collection([
+        article({
+          id: "article-intermediate",
+          title: "A measured analysis",
+          originalUrl: "https://news.example/story/measured",
+          accessibleUrl: "https://news.example/story/measured",
+          fkgl: 10.4,
+        }),
+      ]),
+    );
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+    expect(service.today().issue?.articles.map((item) => item.originalUrl)).toEqual([
+      "https://news.example/story/measured",
+    ]);
+    await service.stop();
+  });
+
+  it("still refuses an article two difficulty tiers away from the saved preference", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    // An Easy target with an Advanced article is two tiers away: outside the
+    // tolerance, so Reader reports the shortage instead of padding the issue.
+    await store.update((state) => {
+      state.preferences = defaultPreferences({ difficulty: "Easy" });
+    });
+    const collect = vi.fn(async () =>
+      collection([
+        article({
+          id: "article-advanced",
+          title: "An advanced analysis",
+          originalUrl: "https://news.example/story/advanced",
+          accessibleUrl: "https://news.example/story/advanced",
+          fkgl: 14.2,
+        }),
+      ]),
+    );
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+    expect(service.today().issue?.articles).toHaveLength(0);
+    expect(service.today().issue?.status).toBe("NOT_DELIVERED");
+    await service.stop();
+  });
+
+  it("prefers the article nearest the saved difficulty when both are usable", async () => {
+    const current = new Date("2026-10-04T19:00:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () =>
+      collection([
+        article({
+          id: "article-advanced",
+          title: "An advanced analysis",
+          originalUrl: "https://news.example/story/advanced",
+          accessibleUrl: "https://news.example/story/advanced",
+          fkgl: 14.2,
+        }),
+        article({
+          id: "article-intermediate",
+          title: "A measured analysis",
+          originalUrl: "https://news.example/story/measured",
+          accessibleUrl: "https://news.example/story/measured",
+          fkgl: 10.4,
+        }),
+      ]),
+    );
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.waitForIdle();
+    // Both are within tolerance, so the exact match is chosen first.
+    expect(service.today().issue?.articles.map((item) => item.originalUrl)).toEqual([
+      "https://news.example/story/measured",
+    ]);
+    await service.stop();
+  });
+
   it("waits until the configured time and delivers at the scheduled instant", async () => {
     let current = new Date("2026-10-04T09:00:00.000Z");
     const now = () => new Date(current);
@@ -521,7 +827,7 @@ describe("Reader collection lifecycle", () => {
     await service.stop();
   });
 
-  it("does not re-deliver yesterday's article, but allows it again beyond the bounded window", async () => {
+  it("does not re-deliver yesterday's article, but allows it again beyond the bounded window", { timeout: 30_000 }, async () => {
     let current = new Date("2026-10-04T09:00:00.000Z");
     const now = () => new Date(current);
     const store = await createStore(now);

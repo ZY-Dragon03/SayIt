@@ -106,8 +106,41 @@ function pageFor(
   };
 }
 
-function indexPageWithArticleMetadata(
+/** A verified article page that also states when it was published. */
+function pageWithPublicationDate(
   url: string,
+  title: string,
+  body: string,
+  publishedAt: string | null,
+  publisher = new URL(url).hostname.replace(/^www\./u, "").split(".")[0],
+): FetchedArticlePage {
+  const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+  const structured = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    headline: title,
+    articleBody: body,
+    publisher: { "@type": "Organization", name: publisher },
+    ...(publishedAt ? { datePublished: publishedAt } : {}),
+  };
+  const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+    <link rel="canonical" href="${url}">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="${title}">
+    <meta name="citation_title" content="${title}">
+    <meta property="article:publisher" content="${publisher}">
+    <meta property="og:site_name" content="${publisher}">
+    <script type="application/ld+json">${JSON.stringify(structured)}</script>
+    </head><body><main><article><h1>${title}</h1>${paragraphs}</article></main></body></html>`;
+  return {
+    statusCode: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from(html),
+    finalUrl: url,
+  };
+}
+
+function indexPageWithArticleMetadata(  url: string,
   title: string,
   body: string,
   linkedHeadlines: string[],
@@ -273,6 +306,81 @@ function makeFetcher(pages: Map<string, FetchedArticlePage>, calls: string[] = [
 }
 
 describe("SayIt Reader Editorial Agent", () => {
+  describe("dated recovery publication dates", () => {
+    const url = "https://www.reuters.com/technology/2026/10/10/finance-policy-review";
+    const title = "Why finance reporting needs verified publication dates";
+    const body = articleBody("finance policy review and independent analysis");
+    const preferences = preferencesForTopic(body, "Finance");
+    // The issue being recovered is 2026-10-09; anything after this is too new.
+    const notAfter = "2026-10-09T16:00:00.000Z";
+
+    it("refuses an article the publisher says appeared after the issue date", async () => {
+      const result = await collectEditorial(preferences, {
+        search: async () => [{ url, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([[url, pageWithPublicationDate(url, title, body, "2026-10-10T06:30:00.000Z", "Reuters")]]),
+        ),
+        maxArticleChecks: 1,
+        publishedNotAfter: notAfter,
+      });
+
+      expect(result.articles).toHaveLength(0);
+      expect(result.trace.candidates.some(
+        (candidate) =>
+          candidate.url === url &&
+          candidate.outcome === "REJECTED" &&
+          /published .*after the issue date/iu.test(candidate.reason),
+      )).toBe(true);
+    });
+
+    it("refuses an article whose publication date the publisher does not state", async () => {
+      const result = await collectEditorial(preferences, {
+        search: async () => [{ url, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([[url, pageWithPublicationDate(url, title, body, null, "Reuters")]]),
+        ),
+        maxArticleChecks: 1,
+        publishedNotAfter: notAfter,
+      });
+
+      expect(result.articles).toHaveLength(0);
+      expect(result.trace.candidates.some(
+        (candidate) =>
+          candidate.url === url &&
+          candidate.outcome === "REJECTED" &&
+          /verifiable publication date/iu.test(candidate.reason),
+      )).toBe(true);
+    });
+
+    it("accepts an article the publisher says existed on the issue date", async () => {
+      const result = await collectEditorial(preferences, {
+        search: async () => [{ url, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([[url, pageWithPublicationDate(url, title, body, "2026-10-09T02:15:00.000Z", "Reuters")]]),
+        ),
+        maxArticleChecks: 1,
+        publishedNotAfter: notAfter,
+      });
+
+      expect(result.articles).toHaveLength(1);
+      expect(result.articles[0]?.publishedAt).toBe("2026-10-09T02:15:00.000Z");
+    });
+
+    it("leaves today's collection unaffected by the dated-recovery bound", async () => {
+      const result = await collectEditorial(preferences, {
+        search: async () => [{ url, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([[url, pageWithPublicationDate(url, title, body, null, "Reuters")]]),
+        ),
+        maxArticleChecks: 1,
+      });
+
+      // No bound means no publication-date requirement: a current collection
+      // must not be blocked by a page that omits the date.
+      expect(result.articles).toHaveLength(1);
+    });
+  });
+
   it("rejects a semantic editorial index while keeping a standalone editorial article eligible", async () => {
     const indexUrl = "https://www.reuters.com/technology/technology+tone/editorials";
     const indexTitle = "Technology + Editorials";

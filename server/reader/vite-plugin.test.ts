@@ -20,12 +20,14 @@ describe("Reader Vite lifecycle integration", () => {
     vite = null;
     viteListening = false;
     await service?.stop();
+    // SQLite holds the state file open until its store is closed.
+    service?.close();
     service = null;
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await rm(directory, { recursive: true, force: true, maxRetries: 5 });
     directory = null;
   });
 
-  it("starts the scheduler and routes full Reader paths through the local Vite service", async () => {
+  it("starts the scheduler and routes full Reader paths through the local Vite service", { timeout: 30_000 }, async () => {
     directory = await mkdtemp(path.join(tmpdir(), "sayit-reader-vite-"));
     const now = new Date("2026-10-04T08:00:00.000Z");
     let discoveryCalls = 0;

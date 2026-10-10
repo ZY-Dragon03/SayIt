@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import os from "node:os";
 import {
   articleSummarySchema,
   dailyIssueSchema,
@@ -25,7 +26,7 @@ import {
 import type { JsonCompletionClient } from "../provider";
 import type { SemanticExistingArticleInput } from "./semantic";
 import { addLocalDays, localDateTime, resolveScheduledTime } from "./time";
-import { ReaderStore, type ReaderTrace } from "./store";
+import { ReaderStore, type ReaderState, type ReaderTrace } from "./store";
 
 export interface EditorialArticle extends ArticleSummary {
   paragraphs?: string[] | null;
@@ -99,6 +100,12 @@ export interface ReaderServiceOptions {
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   fetchArticle?: EditorialCollectorOptions["fetchArticle"];
   semanticClient?: JsonCompletionClient;
+  /**
+   * How long an attempt with no recorded claim is respected as live. Recording
+   * an attempt and claiming it are separate store transactions, so this window
+   * covers the gap; it defaults to the lease duration.
+   */
+  unclaimedGraceMs?: number;
   /**
    * Whether this process owns future scheduled runs.
    *
@@ -301,14 +308,37 @@ function previousCalendarDate(
   return previous ?? addLocalDays(localDate, -1);
 }
 
+/**
+ * How far an article's measured difficulty sits from the saved preference.
+ *
+ * FKGL is an approximate estimator, not proof that a text is unsuitable, so it
+ * guides ranking instead of gating delivery. Only a distance of one tier is
+ * tolerated: an article two tiers away from the stated target is a worse
+ * reading experience than showing fewer articles.
+ */
+function difficultyDistance(
+  article: ArticleSummary,
+  preferences: ReaderPreferences,
+): number | null {
+  if (article.fkgl === null) return null;
+  const measured =
+    article.fkgl <= 8 ? "Easy" : article.fkgl <= 12 ? "Intermediate" : "Advanced";
+  const tiers: ReaderPreferences["difficulty"][] = ["Easy", "Intermediate", "Advanced"];
+  const measuredIndex = tiers.indexOf(measured);
+  const targetIndex = tiers.indexOf(preferences.difficulty);
+  if (measuredIndex < 0 || targetIndex < 0) return null;
+  return Math.abs(measuredIndex - targetIndex);
+}
+
+const MAX_DIFFICULTY_DISTANCE = 1;
+
 function isSuitable(article: ArticleSummary, preferences: ReaderPreferences): boolean {
   if (!isFullText(article) || article.fkgl === null || article.sentenceCount < 1) return false;
   if (!preferences.topics.some((topic) => article.topics.some((candidate) => sameTopic(topic, candidate)))) {
     return false;
   }
-  const measuredDifficulty =
-    article.fkgl <= 8 ? "Easy" : article.fkgl <= 12 ? "Intermediate" : "Advanced";
-  return measuredDifficulty === preferences.difficulty;
+  const distance = difficultyDistance(article, preferences);
+  return distance !== null && distance <= MAX_DIFFICULTY_DISTANCE;
 }
 
 function sanitizeTraceUrl(value: string): string {
@@ -414,6 +444,9 @@ function occurrenceId(localDate: string, timezone: string): string {
   return "occurrence:" + localDate + ":" + encodeURIComponent(timezone);
 }
 
+/** How long one process owns a collection attempt without a heartbeat. */
+export const RUN_LEASE_MS = 120_000;
+
 export class ReaderService {
   readonly store: ReaderStore;
   private readonly now: () => Date;
@@ -426,6 +459,11 @@ export class ReaderService {
   private readonly bodies = new Map<string, BodyRecord>();
   private readonly tasks = new Map<string, Promise<void>>();
   private readonly scheduleRuns: boolean;
+  private readonly unclaimedGraceMs: number;
+  /** Attempts this process currently owns. */
+  private readonly ownedAttempts = new Set<string>();
+  private ownerIdValue = "";
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private started = false;
   private pulseQueue: Promise<void> = Promise.resolve();
@@ -434,6 +472,7 @@ export class ReaderService {
     this.store = options.store ?? new ReaderStore();
     this.now = options.now ?? (() => new Date());
     this.scheduleRuns = options.scheduleRuns ?? true;
+    this.unclaimedGraceMs = options.unclaimedGraceMs ?? RUN_LEASE_MS;
     this.setTimer = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
     this.fetchArticle = options.fetchArticle ?? ((url) => safeFetchArticle(url));
@@ -446,9 +485,9 @@ export class ReaderService {
     if (this.started) return;
     await this.store.initialize();
     this.started = true;
-    // Any attempt still marked RUNNING belongs to a previous process, because
-    // the work itself lived in memory. Clear it before scheduling so a single
-    // unexpected restart cannot block today's collection forever.
+    // Only attempts nobody owns any more are orphans. A run in another process
+    // that still holds its claim is left strictly alone, so starting this
+    // service during a scheduled or manual collection cannot fail that work.
     await this.recoverInterruptedRuns();
     await this.pulse("catch-up");
   }
@@ -457,6 +496,133 @@ export class ReaderService {
     this.started = false;
     if (this.timer) this.clearTimer(this.timer);
     this.timer = undefined;
+    // Heartbeats stop, so any claim this process still records in the state file
+    // lapses on its own rather than blocking the next owner forever.
+    this.stopHeartbeat();
+  }
+
+  /** This process's identity as a run owner. */
+  private get ownerId(): string {
+    if (!this.ownerIdValue) {
+      this.ownerIdValue = `${os.hostname()}:${process.pid}`;
+    }
+    return this.ownerIdValue;
+  }
+
+  /**
+   * Claim a collection attempt for this process.
+   *
+   * Returns false when another live process already owns it, in which case the
+   * caller must not run, must not treat the attempt as orphaned, and must not
+   * touch its occurrence.
+   */
+  private async claimAttempt(attemptId: string): Promise<boolean> {
+    const result = await this.store.claimRunLease({
+      attemptId,
+      ownerId: this.ownerId,
+      pid: process.pid,
+      hostname: os.hostname(),
+      durationMs: RUN_LEASE_MS,
+      now: this.now().toISOString(),
+    });
+    return result.claimed;
+  }
+
+  /** Keep this process's claim alive while a collection is running. */
+  private async extendClaims(): Promise<void> {
+    const now = this.now().toISOString();
+    for (const attemptId of this.ownedAttempts) {
+      try {
+        await this.store.refreshRunLease({
+          attemptId,
+          ownerId: this.ownerId,
+          pid: process.pid,
+          hostname: os.hostname(),
+          durationMs: RUN_LEASE_MS,
+          now,
+        });
+      } catch {
+        // A failed heartbeat must not abort the collection itself.
+      }
+    }
+  }
+
+  private beginHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => {
+      void this.extendClaims();
+    }, RUN_LEASE_MS / 3);
+    this.heartbeat.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (!this.heartbeat) return;
+    clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+  }
+
+  /**
+   * Claim an issue for this process inside a write transaction.
+   *
+   * The attempt and its lease are recorded together, so two processes racing for
+   * the same issue cannot both start a collection: the second finds a live claim
+   * and is told the work already belongs to someone else.
+   */
+  private claimLeaseInState(
+    state: ReaderState,
+    issueId: string,
+    attemptId: string,
+    now: Date,
+  ): boolean {
+    const nowMs = now.getTime();
+    const live = state.attempts.filter(
+      (item) => item.issueId === issueId && item.state === "RUNNING",
+    );
+    for (const attempt of live) {
+      const lease = state.runLeases.find((item) => item.attemptId === attempt.id);
+      if (lease) {
+        if (Date.parse(lease.expiresAt) > nowMs && lease.ownerId !== this.ownerId) {
+          return false;
+        }
+        continue;
+      }
+      // No claim recorded: treat it as live for one recording window, because
+      // failing a peer's live work is worse than waiting out a short window.
+      const startedAt = Date.parse(attempt.startedAt);
+      if (Number.isFinite(startedAt) && nowMs - startedAt < RUN_LEASE_MS) return false;
+    }
+    state.runLeases = state.runLeases.filter(
+      (item) => item.attemptId !== attemptId,
+    );
+    state.runLeases.push({
+      attemptId,
+      ownerId: this.ownerId,
+      pid: process.pid,
+      hostname: os.hostname(),
+      expiresAt: new Date(nowMs + RUN_LEASE_MS).toISOString(),
+    });
+    this.ownedAttempts.add(attemptId);
+    return true;
+  }
+
+  /**
+   * Whether an attempt is genuinely live.
+   *
+   * A claim held by any process makes it live. An attempt with no claim is
+   * treated as live until its recording window lapses, because this process
+   * cannot distinguish a peer that is about to claim it from one that died, and
+   * failing a peer's live work is the worse error.
+   */
+  private attemptIsLive(attempt: RunAttempt, now: Date): boolean {
+    const holder = this.store.runLeaseHolder(attempt.id, now.toISOString());
+    if (holder) return true;
+    // Attempts recorded before ownership existed carry no claim, so they are
+    // treated as live only for one recording window. Recording an attempt and
+    // claiming it are separate store transactions, and a peer must never be
+    // mistaken for an orphan in the gap between them.
+    const startedAt = Date.parse(attempt.startedAt);
+    if (!Number.isFinite(startedAt)) return false;
+    return now.getTime() - startedAt < this.unclaimedGraceMs;
   }
 
   /**
@@ -510,23 +676,45 @@ export class ReaderService {
    */
   private async recoverInterruptedRuns(): Promise<void> {
     const now = this.now();
-    const interrupted = this.store
-      .snapshot()
-      .attempts.filter((attempt) => attempt.state === "RUNNING" && attempt.completedAt === null);
+    await this.store.reload();
+    const snapshot = this.store.snapshot();
+    const interrupted = snapshot.attempts.filter(
+      (attempt) =>
+        attempt.state === "RUNNING" &&
+        attempt.completedAt === null &&
+        !this.attemptIsLive(attempt, now),
+    );
     if (interrupted.length === 0) return;
     const interruptedIds = new Set(interrupted.map((attempt) => attempt.id));
 
     await this.store.update((state) => {
+      // Re-check inside the transaction: another process may have claimed or
+      // finished one of these attempts since the snapshot was taken.
+      const stillOrphaned = new Set(
+        state.attempts
+          .filter(
+            (attempt) =>
+              interruptedIds.has(attempt.id) &&
+              attempt.state === "RUNNING" &&
+              !this.attemptIsLive(attempt, now),
+          )
+          .map((attempt) => attempt.id),
+      );
+      if (stillOrphaned.size === 0) return;
       const recoveredAt = now.toISOString();
       for (const attempt of state.attempts) {
-        if (!interruptedIds.has(attempt.id)) continue;
+        if (!stillOrphaned.has(attempt.id)) continue;
         attempt.state = "FAILED";
         attempt.completedAt = recoveredAt;
         attempt.retryable = true;
         attempt.failureReason =
           "The collection was interrupted by a service restart and was recovered automatically.";
       }
+      state.runLeases = state.runLeases.filter(
+        (lease) => !stillOrphaned.has(lease.attemptId),
+      );
       for (const attempt of interrupted) {
+        if (!stillOrphaned.has(attempt.id)) continue;
         const issue = state.issues.find(
           (candidate) =>
             candidate.id === attempt.issueId && candidate.edition === attempt.edition,
@@ -645,6 +833,17 @@ export class ReaderService {
     await this.store.reload();
   }
 
+  /**
+   * Release the local store.
+   *
+   * SQLite holds an open file handle, so a process that is finished with the
+   * service — a test, or the one-shot scheduled task at exit — must close it to
+   * leave the state directory removable and unlocked.
+   */
+  close(): void {
+    this.store.close();
+  }
+
   archive(limit = 30): DailyIssue[] {
     const state = this.requireStore().snapshot();
     const latestByDate = new Map<string, DailyIssue>();
@@ -734,6 +933,10 @@ export class ReaderService {
         refusal: "This issue is already fulfilled; backfill never replaces it.",
       };
     }
+    // A dated recovery may only fill the named day with articles that already
+    // existed then. Discovery runs now, so without this an article published
+    // afterwards could be presented as that day's reading.
+    const notAfter = this.endOfLocalDate(localDate, preferences.timezone);
 
     const trigger: RunAttemptTrigger = "backfill";
     const now = this.now();
@@ -802,7 +1005,7 @@ export class ReaderService {
         refusal: "A collection for this issue is already running.",
       };
     }
-    await this.collectAndRecord(started);
+    await this.collectAndRecord(started, { publishedNotAfter: notAfter });
     const after = currentIssue(
       this.store.snapshot().issues,
       localDate,
@@ -815,6 +1018,11 @@ export class ReaderService {
       attemptId: started.attempt.id,
       refusal: null,
     };
+  }
+
+  /** The last instant of a calendar date in the configured timezone. */
+  private endOfLocalDate(localDate: string, timezone: string): string {
+    return resolveScheduledTime(addLocalDays(localDate, 1), "00:00", timezone).toISOString();
   }
 
   edition(issueId: string, edition: number): DailyIssue | null {
@@ -862,12 +1070,14 @@ export class ReaderService {
     const existingRunning = currentState.attempts.some(
       (attempt) =>
         attempt.issueId === issueKey &&
-        attempt.state === "RUNNING",
+        attempt.state === "RUNNING" &&
+        this.attemptIsLive(attempt, this.now()),
     );
     if (existingRunning) {
       throw new ReaderServiceError("run_in_progress", "A collection is already running for today.", 409, true);
     }
 
+    const attemptId = createId("attempt");
     const started = await this.store.update((state) => {
       let issue = currentIssue(state.issues, date, preferences.timezone);
       if (trigger === "regenerate") {
@@ -887,8 +1097,11 @@ export class ReaderService {
         state.issues.push(issue);
       }
       if (!issue) throw new ReaderServiceError("issue_unavailable", "Today's issue could not be prepared.", 500, true);
+      // Claiming inside the transaction is what makes two simultaneous readers
+      // of "Collect now" resolve to one collection instead of two.
+      if (!this.claimLeaseInState(state, issueId, attemptId, this.now())) return null;
       const attempt = runAttemptSchema.parse({
-        id: createId("attempt"),
+        id: attemptId,
         issueId,
         edition: issue.edition,
         trigger,
@@ -903,6 +1116,9 @@ export class ReaderService {
       state.attempts.push(attempt);
       return { attempt, issue, preferences: state.preferences };
     });
+    if (!started) {
+      throw new ReaderServiceError("run_in_progress", "A collection is already running for today.", 409, true);
+    }
     this.launchCollection(started);
     return { attempt: started.attempt, issue: started.issue };
   }
@@ -1034,7 +1250,31 @@ export class ReaderService {
         ? new Date(occurrence.nextAttemptAt)
         : new Date(occurrence.scheduledAt);
       const issue = currentIssue(state.issues, date, preferences.timezone);
-      if (issue?.status === "COMPLETE" && dueAt.getTime() <= now.getTime() && !isTerminalOccurrence(occurrence.status)) {
+      if (occurrence.status === "RUNNING") {
+        // The run is owned by another process. When that owner dies its claim
+        // lapses, and only then is the occurrence recovered; a live owner is
+        // never interrupted just because this process looked at the state.
+        const ownedAttempt = occurrence.lastAttemptId
+          ? state.attempts.find((item) => item.id === occurrence.lastAttemptId) ?? null
+          : null;
+        const stillOwned =
+          ownedAttempt?.state === "RUNNING" && this.attemptIsLive(ownedAttempt, now);
+        if (!stillOwned && issue?.status !== "COMPLETE") {
+          await this.store.update((next) => {
+            const live = next.occurrences.find((item) => item.id === occurrence.id);
+            const current = live?.lastAttemptId
+              ? next.attempts.find((item) => item.id === live.lastAttemptId) ?? null
+              : null;
+            const liveOwner =
+              current?.state === "RUNNING" && this.attemptIsLive(current, now);
+            if (!live || liveOwner || isTerminalOccurrence(live.status)) return;
+            this.restoreInterruptedOccurrence(live, {
+              now,
+              trigger: current?.trigger ?? "scheduled",
+            });
+          });
+        }
+      } else if (issue?.status === "COMPLETE" && dueAt.getTime() <= now.getTime() && !isTerminalOccurrence(occurrence.status)) {
         await this.updateOccurrence(occurrence.id, {
           status: "ALREADY_FULFILLED",
           nextAttemptAt: null,
@@ -1042,7 +1282,6 @@ export class ReaderService {
         });
       } else if (
         !isTerminalOccurrence(occurrence.status) &&
-        occurrence.status !== "RUNNING" &&
         dueAt.getTime() <= now.getTime()
       ) {
         await this.beginScheduledRun(occurrence, trigger);
@@ -1145,19 +1384,20 @@ export class ReaderService {
       });
       return;
     }
+    const attemptId = createId("attempt");
     const started = await this.store.update((next) => {
       const liveOccurrence = next.occurrences.find((item) => item.id === occurrence.id);
       if (!liveOccurrence || liveOccurrence.status === "RUNNING" || isTerminalOccurrence(liveOccurrence.status)) {
         return null;
       }
-      if (next.attempts.some((item) => item.issueId === issueId && item.state === "RUNNING")) return null;
+      if (!this.claimLeaseInState(next, issueId, attemptId, now)) return null;
       let dailyIssue = currentIssue(next.issues, date, occurrence.timezone);
       if (!dailyIssue) {
         dailyIssue = emptyIssue(date, preferences, now);
         next.issues.push(dailyIssue);
       }
       const attempt = runAttemptSchema.parse({
-        id: createId("attempt"),
+        id: attemptId,
         issueId,
         edition: dailyIssue.edition,
         trigger,
@@ -1195,8 +1435,12 @@ export class ReaderService {
     );
   }
 
-  private async collectAndRecord(started: StartedRun): Promise<void> {
+  private async collectAndRecord(
+    started: StartedRun,
+    options: { publishedNotAfter?: string } = {},
+  ): Promise<void> {
     const controller = new AbortController();
+    this.beginHeartbeat();
     try {
       if (!this.collector) {
         throw new ReaderServiceError("editorial_unavailable", "Article discovery is not configured.", 503, true);
@@ -1207,6 +1451,9 @@ export class ReaderService {
         signal: controller.signal,
         semanticClient: this.semanticClient,
         alreadyDelivered: this.alreadyDeliveredContext(started.issue),
+        ...(options.publishedNotAfter
+          ? { publishedNotAfter: options.publishedNotAfter }
+          : {}),
       });
       const now = this.now();
       const trace = toStoredTrace(
@@ -1257,7 +1504,19 @@ export class ReaderService {
             if (title) recentTitles.add(title);
           }
         }
-        for (const candidate of result.articles) {
+        for (const candidate of [...result.articles]
+          // Nearest to the saved difficulty first, then the shortest read, so the
+          // tolerance never displaces a better match within the daily budget.
+          .map((item) => ({
+            item,
+            distance: difficultyDistance(item, started.preferences) ?? 9,
+          }))
+          .sort(
+            (left, right) =>
+              left.distance - right.distance ||
+              left.item.wordCount - right.item.wordCount,
+          )
+          .map((entry) => entry.item)) {
           const summary = scopeSummary(candidate, issue.id, issue.edition);
           if (!isSuitable(summary, started.preferences)) continue;
           const urlKeys = [
@@ -1357,6 +1616,23 @@ export class ReaderService {
       }
     } catch (error) {
       await this.recordFailure(started, error);
+    } finally {
+      await this.releaseOwnership(started.attempt.id);
+    }
+  }
+
+  /**
+   * Give up an attempt this process owned, and stop heartbeating when nothing
+   * is left. Ownership is released in a `finally`, so a failed or cancelled
+   * collection does not leave a claim behind that would block the next run.
+   */
+  private async releaseOwnership(attemptId: string): Promise<void> {
+    this.ownedAttempts.delete(attemptId);
+    if (this.ownedAttempts.size === 0) this.stopHeartbeat();
+    try {
+      await this.store.releaseRunLease(attemptId, this.ownerId);
+    } catch {
+      // A claim that cannot be released lapses on its own.
     }
   }
 

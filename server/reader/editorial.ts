@@ -63,6 +63,11 @@ export interface EditorialArticle {
   paragraphCount: number;
   paragraphs?: string[];
   bodyHash?: string;
+  /**
+   * When the publisher says the article was published, when its page states it.
+   * Used to refuse placing a newer article into an earlier day's issue.
+   */
+  publishedAt?: string | null;
   provenance?: {
     publisherIdentity: string;
     publisherIdentitySources: Array<
@@ -128,6 +133,14 @@ export interface EditorialOptions {
   signal?: AbortSignal;
   semanticClient?: JsonCompletionClient;
   alreadyDelivered?: SemanticExistingArticleInput[];
+  /**
+   * Refuse any article the publisher says was published after this instant.
+   *
+   * Discovery always runs now, so a dated recovery of an earlier issue needs
+   * this bound; without it a newly published article could be presented as an
+   * older day's reading.
+   */
+  publishedNotAfter?: string;
 }
 
 export type EditorialCollectionFailureCode =
@@ -750,6 +763,7 @@ function extractStructuredArticle(document: Document): {
   publisher: string | null;
   articleBody: string | null;
   headline: string | null;
+  publishedAt: string | null;
   licenses: string[];
   hasArticleType: boolean;
 } {
@@ -794,13 +808,34 @@ function extractStructuredArticle(document: Document): {
   const licenseValues = articles
     .map((item) => textValue(item.license))
     .filter((value): value is string => Boolean(value));
+  // The publisher's own statement of when the article was published, so a dated
+  // recovery can refuse to present a newer article as an older day's reading.
+  const publishedAt =
+    articleDate(article?.datePublished) ??
+    articleDate(article?.dateCreated) ??
+    (normalizeWhitespace(
+      document.querySelector<HTMLMetaElement>('meta[property="article:published_time"]')
+        ?.content ?? "",
+    ) ||
+      null);
   return {
     publisher: textValue(article?.publisher),
     articleBody: textValue(article?.articleBody),
     headline: textValue(article?.headline),
+    publishedAt,
     licenses: licenseValues,
     hasArticleType: articles.length > 0,
   };
+}
+
+/** Read a structured publication date in a form that can be compared. */
+function articleDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return new Date(parsed).toISOString();
 }
 
 function publisherMetadata(document: Document): {
@@ -1397,6 +1432,9 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     paragraphCount: paragraphs.length,
     paragraphs,
     bodyHash,
+    // The publisher's stated publication time, which a dated recovery must
+    // check before it may place this article in an earlier day's issue.
+    publishedAt: structured.publishedAt,
     provenance: {
       publisherIdentity,
       publisherIdentitySources,
@@ -1743,11 +1781,44 @@ export async function collectEditorial(
 
   const verified: VerifiedCandidate[] = [];
   const allSummaries: EditorialArticle[] = [];
+  const notAfter = options.publishedNotAfter
+    ? Date.parse(options.publishedNotAfter)
+    : NaN;
   for (const candidate of checked) {
     if (!candidate.article) {
       if (candidate.summary.contentStatus !== "FULL_TEXT") allSummaries.push(candidate.summary);
       trace.candidates.push(candidate.trace);
       continue;
+    }
+    if (Number.isFinite(notAfter)) {
+      const publishedAt = candidate.article.publishedAt
+        ? Date.parse(candidate.article.publishedAt)
+        : NaN;
+      const stated = candidate.article.publishedAt ?? null;
+      if (Number.isFinite(publishedAt) && publishedAt > notAfter) {
+        // The publisher states this article appeared after the day being
+        // recovered, so it cannot be that day's reading.
+        trace.candidates.push({
+          ...candidate.trace,
+          outcome: "REJECTED",
+          reason: `The publisher states this article was published ${stated}, after the issue date being recovered.`,
+        });
+        continue;
+      }
+      if (!stated) {
+        // No verifiable publication date: record the gap rather than silently
+        // treating a possibly newer article as the named day's reading.
+        trace.decisions.push(
+          `Publication date could not be verified for ${candidate.article.originalUrl}; it was not accepted for a dated recovery.`,
+        );
+        trace.candidates.push({
+          ...candidate.trace,
+          outcome: "REJECTED",
+          reason:
+            "The publisher did not state a verifiable publication date, so the article cannot be assigned to an earlier issue date.",
+        });
+        continue;
+      }
     }
     const entry: VerifiedCandidate = {
       article: candidate.article,
