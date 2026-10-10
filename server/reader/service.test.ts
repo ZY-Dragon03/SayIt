@@ -437,6 +437,46 @@ describe("Reader collection lifecycle", () => {
     await service.stop();
   });
 
+  it("presents today as the latest issue once today is already fulfilled", async () => {
+    const current = new Date("2026-10-05T01:30:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([article()]));
+    const { service } = makeService(store, now, collect);
+
+    // 18:00 UTC is still ahead on 2026-10-05, so the schedule alone would point
+    // at the previous day — but a recovered or operator-run collection can
+    // fulfil today early, and the reader must then open today's reading.
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    expect(service.today().issue?.status).toBe("COMPLETE");
+
+    const presented = service.today().latest;
+    expect(presented?.date).toBe("2026-10-05");
+    expect(presented?.delivered).toBe(true);
+    expect(presented?.latestDeliveredDate).toBe("2026-10-05");
+    await service.stop();
+  });
+
+  it("still points at the previous day when today is due but unfulfilled", async () => {
+    const current = new Date("2026-10-05T01:30:00.000Z");
+    const now = () => new Date(current);
+    const store = await createStore(now);
+    const collect = vi.fn(async () => collection([]));
+    const { service } = makeService(store, now, collect);
+
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+    expect(service.today().issue?.status).toBe("NOT_DELIVERED");
+
+    const presented = service.today().latest;
+    expect(presented?.date).toBe("2026-10-04");
+    expect(presented?.delivered).toBe(false);
+    await service.stop();
+  });
+
   it("waits until the configured time and delivers at the scheduled instant", async () => {
     let current = new Date("2026-10-04T09:00:00.000Z");
     const now = () => new Date(current);

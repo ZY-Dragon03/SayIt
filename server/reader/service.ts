@@ -775,6 +775,11 @@ export class ReaderService {
    * passed. Before today's collection time it is yesterday, so a failed or
    * skipped run is reported honestly instead of showing an older date as if it
    * were current.
+   *
+   * A today that has already been fulfilled counts as the latest issue even
+   * before the configured time: an operator-run or recovered collection can
+   * deliver today early, and the reader must then open today's reading rather
+   * than yesterday's failure.
    */
   private latestIssueStatus(
     state: ReturnType<ReaderStore["snapshot"]>,
@@ -793,8 +798,12 @@ export class ReaderService {
       preferences.collectionTime,
       preferences.timezone,
     ).getTime();
+    const todayIssue = currentIssue(state.issues, today, preferences.timezone);
+    const todayFulfilled = Boolean(todayIssue && todayIssue.status === "COMPLETE" && isFullTextIssue(todayIssue));
     const date =
-      now.getTime() >= scheduledToday ? today : previousCalendarDate(today, state);
+      now.getTime() >= scheduledToday || todayFulfilled
+        ? today
+        : previousCalendarDate(today, state);
     const issue = currentIssue(state.issues, date, preferences.timezone);
     const occurrence =
       state.occurrences.find(
