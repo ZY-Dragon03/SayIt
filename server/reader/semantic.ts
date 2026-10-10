@@ -41,7 +41,7 @@ export interface SemanticCandidateInput {
       | "article_publisher"
       | "open_graph_site_name"
     >;
-    canonicalRelationship: "original_url" | "accessible_url";
+    canonicalRelationship: "original_url" | "accessible_url" | "publisher_canonical";
     standaloneArticleVerified: true;
     titleAgreementVerified: true;
     bodyCompletenessVerified: true;
@@ -111,7 +111,7 @@ const semanticCandidateInputSchema = z.object({
       "article_publisher",
       "open_graph_site_name",
     ])).min(1).max(4).optional(),
-    canonicalRelationship: z.enum(["original_url", "accessible_url"]),
+    canonicalRelationship: z.enum(["original_url", "accessible_url", "publisher_canonical"]),
     standaloneArticleVerified: z.literal(true),
     titleAgreementVerified: z.literal(true),
     bodyCompletenessVerified: z.literal(true),

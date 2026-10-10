@@ -542,11 +542,6 @@ describe("Reader workspace", () => {
       backButton?.click();
     });
     await flush();
-    const todayButton = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.trim() === "Today",
-    );
-    await act(async () => todayButton?.click());
-    await flush();
 
     const issueActions = [...container.querySelectorAll("button")].find((button) =>
       button.getAttribute("aria-label") === "Issue actions",
@@ -619,11 +614,6 @@ describe("Reader workspace", () => {
       button.getAttribute("aria-label") === "Back to reading list",
     );
     await act(async () => backButton?.click());
-    await flush();
-    const todayButton = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.trim() === "Today",
-    );
-    await act(async () => todayButton?.click());
     await flush();
 
     const issueActions = [...container.querySelectorAll("button")].find((button) =>

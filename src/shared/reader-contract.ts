@@ -149,7 +149,17 @@ export const articleSummarySchema = z
           "article_publisher",
           "open_graph_site_name",
         ])).min(1).max(4),
-        canonicalRelationship: z.enum(["original_url", "accessible_url"]),
+        canonicalRelationship: z.enum([
+          "original_url",
+          "accessible_url",
+          /**
+           * The page declared a canonical URL on the same publisher host that is
+           * neither the discovered nor the accessible URL — typical for an RSS
+           * link that omits a section path. The declared canonical is then the
+           * article's identity.
+           */
+          "publisher_canonical",
+        ]),
         standaloneArticleVerified: z.literal(true),
         titleAgreementVerified: z.literal(true),
         bodyCompletenessVerified: z.literal(true),

@@ -381,6 +381,76 @@ describe("SayIt Reader Editorial Agent", () => {
     });
   });
 
+  describe("publisher canonical adoption", () => {
+    /** The page declares a canonical URL that differs from the link that led here. */
+    function pageWithCanonical(
+      requestedUrl: string,
+      canonicalUrl: string | null,
+      title: string,
+      body: string,
+      publisher = new URL(requestedUrl).hostname.replace(/^www\./u, "").split(".")[0],
+    ): FetchedArticlePage {
+      const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+      const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
+      ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ""}
+      <meta property="og:type" content="article">
+      <meta property="og:title" content="${title}">
+      <meta name="citation_title" content="${title}">
+      <meta property="article:publisher" content="${publisher}">
+      <meta property="og:site_name" content="${publisher}">
+      </head><body><main><article><h1>${title}</h1>${paragraphs}</article></main></body></html>`;
+      return {
+        statusCode: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: Buffer.from(html),
+        finalUrl: requestedUrl,
+      };
+    }
+
+    it("adopts a canonical URL on the publisher's own host instead of rejecting the article", async () => {
+      // An RSS link without the section path, exactly as BBC and Al Jazeera
+      // publish them: the page names its own canonical article URL.
+      const requested = "https://www.bbc.com/news/articles/cmn0jke547r5o";
+      const canonical = "https://www.bbc.com/news/world/articles/cmn0jke547r5o";
+      const title = "Why finance reporting needs verified publication dates";
+      const body = articleBody("finance policy review and independent analysis");
+      const result = await collectEditorial(preferencesForTopic(body, "Finance"), {
+        search: async () => [{ url: requested, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([[requested, pageWithCanonical(requested, canonical, title, body, "BBC")]]),
+        ),
+        maxArticleChecks: 1,
+      });
+
+      expect(result.articles).toHaveLength(1);
+      const article = result.articles[0]!;
+      // The stored article points at the publisher's declared identity.
+      expect(article.accessibleUrl).toBe(canonical);
+      expect(article.provenance?.canonicalRelationship).toBe("publisher_canonical");
+    });
+
+    it("still refuses a canonical URL that leaves the publisher's host", async () => {
+      const requested = "https://www.bbc.com/news/articles/cmn0jke547r5o";
+      const title = "Why finance reporting needs verified publication dates";
+      const body = articleBody("finance policy review and independent analysis");
+      const result = await collectEditorial(preferencesForTopic(body, "Finance"), {
+        search: async () => [{ url: requested, title, snippet: "Finance policy review" }],
+        fetchArticle: makeFetcher(
+          new Map([
+            [
+              requested,
+              pageWithCanonical(requested, "https://mirror.example/copied-story", title, body, "BBC"),
+            ],
+          ]),
+        ),
+        maxArticleChecks: 1,
+      });
+
+      expect(result.articles).toHaveLength(0);
+      expect(result.trace.candidates.some((candidate) => /canonical URL/iu.test(candidate.reason))).toBe(true);
+    });
+  });
+
   it("rejects a semantic editorial index while keeping a standalone editorial article eligible", async () => {
     const indexUrl = "https://www.reuters.com/technology/technology+tone/editorials";
     const indexTitle = "Technology + Editorials";

@@ -76,7 +76,10 @@ export interface EditorialArticle {
       | "article_publisher"
       | "open_graph_site_name"
     >;
-    canonicalRelationship: "original_url" | "accessible_url";
+    canonicalRelationship:
+      | "original_url"
+      | "accessible_url"
+      | "publisher_canonical";
     standaloneArticleVerified: true;
     titleAgreementVerified: true;
     bodyCompletenessVerified: true;
@@ -1259,8 +1262,8 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
 
   const html = page.body.toString("utf8");
   const sourceUrl = normalizeUrl(source.url);
-  const accessibleUrl = normalizeUrl(page.finalUrl);
-  if (!sourceUrl || !accessibleUrl) {
+  const reachableUrl = normalizeUrl(page.finalUrl);
+  if (!sourceUrl || !reachableUrl) {
     return { article: null, body: "", summary: defaultSummary, reason: "The original or accessible URL could not be verified as HTTPS." };
   }
   const parsed = new JSDOM(html, { url: page.finalUrl });
@@ -1281,9 +1284,21 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   const canonical = normalizeUrl(metadata.canonicalUrl ?? "");
   const canonicalRelationship = canonical === sourceUrl
     ? "original_url" as const
-    : canonical === accessibleUrl
+    : canonical === reachableUrl
       ? "accessible_url" as const
-      : null;
+      : // A publisher's own canonical URL on the same host is a stronger
+        // statement of the article's identity than the link that led here, so it
+        // is adopted instead of rejecting the article. A canonical that leaves
+        // the publisher's host is still refused below.
+        canonical && hostOf(canonical) === hostOf(reachableUrl)
+        ? "publisher_canonical" as const
+        : null;
+  // The declared canonical becomes the article's address, so a stored article
+  // always points at the publisher's own identity for it.
+  const accessibleUrl =
+    canonicalRelationship === "publisher_canonical" && canonical
+      ? canonical
+      : reachableUrl;
   const fallbackForProvenance = (reason: string, title = source.title) => {
     const summary = makeCandidateSummary(source, "EXTERNAL_ONLY", reason, page.statusCode);
     return {
