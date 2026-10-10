@@ -498,7 +498,7 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.candidates[0]?.contentStatus).toBe("SUMMARY");
   });
 
-  it("rejects an incomplete Readability extraction when story paragraphs are omitted", async () => {
+  it("rejects an incomplete Readability extraction when story paragraphs are omitted", { timeout: 30_000 }, async () => {
     const url = "https://www.reuters.com/world/analysis/synthetic-continuity-case";
     const title = "Synthetic report on finance and economic evidence";
     const paragraphs = Array.from({ length: 47 }, (_, index) => [

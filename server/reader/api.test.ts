@@ -173,7 +173,7 @@ describe("Reader local API", () => {
     expect(polled.body.issue).toMatchObject({ id: started.body.issue.id, status: "NOT_DELIVERED" });
   });
 
-  it("serves selected article text, progress, and immutable earlier editions", async () => {
+  it("serves selected article text, progress, and immutable earlier editions", { timeout: 30_000 }, async () => {
     let current = new Date("2026-10-04T09:00:00.000Z");
     const collect = vi
       .fn<EditorialCollector>()

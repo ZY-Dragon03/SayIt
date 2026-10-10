@@ -331,11 +331,16 @@ export class ReaderStore {
       try {
         database.exec("BEGIN IMMEDIATE");
         transactionOpen = true;
-        const next = structuredClone(this.readCommittedState());
+        const committed = this.readCommittedState();
+        const next = structuredClone(committed);
         const result = await mutator(next);
         const parsed = stateSchema.safeParse(next);
         if (!parsed.success) throw new ReaderStoreError("reader_state_invalid");
-        this.writeState(parsed.data);
+        // Rewriting every table on every write would hold the write lock for
+        // work nobody asked for, so a progress save or a heartbeat would stall
+        // the UI for as long as the whole state took to rewrite. The version this
+        // transaction read says exactly which tables changed.
+        this.writeState(parsed.data, committed);
         database.exec("COMMIT");
         transactionOpen = false;
         this.state = parsed.data;
@@ -639,98 +644,128 @@ export class ReaderStore {
     return parsed.data;
   }
 
-  private writeState(state: ReaderState): void {
+  /**
+   * Persist the differences between the version this transaction read and the
+   * version it produced, leaving untouched tables alone.
+   */
+  private writeState(state: ReaderState, committed?: ReaderState): void {
     const database = this.requireDatabase();
-    database.prepare("DELETE FROM issues").run();
-    const insertIssue = database.prepare(
-      "INSERT INTO issues (id, edition, payload) VALUES (?, ?, ?)",
-    );
-    for (const issue of state.issues) {
-      insertIssue.run(issue.id, issue.edition, JSON.stringify(issue));
-    }
+    const changed = (selector: (value: ReaderState) => unknown): boolean =>
+      !committed || JSON.stringify(selector(committed)) !== JSON.stringify(selector(state));
 
-    database.prepare("DELETE FROM occurrences").run();
-    const insertOccurrence = database.prepare(
-      "INSERT INTO occurrences (id, payload) VALUES (?, ?)",
-    );
-    for (const occurrence of state.occurrences) {
-      insertOccurrence.run(occurrence.id, JSON.stringify(occurrence));
-    }
-
-    database.prepare("DELETE FROM attempts").run();
-    const insertAttempt = database.prepare(
-      "INSERT INTO attempts (id, payload) VALUES (?, ?)",
-    );
-    for (const attempt of state.attempts) {
-      insertAttempt.run(attempt.id, JSON.stringify(attempt));
-    }
-
-    database.prepare("DELETE FROM run_leases").run();
-    const insertLease = database.prepare(
-      `INSERT INTO run_leases (attempt_id, owner_id, owner_pid, hostname, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    );
-    for (const lease of state.runLeases) {
-      // Only a run that is still live can hold a claim; a finished attempt's
-      // claim is dropped so it cannot block the next collection.
-      const attempt = state.attempts.find((item) => item.id === lease.attemptId);
-      if (attempt && attempt.state !== "RUNNING") continue;
-      insertLease.run(
-        lease.attemptId,
-        lease.ownerId,
-        lease.pid,
-        lease.hostname,
-        lease.expiresAt,
+    if (changed((value) => value.issues)) {
+      database.prepare("DELETE FROM issues").run();
+      const insertIssue = database.prepare(
+        "INSERT INTO issues (id, edition, payload) VALUES (?, ?, ?)",
       );
-    }
-
-    database.prepare("DELETE FROM progress").run();
-    const insertProgress = database.prepare(
-      "INSERT INTO progress (issue_id, article_id, edition, payload) VALUES (?, ?, ?, ?)",
-    );
-    for (const record of state.progress) {
-      insertProgress.run(
-        record.issueId,
-        record.articleId,
-        record.edition,
-        JSON.stringify(record),
-      );
-    }
-
-    database.prepare("DELETE FROM traces").run();
-    const insertTrace = database.prepare(
-      "INSERT INTO traces (id, payload) VALUES (?, ?)",
-    );
-    for (const trace of state.traces) {
-      insertTrace.run(trace.id, JSON.stringify(trace));
-    }
-
-    const retiredBodies = database
-      .prepare("SELECT article_id, edition FROM article_bodies")
-      .all() as { article_id: string; edition: number }[];
-    const keep = new Set(
-      state.cachedBodies.map((item) => `${item.articleId}|${item.edition}`),
-    );
-    const removeBody = database.prepare(
-      "DELETE FROM article_bodies WHERE article_id = ? AND edition = ?",
-    );
-    for (const row of retiredBodies) {
-      if (!keep.has(`${row.article_id}|${row.edition}`)) {
-        removeBody.run(row.article_id, row.edition);
+      for (const issue of state.issues) {
+        insertIssue.run(issue.id, issue.edition, JSON.stringify(issue));
       }
     }
 
-    database
-      .prepare(
-        "INSERT OR REPLACE INTO preferences (singleton, configured, payload) VALUES (1, ?, ?)",
-      )
-      .run(
-        state.preferencesConfigured ? 1 : 0,
-        JSON.stringify(state.preferences),
+    if (changed((value) => value.occurrences)) {
+      database.prepare("DELETE FROM occurrences").run();
+      const insertOccurrence = database.prepare(
+        "INSERT INTO occurrences (id, payload) VALUES (?, ?)",
       );
-    database
-      .prepare("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
-      .run(LAST_LOCAL_DATE_KEY, JSON.stringify(state.lastLocalDateByTimezone));
+      for (const occurrence of state.occurrences) {
+        insertOccurrence.run(occurrence.id, JSON.stringify(occurrence));
+      }
+    }
+
+    if (changed((value) => value.attempts)) {
+      database.prepare("DELETE FROM attempts").run();
+      const insertAttempt = database.prepare(
+        "INSERT INTO attempts (id, payload) VALUES (?, ?)",
+      );
+      for (const attempt of state.attempts) {
+        insertAttempt.run(attempt.id, JSON.stringify(attempt));
+      }
+    }
+
+    if (changed((value) => value.runLeases)) {
+      database.prepare("DELETE FROM run_leases").run();
+      const insertLease = database.prepare(
+        `INSERT INTO run_leases (attempt_id, owner_id, owner_pid, hostname, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const lease of state.runLeases) {
+        // Only a run that is still live can hold a claim; a finished attempt's
+        // claim is dropped so it cannot block the next collection.
+        const attempt = state.attempts.find((item) => item.id === lease.attemptId);
+        if (attempt && attempt.state !== "RUNNING") continue;
+        insertLease.run(
+          lease.attemptId,
+          lease.ownerId,
+          lease.pid,
+          lease.hostname,
+          lease.expiresAt,
+        );
+      }
+    }
+
+    if (changed((value) => value.progress)) {
+      database.prepare("DELETE FROM progress").run();
+      const insertProgress = database.prepare(
+        "INSERT INTO progress (issue_id, article_id, edition, payload) VALUES (?, ?, ?, ?)",
+      );
+      for (const record of state.progress) {
+        insertProgress.run(
+          record.issueId,
+          record.articleId,
+          record.edition,
+          JSON.stringify(record),
+        );
+      }
+    }
+
+    if (changed((value) => value.traces)) {
+      database.prepare("DELETE FROM traces").run();
+      const insertTrace = database.prepare(
+        "INSERT INTO traces (id, payload) VALUES (?, ?)",
+      );
+      for (const trace of state.traces) {
+        insertTrace.run(trace.id, JSON.stringify(trace));
+      }
+    }
+
+    if (changed((value) => value.cachedBodies)) {
+      const retiredBodies = database
+        .prepare("SELECT article_id, edition FROM article_bodies")
+        .all() as { article_id: string; edition: number }[];
+      const keep = new Set(
+        state.cachedBodies.map((item) => `${item.articleId}|${item.edition}`),
+      );
+      const removeBody = database.prepare(
+        "DELETE FROM article_bodies WHERE article_id = ? AND edition = ?",
+      );
+      for (const row of retiredBodies) {
+        if (!keep.has(`${row.article_id}|${row.edition}`)) {
+          removeBody.run(row.article_id, row.edition);
+        }
+      }
+    }
+
+    if (
+      changed(
+        (value) =>
+          [value.preferences, value.preferencesConfigured] as const,
+      )
+    ) {
+      database
+        .prepare(
+          "INSERT OR REPLACE INTO preferences (singleton, configured, payload) VALUES (1, ?, ?)",
+        )
+        .run(
+          state.preferencesConfigured ? 1 : 0,
+          JSON.stringify(state.preferences),
+        );
+    }
+    if (changed((value) => value.lastLocalDateByTimezone)) {
+      database
+        .prepare("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
+        .run(LAST_LOCAL_DATE_KEY, JSON.stringify(state.lastLocalDateByTimezone));
+    }
   }
 
   private requireDatabase(): DatabaseSync {
