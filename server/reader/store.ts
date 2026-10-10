@@ -163,24 +163,43 @@ export class ReaderStore {
     if (this.initialized) return;
     await mkdir(this.directory, { recursive: true });
     await mkdir(this.cacheDirectory, { recursive: true });
+    let loaded: ReaderState | null = null;
     try {
-      const bytes = await readFile(this.stateFile);
-      if (bytes.byteLength > this.maxStateBytes) {
-        throw new Error("state_too_large");
-      }
-      const decoded = JSON.parse(bytes.toString("utf8")) as unknown;
-      const parsed = envelopeSchema.safeParse(decoded);
-      if (!parsed.success) throw new Error("state_invalid");
-      this.state = parsed.data.state;
+      loaded = await this.readStateFromDisk();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         // Preserve a malformed or unreadable state file; never overwrite it.
         throw new ReaderStoreError("reader_store_unavailable");
       }
+    }
+    if (loaded) {
+      this.state = loaded;
+    } else {
       this.state = emptyState();
       await this.writeState(this.state);
     }
     this.initialized = true;
+  }
+
+  /**
+   * Adopt whatever another process last committed.
+   *
+   * The development server and the scheduled task are separate processes that
+   * share this file. Reads therefore refresh from disk instead of trusting a
+   * copy captured at startup.
+   */
+  async reload(): Promise<void> {
+    this.assertInitialized();
+    const execute = async (): Promise<void> => {
+      try {
+        this.state = await this.readStateFromDisk();
+      } catch {
+        // Keep the last good state when the file is unreadable or absent.
+      }
+    };
+    const current = this.queue.then(execute, execute);
+    this.queue = current.catch(() => undefined);
+    await current;
   }
 
   snapshot(): ReaderState {
@@ -188,10 +207,24 @@ export class ReaderStore {
     return structuredClone(this.state);
   }
 
+  /**
+   * Apply one mutation on top of the newest committed state.
+   *
+   * The state file is re-read inside the update so a mutation made here can
+   * never overwrite work another process committed in the meantime, which is
+   * what let a stale development-server snapshot erase a completed scheduled
+   * collection. Updates are also serialized with `reload`.
+   */
   async update<T>(mutator: (state: ReaderState) => T | Promise<T>): Promise<T> {
     this.assertInitialized();
     const execute = async (): Promise<T> => {
-      const next = structuredClone(this.state);
+      let base: ReaderState;
+      try {
+        base = await this.readStateFromDisk();
+      } catch {
+        base = this.state;
+      }
+      const next = structuredClone(base);
       const result = await mutator(next);
       const parsed = stateSchema.safeParse(next);
       if (!parsed.success) throw new ReaderStoreError("reader_state_invalid");
@@ -202,6 +235,17 @@ export class ReaderStore {
     const current = this.queue.then(execute, execute);
     this.queue = current.catch(() => undefined);
     return current;
+  }
+
+  private async readStateFromDisk(): Promise<ReaderState> {
+    const bytes = await readFile(this.stateFile);
+    if (bytes.byteLength > this.maxStateBytes) {
+      throw new Error("state_too_large");
+    }
+    const decoded = JSON.parse(bytes.toString("utf8")) as unknown;
+    const parsed = envelopeSchema.safeParse(decoded);
+    if (!parsed.success) throw new Error("state_invalid");
+    return parsed.data.state;
   }
 
   async saveCache(

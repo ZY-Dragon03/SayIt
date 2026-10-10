@@ -71,6 +71,83 @@ function issue(summary: ArticleSummary): DailyIssue {
 }
 
 describe("Reader versioned local store", () => {
+  it("never lets a stale process snapshot erase work another process committed", async () => {
+    const directory = await createDirectory();
+    const now = () => new Date("2026-10-04T00:00:00Z");
+
+    // The development server and the scheduled task are separate processes
+    // sharing this file. Both load it, then each writes.
+    const devServer = new ReaderStore({ directory, now });
+    const scheduledTask = new ReaderStore({ directory, now });
+    await devServer.initialize();
+    await scheduledTask.initialize();
+    await devServer.update((state) => {
+      state.preferencesConfigured = true;
+    });
+
+    // The task commits a completed collection, which the server never saw.
+    await scheduledTask.update((state) => {
+      state.issues.push(issue(article()));
+      state.occurrences.push({
+        id: "occurrence-2026-10-04-Asia-Shanghai",
+        localDate: "2026-10-04",
+        timezone: "Asia/Shanghai",
+        localTime: "08:00",
+        scheduledAt: "2026-10-04T00:00:00.000Z",
+        status: "COMPLETED",
+        scheduledAttemptCount: 1,
+        maxScheduledAttempts: 3,
+        nextAttemptAt: null,
+        lastAttemptId: "attempt:one",
+        updatedAt: "2026-10-04T00:00:00.000Z",
+      });
+    });
+
+    // The server then writes an unrelated progress update from its old snapshot.
+    await devServer.update((state) => {
+      state.progress.push({
+        issueId: "issue-2026-10-04-Asia-Shanghai",
+        articleId: "article-test-1",
+        edition: 1,
+        scrollRatio: 0.5,
+        scrollTop: 100,
+        firstVisibleParagraph: 3,
+        paragraphOffset: 0,
+        readState: "IN_PROGRESS",
+        updatedAt: "2026-10-04T00:00:00.000Z",
+      });
+    });
+
+    // The committed collection must survive, and the progress update lands too.
+    const committed = JSON.parse(
+      await readFile(path.join(directory, "reader-state.json"), "utf8"),
+    );
+    expect(committed.state.issues).toHaveLength(1);
+    expect(committed.state.occurrences[0]).toMatchObject({
+      status: "COMPLETED",
+      scheduledAttemptCount: 1,
+    });
+    expect(committed.state.progress).toHaveLength(1);
+  });
+
+  it("gives a long-lived reader a fresh view of another process's writes", async () => {
+    const directory = await createDirectory();
+    const now = () => new Date("2026-10-04T00:00:00Z");
+    const longLived = new ReaderStore({ directory, now });
+    await longLived.initialize();
+
+    const writer = new ReaderStore({ directory, now });
+    await writer.initialize();
+    await writer.update((state) => {
+      state.issues.push(issue(article()));
+    });
+
+    // Without a reload the long-lived process would keep serving its startup copy.
+    expect(longLived.snapshot().issues).toHaveLength(0);
+    await longLived.reload();
+    expect(longLived.snapshot().issues).toHaveLength(1);
+  });
+
   it("persists preferences and metadata in a schema-versioned envelope", async () => {
     const directory = await createDirectory();
     const store = new ReaderStore({ directory, now: () => new Date("2026-10-04T00:00:00Z") });

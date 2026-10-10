@@ -49,7 +49,12 @@ export function readerServicePlugin(options: ReaderServicePluginOptions = {}): P
           next();
           return;
         }
-        void handleReader(request, response);
+        // Another process (the scheduled task) may have committed since this
+        // server last read the state, so every Reader request adopts it first.
+        void service
+          .reload()
+          .catch(() => undefined)
+          .then(() => handleReader(request, response));
       });
 
       server.httpServer?.once("close", () => {

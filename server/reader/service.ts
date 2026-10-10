@@ -633,6 +633,18 @@ export class ReaderService {
     };
   }
 
+  /**
+   * Adopt the newest committed state before answering a Reader request.
+   *
+   * The development server is a long-lived process that shares the state file
+   * with the scheduled task, so without this the UI would keep serving the
+   * snapshot it happened to load at startup.
+   */
+  async reload(): Promise<void> {
+    if (!this.started) return;
+    await this.store.reload();
+  }
+
   archive(limit = 30): DailyIssue[] {
     const state = this.requireStore().snapshot();
     const latestByDate = new Map<string, DailyIssue>();
