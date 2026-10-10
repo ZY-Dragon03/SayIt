@@ -335,7 +335,13 @@ export class ReaderStore {
         const next = structuredClone(committed);
         const result = await mutator(next);
         const parsed = stateSchema.safeParse(next);
-        if (!parsed.success) throw new ReaderStoreError("reader_state_invalid");
+        if (!parsed.success) {
+          const issues = parsed.error.issues
+            .slice(0, 6)
+            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+            .join(" | ");
+          throw new ReaderStoreError("reader_state_invalid", new Error(issues));
+        }
         // Rewriting every table on every write would hold the write lock for
         // work nobody asked for, so a progress save or a heartbeat would stall
         // the UI for as long as the whole state took to rewrite. The version this
@@ -895,7 +901,15 @@ export class ReaderStore {
 
 export class ReaderStoreError extends Error {
   constructor(readonly code: string, readonly cause?: unknown) {
-    super("Reader local storage could not complete this request.");
+    // The cause carries the underlying failure, so it is surfaced here rather
+    // than hidden behind a generic sentence when a collection needs diagnosing.
+    const detail =
+      cause instanceof Error
+        ? `: ${cause.message}`
+        : typeof cause === "string"
+          ? `: ${cause}`
+          : "";
+    super(`Reader local storage could not complete this request (${code})${detail}`);
     this.name = "ReaderStoreError";
   }
 }

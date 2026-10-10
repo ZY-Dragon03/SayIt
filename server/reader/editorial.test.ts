@@ -3,6 +3,11 @@ import {
   collectEditorial as collectEditorialCore,
   countSentenceEnds,
   countSyllablesInWord,
+  difficultyTierDistance,
+  isDeliverableDifficulty,
+  measuredDifficulty,
+  parsePublisherFeed,
+  PUBLISHER_FEEDS,
   readArticleFullText,
   readingMetrics,
   shingleJaccard,
@@ -448,6 +453,259 @@ describe("SayIt Reader Editorial Agent", () => {
 
       expect(result.articles).toHaveLength(0);
       expect(result.trace.candidates.some((candidate) => /canonical URL/iu.test(candidate.reason))).toBe(true);
+    });
+  });
+
+  describe("official publisher feeds", () => {
+    const feedUrl = "https://www.bbc.com/news/articles/rss-one";
+    const title = "Why finance reporting needs verified publication dates";
+    const body = articleBody("finance policy review and independent analysis");
+
+    function feedHarness(feedCandidates: { url: string; title: string; publication: string }[]) {
+      return async () => ({
+        candidates: feedCandidates.map((item) => ({ ...item, snippet: "" })),
+        decisions: [`Publisher feed ${feedCandidates[0]?.publication ?? "test"} contributed ${feedCandidates.length} candidate article(s).`],
+      });
+    }
+
+    it("merges feed and search candidates and verifies a shared article once", async () => {
+      const searchCalls: string[] = [];
+      const result = await collectEditorial(preferencesForTopic(body, "Finance"), {
+        feedDiscovery: feedHarness([{ url: feedUrl, title, publication: "BBC World" }]),
+        // Search offers the same article plus one of its own.
+        search: async (query) => {
+          searchCalls.push(query);
+          return [
+            { url: feedUrl, title, snippet: "" },
+            {
+              url: "https://www.reuters.com/technology/2026/10/04/independent-editorial-analysis",
+              title: "A second verified finance analysis",
+              snippet: "",
+            },
+          ];
+        },
+        fetchArticle: makeFetcher(
+          new Map([
+            [feedUrl, pageFor(feedUrl, title, body, "BBC")],
+            [
+              "https://www.reuters.com/technology/2026/10/04/independent-editorial-analysis",
+              pageFor(
+                "https://www.reuters.com/technology/2026/10/04/independent-editorial-analysis",
+                "A second verified finance analysis",
+                body,
+                "Reuters",
+              ),
+            ],
+          ]),
+        ),
+        maxArticleChecks: 4,
+      });
+
+      // The shared URL is offered by both sources, so every later sighting is
+      // recorded as a duplicate and the article reaches verification once.
+      const sharedSightings = result.trace.candidates.filter(
+        (candidate) => candidate.url === feedUrl,
+      );
+      expect(sharedSightings.filter((candidate) => candidate.outcome === "DUPLICATE").length).toBe(
+        sharedSightings.length - 1,
+      );
+      expect(sharedSightings.filter((candidate) => candidate.outcome !== "DUPLICATE")).toHaveLength(1);
+      expect(searchCalls.length).toBeGreaterThan(0);
+      // Both sources contributed to the same pipeline.
+      expect(result.trace.decisions.some((line) => /Publisher feed .* contributed/iu.test(line))).toBe(true);
+      expect(result.articles.length).toBeGreaterThan(0);
+    });
+
+    it("keeps collecting when one feed fails", async () => {
+      const workingUrl = "https://www.theguardian.com/world/2026/oct/10/finance-analysis";
+      const result = await collectEditorial(preferencesForTopic(body, "Finance"), {
+        feedDiscovery: async () => ({
+          candidates: [{ url: workingUrl, title, publication: "The Guardian World", snippet: "" }],
+          decisions: [
+            "Publisher feed BBC World could not be read: feed timed out.",
+            "Publisher feed The Guardian World contributed 1 candidate article(s).",
+          ],
+        }),
+        search: async () => [],
+        fetchArticle: makeFetcher(new Map([[workingUrl, pageFor(workingUrl, title, body, "The Guardian")]])),
+        maxArticleChecks: 2,
+      });
+
+      // The failing feed is recorded and the working one still delivered.
+      expect(result.trace.decisions.some((line) => /BBC World could not be read/iu.test(line))).toBe(true);
+      expect(result.articles).toHaveLength(1);
+    });
+
+    it("reads publisher feeds even when every search query fails", async () => {
+      const result = await collectEditorial(preferencesForTopic(body, "Finance"), {
+        feedDiscovery: feedHarness([{ url: feedUrl, title, publication: "BBC World" }]),
+        search: async () => {
+          throw new Error("search provider unavailable");
+        },
+        fetchArticle: makeFetcher(new Map([[feedUrl, pageFor(feedUrl, title, body, "BBC")]])),
+        maxArticleChecks: 2,
+      });
+
+      // Discovery is not reported as unavailable: a real source produced a real article.
+      expect(result.articles).toHaveLength(1);
+    });
+
+    it("parses a real RSS document into candidates", () => {
+      const xml = `<?xml version="1.0"?><rss version="2.0"><channel>
+        <item><title>First &amp; story</title><link>https://www.bbc.com/news/articles/one</link>
+        <description><![CDATA[<p>Summary</p>]]></description></item>
+        <item><title>Second story</title><link>https://www.bbc.com/news/articles/two</link></item>
+      </channel></rss>`;
+      const candidates = parsePublisherFeed(xml, {
+        name: "BBC World",
+        url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+        topics: ["Politics"],
+      });
+      expect(candidates).toEqual([
+        { url: "https://www.bbc.com/news/articles/one", title: "First & story", snippet: "Summary", publication: "BBC World" },
+        { url: "https://www.bbc.com/news/articles/two", title: "Second story", snippet: "", publication: "BBC World" },
+      ]);
+    });
+
+    it("parses an Atom document and ignores a malformed one", () => {
+      const atom = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+        <entry><title>Atom story</title><link rel="alternate" href="https://example.com/a"/></entry></feed>`;
+      expect(
+        parsePublisherFeed(atom, { name: "Example", url: "https://example.com/feed", topics: [] }),
+      ).toEqual([
+        { url: "https://example.com/a", title: "Atom story", snippet: "", publication: "Example" },
+      ]);
+      expect(
+        parsePublisherFeed("<html><body>not a feed", { name: "Example", url: "https://example.com/feed", topics: [] }),
+      ).toEqual([]);
+    });
+
+    it("uses real publisher feed URLs that have been fetched", () => {
+      for (const feed of PUBLISHER_FEEDS) {
+        expect(feed.url.startsWith("https://")).toBe(true);
+        expect(feed.topics.length).toBeGreaterThan(0);
+        expect(feed.name.length).toBeGreaterThan(0);
+      }
+      const names = PUBLISHER_FEEDS.map((feed) => feed.name);
+      expect(names.some((name) => /BBC/u.test(name))).toBe(true);
+      expect(names.some((name) => /Guardian/u.test(name))).toBe(true);
+      expect(names.some((name) => /Al Jazeera/u.test(name))).toBe(true);
+    });
+  });
+
+  describe("shared reading-difficulty policy", () => {
+    /**
+     * Fixtures with measured tiers that differ, so the policy is exercised on
+     * real readability metrics rather than on asserted labels.
+     */
+    const INTERMEDIATE_BODY = Array.from(
+      { length: 8 },
+      () =>
+        "The report examines the recent decision and explains how it affects credit, savings, and business investment. Officials said prices and employment data will guide the next set of choices. The report examines the recent decision and explains how it affects credit, savings, and business investment. Officials said prices and employment data will guide the next set of choices.",
+    ).join("\n\n");
+    const ADVANCED_BODY = Array.from(
+      { length: 8 },
+      (_, index) =>
+        `Notwithstanding the ostensibly stabilizing implications of the announced monetary framework, the aggregate consequences for heterogeneous economic participants remain substantially indeterminate. Consequently, an analytically rigorous appraisal necessitates distinguishing between immediately observable market perturbations and the more protracted structural transformations that regulatory interventions ultimately precipitate. ${index % 2 ? "The investigation additionally evaluates institutional ramifications." : "Correspondingly, methodological refinements appear warranted."}`,
+    ).join("\n\n");
+
+    it("prefers the requested tier and permits exactly one adjacent tier", () => {
+      // Intermediate is requested: Intermediate is preferred, Easy and Advanced
+      // are permitted fallbacks, and anything two tiers away is refused.
+      expect(difficultyTierDistance(10.4, "Intermediate")).toBe(0);
+      expect(difficultyTierDistance(3.1, "Intermediate")).toBe(1);
+      expect(difficultyTierDistance(14.2, "Intermediate")).toBe(1);
+      expect(isDeliverableDifficulty(10.4, "Intermediate")).toBe(true);
+      expect(isDeliverableDifficulty(3.1, "Intermediate")).toBe(true);
+      expect(isDeliverableDifficulty(14.2, "Intermediate")).toBe(true);
+
+      // An Easy target reaches Advanced only through an Intermediate fallback,
+      // so a two-tier gap is never allowed.
+      expect(difficultyTierDistance(14.2, "Easy")).toBe(2);
+      expect(isDeliverableDifficulty(14.2, "Easy")).toBe(false);
+      expect(difficultyTierDistance(3.1, "Advanced")).toBe(2);
+      expect(isDeliverableDifficulty(3.1, "Advanced")).toBe(false);
+      // An unmeasurable article is never silently eligible.
+      expect(isDeliverableDifficulty(null, "Intermediate")).toBe(false);
+    });
+
+    it("reports the measured tier truthfully instead of the requested one", () => {
+      const body = articleBody("finance policy review and independent analysis");
+      const page = pageFor("https://www.reuters.com/technology/2026/10/04/finance-review", "A finance review", body, "Reuters");
+      // The page's own reading metrics decide the tier, not the saved target.
+      expect(measuredDifficulty(14.2)).toBe("Advanced");
+      expect(measuredDifficulty(10.4)).toBe("Intermediate");
+      expect(page.statusCode).toBe(200);
+    });
+
+    it("chooses an exact match before an adjacent-tier fallback", { timeout: 30_000 }, async () => {
+      // Two publishers, two measured tiers: one Intermediate (the requested
+      // tier) and one Advanced (one adjacent tier, a permitted fallback).
+      const exactUrl = "https://www.reuters.com/technology/2026/10/04/finance-exact";
+      const fallbackUrl = "https://www.ft.com/content/finance-fallback";
+      const exactMetrics = readingMetrics(INTERMEDIATE_BODY);
+      const fallbackMetrics = readingMetrics(ADVANCED_BODY);
+      expect(exactMetrics.difficulty).toBe("Intermediate");
+      expect(fallbackMetrics.difficulty).toBe("Advanced");
+      const preferences: EditorialPreferences = {
+        topics: ["Finance"],
+        dailyArticleCount: 2,
+        difficulty: "Intermediate",
+        readingBudgetMinutes:
+          exactMetrics.readingMinutes + fallbackMetrics.readingMinutes + 0.5,
+      };
+      const result = await collectEditorial(preferences, {
+        // Search offers the fallback first, so ordering must come from the
+        // difficulty policy rather than from discovery order.
+        search: async () => [
+          { url: fallbackUrl, title: "An advanced currency analysis", snippet: "" },
+          { url: exactUrl, title: "A measured finance analysis", snippet: "" },
+        ],
+        fetchArticle: makeFetcher(
+          new Map([
+            [fallbackUrl, pageFor(fallbackUrl, "An advanced currency analysis", ADVANCED_BODY, "Ft")],
+            [exactUrl, pageFor(exactUrl, "A measured finance analysis", INTERMEDIATE_BODY, "Reuters")],
+          ]),
+        ),
+        maxArticleChecks: 2,
+        semanticClient: testSemanticClient(),
+      });
+
+      // Both are deliverable, and the preferred tier is delivered first.
+      expect(result.articles.length).toBe(2);
+      expect(difficultyTierDistance(result.articles[0]!.fkgl, "Intermediate")).toBe(0);
+      for (const article of result.articles) {
+        const distance = difficultyTierDistance(article.fkgl, "Intermediate");
+        expect(distance).not.toBeNull();
+        expect(distance as number).toBeLessThanOrEqual(1);
+        // The measured tier is reported as itself, never relabelled.
+        expect(article.difficulty).toBe(measuredDifficulty(article.fkgl));
+      }
+    });
+
+    it("accepts an adjacent-tier fallback when nothing matches the requested tier", { timeout: 30_000 }, async () => {
+      const advancedUrl = "https://www.ft.com/content/only-advanced";
+      const result = await collectEditorial(
+        {
+          topics: ["Finance"],
+          dailyArticleCount: 1,
+          difficulty: "Intermediate",
+          readingBudgetMinutes: readingMetrics(ADVANCED_BODY).readingMinutes + 0.5,
+        },
+        {
+          search: async () => [{ url: advancedUrl, title: "An advanced currency analysis", snippet: "" }],
+          fetchArticle: makeFetcher(
+            new Map([[advancedUrl, pageFor(advancedUrl, "An advanced currency analysis", ADVANCED_BODY, "Ft")]]),
+          ),
+          maxArticleChecks: 1,
+          semanticClient: testSemanticClient(),
+        },
+      );
+
+      // One adjacent tier is a permitted fallback, and it is reported truthfully.
+      expect(result.articles).toHaveLength(1);
+      expect(result.articles[0]?.difficulty).toBe("Advanced");
+      expect(result.articles[0]?.editorial?.decision).toBe("APPROVE");
     });
   });
 

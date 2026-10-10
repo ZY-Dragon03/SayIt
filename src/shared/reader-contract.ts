@@ -140,6 +140,12 @@ export const articleSummarySchema = z
     topics: z.array(z.string().min(1).max(64)),
     difficulty: readerDifficultySchema.nullable(),
     paragraphCount: z.number().int().nonnegative(),
+    /**
+     * The publisher's stated publication time, when its page declares one. A
+     * dated recovery uses it to refuse an article that appeared after the issue
+     * date it would fill.
+     */
+    publishedAt: z.string().datetime({ offset: true }).nullable().optional(),
     provenance: z
       .object({
         publisherIdentity: z.string().min(1).max(160),

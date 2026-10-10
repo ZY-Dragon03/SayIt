@@ -129,6 +129,14 @@ export interface EditorialArticleFetcher {
 export interface EditorialOptions {
   /** Dynamic search may be overridden in deterministic tests; production defaults to DuckDuckGo. */
   search?: EditorialSearchProvider;
+  /**
+   * Official publisher feeds, read alongside search and merged into the same
+   * deduplicated candidate set. Overridable so tests need no network.
+   */
+  feedDiscovery?: (
+    topics: string[],
+    signal?: AbortSignal,
+  ) => Promise<{ candidates: SearchCandidate[]; decisions: string[] }>;
   /** Required so article URLs always pass through the service's SSRF-safe, pinned-IP adapter. */
   fetchArticle: EditorialArticleFetcher;
   now?: () => Date;
@@ -1612,8 +1620,50 @@ function deduplicate(
   return { duplicate: null, reason: null };
 }
 
+/** The difficulty tiers, ordered from easiest to hardest. */
+const DIFFICULTY_TIERS: ReaderDifficulty[] = ["Easy", "Intermediate", "Advanced"];
+
+/** The difficulty an article's measured reading grade actually reports. */
+export function measuredDifficulty(fkgl: number | null): ReaderDifficulty | null {
+  if (fkgl === null) return null;
+  return fkgl <= 8 ? "Easy" : fkgl <= 12 ? "Intermediate" : "Advanced";
+}
+
+/**
+ * How far an article's measured difficulty sits from the requested tier.
+ *
+ * One shared rule for candidate selection, result ranking and final Issue
+ * fulfilment: the requested tier is preferred, an adjacent tier is permitted
+ * only as a fallback, and a two-tier difference is never allowed. The measured
+ * tier is always reported as itself, so an Advanced article is never relabelled
+ * Intermediate to satisfy a target.
+ */
+export function difficultyTierDistance(
+  fkgl: number | null,
+  target: ReaderDifficulty,
+): number | null {
+  const measured = measuredDifficulty(fkgl);
+  if (!measured) return null;
+  const measuredIndex = DIFFICULTY_TIERS.indexOf(measured);
+  const targetIndex = DIFFICULTY_TIERS.indexOf(target);
+  if (measuredIndex < 0 || targetIndex < 0) return null;
+  return Math.abs(measuredIndex - targetIndex);
+}
+
+/** Whether an article's measured difficulty may be delivered for a target. */
+export function isDeliverableDifficulty(
+  fkgl: number | null,
+  target: ReaderDifficulty,
+): boolean {
+  const distance = difficultyTierDistance(fkgl, target);
+  return distance !== null && distance <= MAX_DIFFICULTY_DISTANCE;
+}
+
+/** The largest difference between the requested and delivered tier. */
+export const MAX_DIFFICULTY_DISTANCE = 1;
+
 function satisfiesDifficulty(article: EditorialArticle, target: ReaderDifficulty): boolean {
-  return article.difficulty === target;
+  return isDeliverableDifficulty(article.fkgl, target);
 }
 
 function bestSelection(
@@ -1683,6 +1733,168 @@ function buildQueries(topics: string[]): string[] {
   return queryVariants(clean);
 }
 
+/**
+ * A publisher feed, with the topics it can serve.
+ *
+ * Only feeds that have been fetched and shown to yield verifiable full-text
+ * articles are listed, so discovery spends its budget on sources that can
+ * actually deliver reading rather than on guesses.
+ */
+export interface PublisherFeed {
+  name: string;
+  url: string;
+  /** Topics this feed's coverage matches. */
+  topics: string[];
+}
+
+export const PUBLISHER_FEEDS: PublisherFeed[] = [
+  {
+    name: "BBC World",
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+    topics: ["Politics", "Geopolitics", "Economy"],
+  },
+  {
+    name: "The Guardian World",
+    url: "https://www.theguardian.com/world/rss",
+    topics: ["Politics", "Geopolitics", "Economy"],
+  },
+  {
+    name: "The Guardian Business",
+    url: "https://www.theguardian.com/uk/business/rss",
+    topics: ["Economy", "Finance", "Business"],
+  },
+  {
+    name: "NPR News",
+    url: "https://feeds.npr.org/1001/rss.xml",
+    topics: ["Politics", "Economy", "Geopolitics"],
+  },
+  {
+    name: "Al Jazeera",
+    url: "https://www.aljazeera.com/xml/rss/all.xml",
+    topics: ["Geopolitics", "Politics", "Economy"],
+  },
+];
+
+/** How many feed items one source may contribute to a single collection. */
+const MAX_FEED_ITEMS = 12;
+
+/** A whole-feed deadline, so one slow publisher cannot hold up a collection. */
+const FEED_TIMEOUT_MS = 10_000;
+
+function feedTopicsFor(feed: PublisherFeed, requested: string[]): string[] {
+  const shared = feed.topics.filter((topic) =>
+    requested.some(
+      (candidate) =>
+        normalizeWhitespace(candidate).toLowerCase() ===
+        normalizeWhitespace(topic).toLowerCase(),
+    ),
+  );
+  // A feed whose own section does not name a requested topic still carries
+  // politics, economics and world news, so it is kept rather than dropped: the
+  // pipeline re-checks every article's topic before it can be delivered.
+  return shared.length > 0 ? shared : feed.topics;
+}
+
+/** Read one publisher feed with the XML parser already used for article pages. */
+export function parsePublisherFeed(xml: string, feed: PublisherFeed): SearchCandidate[] {
+  let document: Document;
+  try {
+    document = new JSDOM(xml, { contentType: "text/xml" }).window.document;
+  } catch {
+    return [];
+  }
+  const entries = [
+    ...document.querySelectorAll("item"),
+    ...document.querySelectorAll("entry"),
+  ].slice(0, MAX_FEED_ITEMS);
+  const candidates: SearchCandidate[] = [];
+  for (const entry of entries) {
+    const title = normalizeWhitespace(entry.querySelector("title")?.textContent ?? "");
+    // Atom states the target in an href, RSS in the element text.
+    const linkElement = entry.querySelector("link");
+    const rawLink = normalizeWhitespace(
+      linkElement?.getAttribute("href") ?? linkElement?.textContent ?? "",
+    );
+    if (!title || !rawLink) continue;
+    candidates.push({
+      url: rawLink,
+      title,
+      // Feeds commonly wrap the summary in HTML, so only its text is kept.
+      snippet: normalizeWhitespace(
+        (entry.querySelector("description, summary")?.textContent ?? "").replace(/<[^>]*>/gu, " "),
+      ),
+      publication: feed.name,
+    });
+  }
+  return candidates;
+}
+
+/**
+ * Discover candidates from official publisher feeds.
+ *
+ * Each feed is bounded and independent: a feed that is slow, blocked or
+ * malformed contributes nothing and the others still return their articles.
+ */
+export async function discoverFromPublisherFeeds(
+  topics: string[],
+  signal?: AbortSignal,
+): Promise<{ candidates: SearchCandidate[]; decisions: string[] }> {
+  // Unit tests inject `feedDiscovery`. Leaving the live network out of a test run
+  // keeps a suite deterministic and stops every test from fetching five feeds.
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return {
+      candidates: [],
+      decisions: [
+        "Publisher feeds are not read in this context; the collection pipeline supplies them.",
+      ],
+    };
+  }
+  const feeds = PUBLISHER_FEEDS.filter((feed) => feedTopicsFor(feed, topics).length > 0);
+  const decisions: string[] = [];
+  const collected: SearchCandidate[] = [];
+
+  await mapLimit(feeds, 4, async (feed) => {
+    if (signal?.aborted) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
+    const relayAbort = () => controller.abort();
+    signal?.addEventListener("abort", relayAbort, { once: true });
+    try {
+      const response = await fetch(feed.url, {
+        headers: {
+          "user-agent": SEARCH_USER_AGENT,
+          accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        },
+        signal: controller.signal,
+        redirect: "follow",
+      });
+      if (!response.ok) {
+        decisions.push(`Publisher feed ${feed.name} returned HTTP ${response.status}.`);
+        return;
+      }
+      const xml = await readBounded(response, MAX_SEARCH_BYTES);
+      const candidates = parsePublisherFeed(xml, feed);
+      if (candidates.length === 0) {
+        decisions.push(`Publisher feed ${feed.name} exposed no readable items.`);
+        return;
+      }
+      collected.push(...candidates);
+      decisions.push(
+        `Publisher feed ${feed.name} contributed ${candidates.length} candidate article(s).`,
+      );
+    } catch (error) {
+      decisions.push(
+        `Publisher feed ${feed.name} could not be read: ${error instanceof Error ? error.message : "unknown feed error"}.`,
+      );
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", relayAbort);
+    }
+  });
+
+  return { candidates: collected, decisions };
+}
+
 async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const output = new Array<R>(items.length);
   let cursor = 0;
@@ -1718,10 +1930,56 @@ export async function collectEditorial(
   validatePreferences(preferences);
   if (typeof options.fetchArticle !== "function") throw new Error("An SSRF-safe article fetcher is required.");
   const search = options.search ?? searchDuckDuckGo;
+  const feedDiscovery = options.feedDiscovery ?? discoverFromPublisherFeeds;
   const queries = buildQueries(preferences.topics);
   const trace: EditorialTrace = { queries: [], candidates: [], decisions: [] };
   const discovered = new Map<string, SearchCandidate>();
   let successfulSearchResponses = 0;
+  let successfulFeedResponses = 0;
+
+  /**
+   * Merge one discovery source into the shared candidate set.
+   *
+   * Publisher feeds and search results feed the same map, so an article offered
+   * by both is verified once and carries the publisher's own name.
+   */
+  const mergeCandidates = (
+    results: SearchCandidate[],
+    duplicateReason: string,
+    origin: "feed" | "search",
+  ) => {
+    for (const result of results) {
+      const normalized = normalizeUrl(result.url);
+      if (!normalized) {
+        trace.candidates.push({ url: result.url, publication: result.publication ?? "", outcome: "REJECTED", reason: "Search result did not resolve to a public HTTPS URL.", statusCode: null, articleId: null });
+        continue;
+      }
+      const existing = discovered.get(normalized);
+      if (existing) {
+        // A publisher feed states the publication name itself, so it is kept
+        // when search offered the same URL under a weaker attribution.
+        if (origin === "feed" && result.publication && !existing.publication) {
+          discovered.set(normalized, { ...existing, publication: result.publication });
+        }
+        trace.candidates.push({ url: normalized, publication: result.publication ?? "", outcome: "DUPLICATE", reason: duplicateReason, statusCode: null, articleId: null });
+        continue;
+      }
+      discovered.set(normalized, { ...result, url: normalized });
+    }
+  };
+
+  // Official publisher feeds first: they name their own articles and are the
+  // sources shown to produce verifiable full-text reading.
+  try {
+    const feeds = await feedDiscovery(preferences.topics, options.signal);
+    trace.decisions.push(...feeds.decisions);
+    if (feeds.candidates.length > 0) successfulFeedResponses = 1;
+    mergeCandidates(feeds.candidates, "A publisher feed and the search results named the same article.", "feed");
+  } catch (error) {
+    trace.decisions.push(
+      `Publisher feed discovery failed: ${error instanceof Error ? error.message : "unknown feed error"}.`,
+    );
+  }
 
   for (const query of queries) {
     if (options.signal?.aborted) break;
@@ -1729,32 +1987,26 @@ export async function collectEditorial(
     try {
       const results = await search(query, options.signal);
       successfulSearchResponses += 1;
-      for (const result of results) {
-        const normalized = normalizeUrl(result.url);
-        if (!normalized) {
-          trace.candidates.push({ url: result.url, publication: result.publication ?? "", outcome: "REJECTED", reason: "Search result did not resolve to a public HTTPS URL.", statusCode: null, articleId: null });
-          continue;
-        }
-        if (discovered.has(normalized)) {
-          trace.candidates.push({ url: normalized, publication: result.publication ?? "", outcome: "DUPLICATE", reason: "Search results repeated the same normalized URL.", statusCode: null, articleId: null });
-          continue;
-        }
-        discovered.set(normalized, { ...result, url: normalized });
-      }
+      mergeCandidates(results, "Search results repeated the same normalized URL.", "search");
     } catch (error) {
       trace.decisions.push(`Search failed for query “${query}”: ${error instanceof Error ? error.message : "unknown search error"}`);
     }
   }
 
-  if (trace.queries.length > 0 && successfulSearchResponses === 0 && !options.signal?.aborted) {
+  if (
+    trace.queries.length > 0 &&
+    successfulSearchResponses === 0 &&
+    successfulFeedResponses === 0 &&
+    !options.signal?.aborted
+  ) {
     throw new EditorialCollectionError(
       "reader_discovery_unavailable",
-      "All preference-based discovery searches failed before returning results.",
+      "All preference-based discovery sources failed before returning results.",
     );
   }
 
   const candidates = [...discovered.values()].slice(0, Math.max(1, Math.min(options.maxArticleChecks ?? 36, 60)));
-  trace.decisions.push(`Generated ${trace.queries.length} preference-based search queries and discovered ${discovered.size} unique article URLs; no article URL list was supplied as input.`);
+  trace.decisions.push(`Generated ${trace.queries.length} preference-based search queries and read ${PUBLISHER_FEEDS.length} official publisher feeds, discovering ${discovered.size} unique article URLs; no article URL list was supplied as input.`);
   let transientHttpFailures = 0;
   let sourceFetchFailures = 0;
   let nonTransientResponses = 0;
@@ -1932,14 +2184,27 @@ export async function collectEditorial(
       editorialScore(right.article.editorial!) - editorialScore(left.article.editorial!) ||
       left.article.readingMinutes - right.article.readingMinutes,
     );
+  // The requested tier is preferred; an adjacent tier is carried as a fallback
+  // so a short day still delivers reading. Anything two tiers away is refused.
   const eligible = approved
     .map((item) => item.article)
-    .filter((article) => satisfiesDifficulty(article, preferences.difficulty) && article.topics.length > 0);
+    .filter((article) => satisfiesDifficulty(article, preferences.difficulty) && article.topics.length > 0)
+    // Exact matches first, then adjacent-tier fallbacks.
+    .sort(
+      (left, right) =>
+        (difficultyTierDistance(left.fkgl, preferences.difficulty) ?? 9) -
+        (difficultyTierDistance(right.fkgl, preferences.difficulty) ?? 9),
+    );
   for (const item of approved) {
-    if (!satisfiesDifficulty(item.article, preferences.difficulty)) {
-      item.trace.outcome = "REJECTED";
-      item.trace.reason = `Semantic approval did not override measured difficulty ${item.article.difficulty}; saved preference is ${preferences.difficulty}.`;
+    if (satisfiesDifficulty(item.article, preferences.difficulty)) {
+      const distance = difficultyTierDistance(item.article.fkgl, preferences.difficulty);
+      if (distance === MAX_DIFFICULTY_DISTANCE) {
+        item.trace.reason = `${item.trace.reason} Delivered as an adjacent-difficulty fallback: measured difficulty is ${item.article.difficulty}, requested ${preferences.difficulty}.`;
+      }
+      continue;
     }
+    item.trace.outcome = "REJECTED";
+    item.trace.reason = `Semantic approval did not override measured difficulty ${item.article.difficulty}; saved preference is ${preferences.difficulty} and only one adjacent tier may be used as a fallback.`;
   }
   const deliveredContext = options.alreadyDelivered?.slice(0, MAX_SEMANTIC_EXISTING_ARTICLES) ?? [];
   const existingCount = deliveredContext.length;

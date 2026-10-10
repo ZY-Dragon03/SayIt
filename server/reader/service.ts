@@ -20,7 +20,9 @@ import {
 import { safeFetchArticle, type SafeHttpResponse } from "./safe-fetch";
 import {
   collectEditorial,
+  difficultyTierDistance,
   EditorialCollectionError,
+  isDeliverableDifficulty,
   readArticleFullText,
 } from "./editorial";
 import type { JsonCompletionClient } from "../provider";
@@ -312,33 +314,23 @@ function previousCalendarDate(
  * How far an article's measured difficulty sits from the saved preference.
  *
  * FKGL is an approximate estimator, not proof that a text is unsuitable, so it
- * guides ranking instead of gating delivery. Only a distance of one tier is
- * tolerated: an article two tiers away from the stated target is a worse
- * reading experience than showing fewer articles.
+ * guides ranking instead of gating delivery. The rule itself lives in the
+ * editorial pipeline, so candidate selection and final Issue fulfilment can
+ * never disagree about what is deliverable.
  */
 function difficultyDistance(
   article: ArticleSummary,
   preferences: ReaderPreferences,
 ): number | null {
-  if (article.fkgl === null) return null;
-  const measured =
-    article.fkgl <= 8 ? "Easy" : article.fkgl <= 12 ? "Intermediate" : "Advanced";
-  const tiers: ReaderPreferences["difficulty"][] = ["Easy", "Intermediate", "Advanced"];
-  const measuredIndex = tiers.indexOf(measured);
-  const targetIndex = tiers.indexOf(preferences.difficulty);
-  if (measuredIndex < 0 || targetIndex < 0) return null;
-  return Math.abs(measuredIndex - targetIndex);
+  return difficultyTierDistance(article.fkgl, preferences.difficulty);
 }
-
-const MAX_DIFFICULTY_DISTANCE = 1;
 
 function isSuitable(article: ArticleSummary, preferences: ReaderPreferences): boolean {
   if (!isFullText(article) || article.fkgl === null || article.sentenceCount < 1) return false;
   if (!preferences.topics.some((topic) => article.topics.some((candidate) => sameTopic(topic, candidate)))) {
     return false;
   }
-  const distance = difficultyDistance(article, preferences);
-  return distance !== null && distance <= MAX_DIFFICULTY_DISTANCE;
+  return isDeliverableDifficulty(article.fkgl, preferences.difficulty);
 }
 
 function sanitizeTraceUrl(value: string): string {
