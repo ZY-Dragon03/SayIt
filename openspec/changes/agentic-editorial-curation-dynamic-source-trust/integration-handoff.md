@@ -16,7 +16,7 @@
 
 ## Integrator Next Action
 
-执行主机只做有界 source review、工件一致性检查和确立单一 candidate SHA。真实缺陷返回 `/root/piw_pm_v11/implement_v11_editorial` 做必要修复；不得在集成过程中顺手改造其他模块。提交时使用准确路径，包含新 V1.1 工程/状态证据；不触碰旧证据分支或 PR #1。集成候选确定后把 SHA、tree 和 evidence 索引交回 PM。
+执行主机只做有界 source review、工件一致性检查和确立单一 candidate SHA。真实缺陷返回实施线程做必要修复；不得在集成过程中顺手改造其他模块。提交时使用准确路径，包含新 V1.1 工程/状态证据；不触碰旧证据分支或 PR #1。集成候选确定后把 SHA、tree 和 evidence 索引交回 PM。
 
 ## AE Handoff Boundary
 

@@ -5,13 +5,14 @@ Const SAYIT_URL = "http://127.0.0.1:5173/"
 Const WINDOW_HIDDEN = 0
 Const WAIT_FOR_EXIT = True
 
-Dim shell, fileSystem, root, envPath, examplePath
+Dim shell, fileSystem, root, envPath, examplePath, nodeMajor
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
 
 root = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 envPath = fileSystem.BuildPath(root, ".env.local")
 examplePath = fileSystem.BuildPath(root, ".env.example")
+nodeMajor = NodeMajorVersion()
 
 If IsCheckMode() Then
   WScript.Echo "Start SayIt launcher check passed."
@@ -19,7 +20,26 @@ If IsCheckMode() Then
   WScript.Echo "package.json: " & fileSystem.FileExists(fileSystem.BuildPath(root, "package.json"))
   WScript.Echo "env example: " & fileSystem.FileExists(examplePath)
   WScript.Echo "vite binary: " & fileSystem.FileExists(fileSystem.BuildPath(root, "node_modules\.bin\vite.cmd"))
+  WScript.Echo "node major: " & nodeMajor
   WScript.Quit 0
+End If
+
+If nodeMajor < 0 Then
+  MsgBox "Node.js is required." & vbCrLf & vbCrLf & _
+         "Install the current Node.js 24 LTS release from https://nodejs.org/ " & _
+         "and double-click Start SayIt again.", _
+         vbCritical, "SayIt setup"
+  WScript.Quit 1
+End If
+
+If Not HasSupportedNode(nodeMajor) Then
+  MsgBox "SayIt needs Node.js 24 or newer; this machine has Node.js " & _
+         nodeMajor & "." & vbCrLf & vbCrLf & _
+         "Reader stores its state with the built-in node:sqlite module, which " & _
+         "needs the Node 24 LTS baseline. Install the current Node.js 24 LTS " & _
+         "release from https://nodejs.org/ and double-click Start SayIt again.", _
+         vbCritical, "SayIt setup"
+  WScript.Quit 1
 End If
 
 If IsServerReady() Then
@@ -116,6 +136,42 @@ Function HasConfiguredApiKey(path)
   Next
 End Function
 
+Function NodeMajorVersion()
+  Dim exec, text, parts
+  NodeMajorVersion = -1
+
+  On Error Resume Next
+  Set exec = shell.Exec("cmd.exe /d /s /c node --version")
+  If Err.Number <> 0 Then
+    Err.Clear
+    On Error GoTo 0
+    Exit Function
+  End If
+  Do While Not exec.StdOut.AtEndOfStream
+    text = text & exec.StdOut.ReadLine()
+  Loop
+  exec.Terminate
+  On Error GoTo 0
+
+  text = Trim(text)
+  If Len(text) = 0 Then
+    Exit Function
+  End If
+  If Left(text, 1) = "v" Or Left(text, 1) = "V" Then
+    text = Mid(text, 2)
+  End If
+  parts = Split(text, ".")
+  If UBound(parts) >= 0 Then
+    If IsNumeric(parts(0)) Then
+      NodeMajorVersion = CLng(parts(0))
+    End If
+  End If
+End Function
+
+Function HasSupportedNode(major)
+  HasSupportedNode = (major >= 24)
+End Function
+
 Function EnsureDependencies()
   Dim vitePath, exitCode
   EnsureDependencies = False
@@ -123,13 +179,6 @@ Function EnsureDependencies()
 
   If fileSystem.FileExists(vitePath) Then
     EnsureDependencies = True
-    Exit Function
-  End If
-
-  exitCode = shell.Run("cmd.exe /d /s /c npm --version", WINDOW_HIDDEN, WAIT_FOR_EXIT)
-  If exitCode <> 0 Then
-    MsgBox "Node.js and npm are required. Install Node.js, then double-click Start SayIt again.", _
-           vbCritical, "SayIt setup"
     Exit Function
   End If
 

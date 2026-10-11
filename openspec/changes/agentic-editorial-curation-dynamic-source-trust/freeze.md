@@ -4,7 +4,7 @@
 
 **PRODUCT_CONTRACT_FROZEN — sayit-reader-v1.1-product-contract-r1**
 
-- PM：当前 native PIW PM thread `/root/piw_pm_v11`；执行主机 `/root`。
+- PM：当前 PM thread；执行主机。
 - 冻结时间：2026-10-06 04:07:30 UTC。
 - 授权：Product Owner 的 SayIt Reader V1.1 完整请求已明确授权 PM 冻结增量、实施、集成和验收，普通技术决定不需再次授权。
 - main 基线：`d80e13c327ac2a8672e0eee95584cb4333dd422b`，PR #1 后。

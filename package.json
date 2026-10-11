@@ -2,9 +2,11 @@
   "name": "sayit",
   "private": true,
   "version": "0.1.0",
+  "description": "Find the words you mean. Understand the English you read.",
+  "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "dev": "vite",
@@ -18,7 +20,7 @@
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^26.1.0",
-    "phonemizer": "1.2.1",
+    "phonemize": "2.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^4.1.5"
@@ -31,6 +33,7 @@
     "@vitejs/plugin-react": "^5.0.2",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
+    "vite-node": "^3.2.4",
     "vitest": "^3.2.4",
     "wordnet": "2.0.0"
   }

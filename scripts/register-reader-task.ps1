@@ -32,6 +32,15 @@ if ($Remove) {
 }
 
 $node = (Get-Command node -ErrorAction Stop).Source
+
+# Reader stores its state with the built-in node:sqlite module. An older runtime
+# would fail inside the task, where the failure is invisible, so the version is
+# checked here where a human is still watching.
+$nodeMajor = [int](& $node -p 'process.versions.node.split(".")[0]')
+if ($nodeMajor -lt 24) {
+  throw "Node.js 24 or newer is required (found $(& $node --version)). Reader uses the built-in node:sqlite module. Install the current Node.js 24 LTS release from https://nodejs.org/ and run this script again."
+}
+
 $viteNode = Join-Path $repo 'node_modules\vite-node\vite-node.mjs'
 if (-not (Test-Path $viteNode)) {
   throw "vite-node was not found at $viteNode. Run 'npm install' first."

@@ -5,7 +5,7 @@
 - 产品 revision：`sayit-reader-v1.1-product-contract-r1`；冻结 commit：`df8b3f53ff1d019034e1c59f82ca8af008649757`。
 - 计划基线：`6ddce6fcca4d22651140fde749e78d9eeb4d9374`。
 - 本文是工程执行记录，不在冻结语义集合内；不能修改 10 项新 PAT 或 V1 含义。
-- runtime_adapter：CODEX_RUNTIME；PM 父线程：`/root/piw_pm_v11`。
+- runtime_adapter：原生 agent runtime；PM 父线程：当前 PM thread。
 - 拓扑：ONE_WORKER。单一候选/模型/持久化路径相互紧密依赖，拆开会在 schema 和 collector 边界冲突。一个 Implementer 保留 PM/实施职责隔离，集成主机可同时准备接受环境。
 - delegation_case：parallel_value=POSSIBLE；lead_opportunity_cost=MATERIAL；capability_or_isolation_value=MATERIAL（PM 禁止实现）；estimated_overhead=LOW；benefit_exceeds_cost=true。
 - 工作指纹：`sayit-v11-implement-editorial-r1-6ddce6f`；恢复身份：复用本次 PM 创建的 `implement_v11_editorial` 原生线程，不另建执行根。

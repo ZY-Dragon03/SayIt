@@ -52,5 +52,14 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
     },
+    optimizeDeps: {
+      // `phonemize` ships an English exception table that contains the word
+      // "await". esbuild's JSON-to-ESM helper names an export after each key, so
+      // pre-bundling emits `await: () => await`, which is a syntax error in a
+      // module and makes the whole IPA engine fail to load in the browser. Left
+      // out of the optimizer, Vite serves the engine's own ESM entry and
+      // transforms its JSON imports instead. Only affects the dev server.
+      exclude: ["phonemize"],
+    },
   };
 });

@@ -1,19 +1,140 @@
 # SayIt
 
-SayIt turns messy English thoughts into natural words, phrases, chunks, and sentences, and explains known expressions in context.
+**Find the words you mean. Understand the English you read.**
 
-## Dogfood MVP
+SayIt is a local-first English companion for two everyday problems: not being able to
+put a thought into words, and not fully understanding the English you are reading.
+It runs on your own machine — a small React app, a local Node server, and your own
+DeepSeek API key. There is no account, no telemetry, and no SayIt-hosted service.
 
-The current implementation is a small React + TypeScript + Vite app. The Vite development server owns the same-origin `/api/retrieve` proxy, so the DeepSeek key stays server-side.
+SayIt has two modes that share one window and one history:
 
-### Run locally
+- **SayIt** turns a rough thought into the expression English actually uses, and
+  explains an expression you select.
+- **Reader** delivers a small curated set of full-text English news articles on a
+  daily schedule, and lets you look up any word in them while you read.
+
+---
+
+## Features
+
+**Both modes**
+
+- One shell, two workspaces — switch without losing your place.
+- A shared **History** drawer: *Expressions* records what you asked, *Reading*
+  records the issues you have read and how far you got.
+- Copy, save, and replay results. Nothing leaves your machine except the single
+  request you explicitly trigger.
+- A local result cache, so asking the same thing twice does not spend a second
+  model call.
+
+**SayIt**
+
+- Best-match expression, alternatives, meaning in context, usage/reference notes,
+  and an example sentence.
+- Local IPA transcription for the expression.
+- Audible playback through your browser's own voices, with a US/UK accent choice
+  and normal or slow speed.
+
+**Reader**
+
+- A dated Daily Issue, built from your topics, article count, difficulty and
+  reading budget.
+- Full-text articles, not teasers: a page must declare its own article body before
+  Reader will store or display it.
+- Select any word or phrase while reading to get a local definition, IPA, and
+  playback — or send it to SayIt for a contextual explanation.
+- Reading progress is remembered per article, across restarts.
+- A dated archive of previous issues, including editions you regenerate.
+
+---
+
+## SayIt — expression retrieval and contextual interpretation
+
+Type roughly what you mean. SayIt returns the expression an English speaker would
+reach for, rather than a literal translation of your wording:
+
+> **you** — `sort ideas by shared traits`
+> **SayIt** — *draw a parallel*, with alternatives, meaning in context, and usage notes
+
+You can also go the other way. Select an expression — in SayIt or inside a Reader
+article — and SayIt explains what it means *in that sentence*, not in the abstract.
+A single word gets a local dictionary definition and IPA; a phrase gets a contextual
+interpretation with the surrounding article sentence as context.
+
+Results are cached locally, and asking twice is free. Pronunciation is played by
+your browser's built-in Web Speech voices, so no audio is ever uploaded.
+
+## Reader — curated English news and contextual word lookup
+
+Reader builds one issue per day at a time you choose. It reads a set of official
+publisher feeds (BBC, The Guardian, NPR, Al Jazeera) plus a web search fallback,
+merges everything into one deduplicated candidate list, and then applies your
+preferences:
+
+| Preference | Meaning |
+| --- | --- |
+| Topics | Politics, Economy, Finance, Geopolitics, and others |
+| Articles per day | How many articles the issue should contain |
+| Difficulty | Easy, Intermediate, or Advanced, from measured reading difficulty |
+| Reading budget | Total minutes the issue should aim for |
+| Collection time | When the daily issue is built, in your time zone |
+
+Every article is verified before it is delivered. Reader checks the publisher's own
+identity for the page, refuses topic and index pages, adopts the publisher's
+canonical URL when one is declared, requires the page to declare its article body as
+full text, and rejects anything whose stated publication date does not fit the issue
+being built. If the sources cannot satisfy your preferences, Reader says so and
+reports the shortage instead of padding the issue with unsuitable articles.
+
+Difficulty is an aid, not a gate. An article one tier away from your preference is
+still eligible, and the closest match is chosen first; an article two tiers away is
+refused. The measured difficulty is always shown as measured.
+
+While reading, select text to get a local dictionary entry with IPA, hear it, copy
+it, or send it to SayIt. Articles you are allowed to keep are cached locally and
+stay readable offline; everything else stays a link.
+
+---
+
+## Screenshots
+
+**SayIt — expression retrieval and contextual interpretation**
+
+![SayIt returning the meaning and usage of "break the ice"](docs/images/sayit-result.png)
+
+**Reader — the daily issue**
+
+![Reader showing a daily issue with two articles](docs/images/reader-today.png)
+
+---
+
+## Quick Start — Windows
+
+1. Install **Node.js 24 LTS** from <https://nodejs.org/> (Node 24 or newer is
+   required — see [Limitations](#limitations)).
+2. Download or clone this repository.
+3. Double-click **`Start SayIt.vbs`** in the project folder.
+
+On the first run the launcher creates `.env.local` from `.env.example`, installs
+dependencies if they are missing, starts the local server in a hidden window, waits
+for it, and opens SayIt in your browser.
+
+When it tells you to, open `.env.local` in Notepad, put your DeepSeek API key after
+`DEEPSEEK_API_KEY=`, save the file, and double-click `Start SayIt.vbs` again.
+
+The launcher reuses an already-running SayIt instead of starting a second one, and
+does not require any PowerShell execution-policy change. Startup logs are written to
+`%TEMP%\SayIt\server.log`.
+
+## Manual installation and configuration
 
 ```powershell
 npm install
 Copy-Item .env.example .env.local
 ```
 
-Add your DeepSeek key to `.env.local`:
+Put your key in `.env.local`:
 
 ```text
 DEEPSEEK_API_KEY=your-key
@@ -21,78 +142,35 @@ DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-Then start SayIt:
+Then start the app:
 
 ```powershell
 npm run dev
 ```
 
-Open the local URL printed by Vite. Type a rough English thought and press Enter. Use Shift+Enter for a new line.
+Open the URL Vite prints — by default <http://127.0.0.1:5173/>. Type a rough English
+thought and press Enter. Use Shift+Enter for a new line.
 
-## Daily use on Windows
+The key is read by the local Node server only. It is never sent to the browser and
+never leaves your machine except as the `Authorization` header on the DeepSeek
+request you triggered yourself. `.env.local` is git-ignored.
 
-Double-click the root-level **`Start SayIt.vbs`** file.
+Other commands:
 
-On the first run, open the generated `.env.local` file in Notepad, replace `your-key` with your DeepSeek key, save it, and double-click **`Start SayIt.vbs`** again.
+```powershell
+npm run typecheck   # TypeScript, no emit
+npm test            # Vitest
+npm run build       # type-check and production build
+```
 
-It will:
+## Daily Reader collection setup
 
-- create `.env.local` from `.env.example` on the first run and tell you when to add `DEEPSEEK_API_KEY`;
-- install dependencies automatically if `node_modules` is missing;
-- start the existing Vite/SayIt server in a hidden window;
-- wait for `http://127.0.0.1:5173/` to respond;
-- open SayIt in the default browser;
-- reuse an already-running SayIt server instead of starting a duplicate.
+Reader's daily collection is owned by **one** scheduler: a Windows Task Scheduler
+task named `SayIt Reader Collection`. It does not depend on a browser window or on
+the development server staying open.
 
-Node.js must be installed on Windows. The launcher uses Windows Script Host and does not require PowerShell execution-policy changes. Startup logs are written to `%TEMP%\SayIt\server.log`.
-
-### Pronunciation playback
-
-Useful English expressions can be played with the small speaker button beside the result. Playback uses the browser's built-in Web Speech API only; no audio is sent to SayIt or DeepSeek. Choose US/UK accent and Normal/Slow speed from the top bar. These preferences are saved in this browser. Voice quality and availability depend on the installed browser/system voices.
-
-When available, the primary expression also shows a compact IPA transcription generated locally by the phonemizer engine. Switching US/UK changes both the displayed IPA and the spoken voice. If local generation returns no usable IPA, it is omitted instead of blocking the result.
-
-IPA results use the browser-local cache key `sayit.ipa.v1`. Any change to the IPA engine or pronunciation behavior MUST bump this cache version/key (for example, to `sayit.ipa.v2`) so stale IPA is not reused.
-
-The local IPA engine is approved for private/local Dogfood use only. Public distribution remains blocked pending a license/distribution review of bundled eSpeak NG code or replacement with a permissively licensed engine.
-
-### SayIt result cache
-
-Repeated successful SayIt queries are served from one shared local cache instead of spending another LLM call. It is used by both normal SayIt and Reader, and it is not History: History records what you asked and used, while the cache answers "do we already have a valid model answer for this request?".
-
-- a normalized single lexical word (`Psychologically`, ` psychologically `, `PSYCHOLOGICALLY`) is one context-free entry shared by both surfaces;
-- a Reader phrase or sentence keys on BOTH its normalized selection and its normalized article sentence, so two different selections of the same length inside one sentence never share an entry, and a context-specific interpretation is never reused in an unrelated context;
-- only validated successful `SayItResult` objects are stored — clarification and no-match answers are always re-asked;
-- Reader reads the cache when a selection is finalized, so a word or phrase it already knows opens directly into the detailed SayIt result with no extra SayIt press and no `/api/retrieve` call; a selection it does not know keeps the lightweight local state (IPA, local dictionary, Listen, Copy, SayIt icon) until you press SayIt;
-- that passive cache read is not a SayIt interaction: it never writes History by itself;
-- an explicit SayIt action that hits the cache still behaves like a SayIt interaction and follows the normal History dedupe policy;
-- a local dictionary-only selection (no SayIt action) never writes History or the cache.
-
-The cache lives under the browser-local key `sayit.result-cache.v2`. Changing the retrieval prompt, model, result shape, or cache identity policy MUST bump `SAYIT_CACHE_SCHEMA_VERSION` in `src/lib/sayit-cache.ts` and the storage key with it, so stale answers cannot be reused; a superseded `sayit.result-cache.v1` store is deleted on first use because its Reader phrase entries keyed on word count and are unsafe.
-
-Speech playback warms the Web Speech voice list at startup and reuses the selected US/UK voice, so pressing Listen does not pay a multi-second voice-discovery cost. The service only cancels the engine when playback is actually pending or speaking.
-
-### Reader state integrity
-
-Reader state lives in one SQLite database, `reader-state.db` in the Reader directory, in WAL mode. Every mutation runs inside `BEGIN IMMEDIATE`, which takes the write lock before the state is read, so the development server and the scheduled task cannot both read one version, compute independent mutations and overwrite each other. A failed read always raises an error; it never falls back to a process's in-memory copy, because that copy is what would silently resurrect lost data. Reads on the request path adopt the newest committed state first, so the UI never serves the snapshot a long-lived process happened to load at startup.
-
-An existing `reader-state.json` is imported exactly once on first start and kept as the operator's record; a later edit to it is not adopted. Permitted article bodies live in the same database, so a body and its metadata commit or roll back together, and nothing outside a permitted record is ever persisted. `ReaderStore.close()` releases the file, which the one-shot scheduled task does at exit.
-
-### Reader run ownership
-
-A collection attempt is owned by the process running it, through a claim recorded with the attempt in the same transaction and refreshed by a heartbeat. Only one process can hold a claim, so two simultaneous "Collect now" presses, or a scheduled run racing a manual one, resolve to a single collection. A process that starts while another process's run is live leaves that run alone: it is not failed, not recovered and not duplicated. An attempt whose owner stopped heartbeating is treated as an orphan after the claim window lapses, and only then is it recovered and its occurrence made schedulable again — so a crash is repaired without a live peer ever being interrupted.
-
-### Reader collection recovery
-
-Collection work lives in memory, so after an unexpected service restart any attempt still stored as `RUNNING` is orphaned: nothing will ever finish it, while the scheduler and manual runs both refuse to start while one exists. On startup the service marks those attempts failed (retryable) and returns their occurrence to a schedulable state exactly once, which is idempotent and leaves issues, editions, delivered articles and reading progress untouched. Reconciliation never leaves an occurrence `RUNNING` without a live attempt.
-
-Recovery never collects early. When the configured collection time is still ahead, an interrupted run leaves the schedule exactly as it was and the day is collected at its own time; catch-up happens immediately only once that time has passed.
-
-An occurrence is only `COMPLETED` when its Daily Issue actually reached `COMPLETE`. A run that finishes without fulfilling the issue stays inside the bounded retry budget (5 then 15 minutes, at most three scheduled attempts) and is only `EXHAUSTED` when that budget is spent, so a finished attempt is never confused with a successful delivery.
-
-### Daily scheduling
-
-The daily collection does not depend on a browser window or on the Vite development server staying alive. Exactly one owner exists: the Windows scheduled task `SayIt Reader Collection`, which runs `server/reader/scheduler-main.ts` every ten minutes through the bundled `vite-node`.
+These commands use PowerShell 7 (`pwsh`), which is what SayIt is set up and tested
+with. Register the task from the repository root:
 
 ```powershell
 pwsh -File scripts/register-reader-task.ps1            # create or update the task
@@ -100,43 +178,125 @@ pwsh -File scripts/register-reader-task.ps1 -RunNow    # trigger one run now
 pwsh -File scripts/register-reader-task.ps1 -Remove    # remove it
 ```
 
-Each invocation is one bounded decision against the existing occurrence and attempt records, so extra invocations are no-ops: a completed issue becomes `ALREADY_FULFILLED`, a run already `RUNNING` is never started twice, and a retry that is not due keeps its time. It only reads today's issue and never triggers an LLM call unless a collection is genuinely due. Every run appends one line to `%LOCALAPPDATA%\SayIt\Reader\scheduler.log`, so a missed or crashed schedule leaves evidence instead of disappearing. The development server sets `scheduleRuns: false`: it still recovers interrupted runs, still catches up an already-overdue date when it starts, and still serves manual runs, but it never arms a competing timer.
+The script refuses to register the task on a Node older than 24, because the task
+would otherwise fail where nobody can see it.
 
-A dated recovery of an earlier, unfulfilled issue is available explicitly and never touches a delivered one:
+The task wakes every ten minutes and makes one bounded decision each time, so extra
+invocations do nothing: a completed issue is left alone, a run already in progress is
+never started twice, and a retry that is not due yet keeps its scheduled time. Every
+run appends one line to `%LOCALAPPDATA%\SayIt\Reader\scheduler.log`, so a missed or
+crashed schedule leaves evidence rather than disappearing.
+
+A dated recovery of an earlier, unfulfilled issue is available explicitly and never
+touches an issue that was already delivered:
 
 ```powershell
 npx vite-node server/reader/scheduler-main.ts --backfill 2026-10-09 --json
 ```
 
-A dated recovery only accepts articles the publisher states were published on or before the named date, and refuses an article whose publication date its page does not state. Discovery always runs at the present moment, so without that bound a newly published article could be presented as an older day's reading.
+## Local storage and privacy
 
-### Article supply and difficulty
+SayIt has no hosted service and no account. The only outbound calls are the ones your
+own use triggers: model requests to the DeepSeek API when you press **Say it** or a
+Reader collection is due, and — during a collection only — queries to public news
+search engines plus direct fetches of the publisher pages those queries return. The
+search queries are derived from your saved topics, and nothing about you is sent
+with them.
 
-FKGL is an approximate reading-difficulty estimator, not proof that a text is unsuitable, so it guides selection instead of gating it. An article within one difficulty tier of the saved preference is eligible and the article nearest the saved difficulty is chosen first, so the tolerance never displaces a better match within the daily reading budget. An article two tiers away is still refused, and Reader reports the shortage rather than padding the issue.
+| What | Where it lives |
+| --- | --- |
+| Your API key | `.env.local`, read by the local server only |
+| Preferences, History, result cache, IPA cache | Your browser's `localStorage` |
+| Reader state: issues, attempts, progress, permitted article bodies | `%LOCALAPPDATA%\SayIt\Reader\reader-state.db` (SQLite, WAL mode) |
+| Scheduler log | `%LOCALAPPDATA%\SayIt\Reader\scheduler.log` |
+| Launcher log | `%TEMP%\SayIt\server.log` |
 
-### Reader navigation
+- No accounts, no analytics, no telemetry, no crash reporting, no third-party
+  trackers.
+- All API endpoints bind to loopback and refuse non-local callers.
+- Article bodies are only stored when the publisher permits caching; everything else
+  stays a link.
+- SayIt never bypasses a paywall, a login, or a publisher's access controls, and
+  never fabricates an article body.
 
-Reader has three explicit states: `LATEST_ISSUE_LIST`, `READING_ARTICLE`, and `VIEWING_HISTORICAL_ISSUE`. It opens on the latest scheduled issue, which is the most recent date whose configured collection time has already passed, so before today's collection time that is yesterday. When that issue delivered nothing, Reader says so plainly and offers the most recent delivered issue underneath, dated as itself.
+To erase everything, delete `%LOCALAPPDATA%\SayIt`, clear the site's browser storage,
+and delete `.env.local`.
 
-`sayit.reader.last-opened.v1` is a bookmark, not an instruction: an explicitly closed article is never reopened because an old pointer exists. Switching workspaces keeps the in-memory view, so an article left at paragraph 20 comes back at paragraph 20, while the issue list stays the issue list. Article bodies already loaded in a session are reused, so reopening the same article in the same session makes no further request, and no restricted content is persisted for speed.
+## Technology stack
 
-### History navigation
+- **React 19** + **TypeScript** + **Vite 7** single-page app.
+- **Node.js 24** local server. Reader state uses the built-in `node:sqlite` module in
+  WAL mode, so every mutation is committed transactionally and two processes cannot
+  overwrite each other's work.
+- **Zod** contracts shared between the server and the browser.
+- **jsdom** + **`@mozilla/readability`** for fetching and extracting publisher pages.
+- **`phonemize`** (MIT) for local IPA; the browser's Web Speech API for audio.
+- **Vitest** for tests.
+- DeepSeek for expression retrieval, contextual interpretation, and editorial
+  curation.
 
-The top-right History icon opens one shared drawer in both workspaces, with two sections and a stable position:
+Engineering notes on the invariants behind Reader's state, scheduling, recovery, and
+article supply live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-- **Reading** — Daily Issues, their delivered articles and reading progress;
-- **Expressions** — the SayIt query and interpretation history recorded by either workspace.
+## Limitations
 
-The drawer defaults to the section belonging to the active mode and can switch sections without switching workspaces. The Reading section has one global `Latest` / `Back to latest` action instead of a Today button on every row, and only the actual current calendar date is labelled Today; a date heading otherwise shows the issue's own date, with `Latest` marking the latest scheduled one. Opening History never changes the mode or the reading position; opening an expression while reading shows a preview panel and leaves the main SayIt input, result and session untouched (the drawer offers "Open in SayIt" for that); opening a reading article from SayIt deliberately switches to Reader, closes the drawer and preserves the SayIt state; closing History dismisses its preview and restores the exact previous workspace and position. The two storage models stay separate.
+- **Windows-first.** `Start SayIt.vbs` and the scheduled-task script are Windows
+  only; `npm run dev` works anywhere Node 24 runs.
+- **Node.js 24 or newer is required.** Reader stores its state with the built-in
+  `node:sqlite` module. It only became usable without a command-line flag in Node
+  22.13/23.4, and it is still marked experimental there, so SayIt targets the Node 24
+  LTS baseline. `Start SayIt.vbs` and `scripts/register-reader-task.ps1` both refuse
+  to run on an older Node and tell you so instead of failing silently later.
+- **You need your own DeepSeek API key** and an internet connection for new
+  requests. Cached answers, saved expressions, and already-read articles keep
+  working offline.
+- **A daily issue can come up short.** Some publishers block automated readers or
+  put articles behind a paywall. Reader reports a partial or missing issue honestly
+  rather than substituting lower-quality content.
+- **Reading difficulty is an approximation.** It is computed from the text's own
+  word, sentence, and syllable counts, and it guides selection rather than proving an
+  article suitable or unsuitable.
+- **IPA is a learner hint, not a pronunciation authority.** It comes from the local
+  `phonemize` engine, which combines letter-to-sound rules with its own bundled
+  exception lexicon, so proper nouns and ambiguous words can be off. Source
+  punctuation and accented letters are folded before transcription, and where no
+  usable transcription is produced the IPA line is simply hidden.
+- **English only**, and web search fallback depends on a third-party engine that can
+  rate-limit.
+- **Article text belongs to its publisher** and is shown for your personal reading
+  only.
 
-Reader also dismisses its selection popover when it is deactivated, and invalidates pending selection work, so a popover can never float over SayIt and a late SayIt response cannot recreate one while SayIt is on screen.
+## Contributing
 
-## Verification
+Issues and pull requests are welcome.
 
 ```powershell
+npm install
 npm run typecheck
 npm test
 npm run build
 ```
 
-The app does not persist queries automatically. Saved expressions stay in this browser's localStorage.
+Please keep the existing behavior contracts in mind: Reader state must stay
+transactional, exactly one component may own the schedule, articles may only be
+delivered after full-text verification, and pronunciation, History, and the shared
+result cache are shared behavior across both modes. `docs/ARCHITECTURE.md` describes
+the invariants worth preserving.
+
+## Third-party acknowledgments
+
+SayIt's own code is MIT. It builds on other people's work under their own licenses,
+including Princeton WordNet (WordNet License), `wordfreq` (CC BY-SA 4.0 data),
+`phonemize` (MIT), `@mozilla/readability` (Apache-2.0), React, Zod, jsdom, and Vite.
+Article headlines and text belong to their publishers; SayIt is not affiliated with
+or endorsed by them.
+
+Full attribution, license texts, and the reasoning behind the pronunciation engine
+choice are in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+## MIT License
+
+Copyright (c) 2026 ZY-Dragon03.
+
+Released under the [MIT License](LICENSE). Third-party components and datasets keep
+their own licenses, as recorded in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

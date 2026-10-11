@@ -5,7 +5,7 @@
   },
   "observation": "PAT-V11-06 saved preferences seed; no collection or article URL input occurred in this setup step",
   "recordedAt": "2026-10-07T04:57:09.846Z",
-  "isolatedDataDirectory": "C:\\Users\\Asus\\AppData\\Local\\Temp\\sayit-reader-v11-a33-ev-20261007T045311Z",
+  "isolatedDataDirectory": "%TEMP%\\sayit-reader-v11-a33-ev-20261007T045311Z",
   "savedPreferences": {
     "topics": [
       "Electric vehicle batteries"

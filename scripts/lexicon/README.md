@@ -1,5 +1,11 @@
 # SayIt compact lexicon source and generation
 
+> The two checked-in source files in this directory are **checksum-locked** by
+> `scripts/generate-sayit-lexicon.mjs`. Editing either one — including adding a
+> header comment — makes `npm run lexicon:generate` fail. Their licensing and
+> attribution live in [`THIRD-PARTY-NOTICES.md`](../../THIRD-PARTY-NOTICES.md) and
+> in `public/data/sayit-lexicon.manifest.json`; keep those with the files.
+
 The checked-in frequency ranking is derived from `wordfreq` 3.0.2 using
 `top_n_list("en", 12000, wordlist="large", ascii_only=True)`. The source
 wheel is pinned by URL and SHA-256 in `public/data/sayit-lexicon.manifest.json`;
