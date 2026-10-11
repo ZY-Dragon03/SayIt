@@ -1,7 +1,7 @@
 # Architecture and behavior contracts
 
 This document holds the engineering notes behind SayIt's behavior. It is written for
-people changing the code; the [README](README.md) is written for people using it.
+people changing the code; the [README](../README.md) is written for people using it.
 
 The sections below are behavior contracts, not implementation trivia. If you change
 one of them, change this document in the same commit.

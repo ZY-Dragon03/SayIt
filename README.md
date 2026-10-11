@@ -55,7 +55,7 @@ Type roughly what you mean. SayIt returns the expression an English speaker woul
 reach for, rather than a literal translation of your wording:
 
 > **you** — `sort ideas by shared traits`
-> **SayIt** — *draw a parallel*, with alternatives, meaning in context, and usage notes
+> **SayIt** — *categorize*, with alternatives, meaning in context, and usage notes
 
 You can also go the other way. Select an expression — in SayIt or inside a Reader
 article — and SayIt explains what it means *in that sentence*, not in the abstract.
@@ -92,8 +92,9 @@ still eligible, and the closest match is chosen first; an article two tiers away
 refused. The measured difficulty is always shown as measured.
 
 While reading, select text to get a local dictionary entry with IPA, hear it, copy
-it, or send it to SayIt. Articles you are allowed to keep are cached locally and
-stay readable offline; everything else stays a link.
+it, or send it to SayIt. Articles whose publisher permits caching are kept locally
+and stay readable offline; the rest are re-read from the publisher when you open
+them.
 
 ---
 
@@ -196,12 +197,33 @@ npx vite-node server/reader/scheduler-main.ts --backfill 2026-10-09 --json
 
 ## Local storage and privacy
 
-SayIt has no hosted service and no account. The only outbound calls are the ones your
-own use triggers: model requests to the DeepSeek API when you press **Say it** or a
-Reader collection is due, and — during a collection only — queries to public news
-search engines plus direct fetches of the publisher pages those queries return. The
-search queries are derived from your saved topics, and nothing about you is sent
-with them.
+SayIt has no hosted service, no account, and no analytics. Nothing is sent anywhere
+until you ask for it — with one exception you control: **Reader's daily collection
+runs on its own once you schedule it.**
+
+**SayIt requests are always user-triggered.** A request reaches the DeepSeek API only
+when you press **Say it**. Playing audio, looking up a word in the local dictionary,
+and browsing History are local and make no network request at all. Opening an article
+is local when its body is already stored; a full-text article whose body was not kept
+is re-fetched from its publisher at the moment you open it.
+
+**Reader can make automatic requests.** Once the `SayIt Reader Collection` task is
+registered, each due collection makes three kinds of outbound request without you
+pressing anything:
+
+- **Discovery** — queries derived from your saved topics, sent to public news search
+  engines, plus direct fetches of the official publisher RSS feeds.
+- **Publisher fetches** — direct requests to the article pages those candidates
+  point at, to verify and read them.
+- **DeepSeek** — one editorial-curation request to judge the candidates that were
+  found, plus a second bounded request only if the first response comes back
+  malformed.
+
+News search queries are derived from your saved topics, and nothing about you is sent
+with them. Your API key stays server-side: it is read by the local Node server and
+never handed to the browser. Removing the scheduled task
+(`pwsh -File scripts/register-reader-task.ps1 -Remove`) stops every automatic
+request; a manual **Collect now** still works.
 
 | What | Where it lives |
 | --- | --- |
@@ -214,8 +236,9 @@ with them.
 - No accounts, no analytics, no telemetry, no crash reporting, no third-party
   trackers.
 - All API endpoints bind to loopback and refuse non-local callers.
-- Article bodies are only stored when the publisher permits caching; everything else
-  stays a link.
+- Article bodies are stored locally only when the publisher permits caching; a body
+  that is not stored is fetched again from its publisher, and nothing about it is
+  written to disk.
 - SayIt never bypasses a paywall, a login, or a publisher's access controls, and
   never fabricates an article body.
 
@@ -248,8 +271,9 @@ article supply live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   LTS baseline. `Start SayIt.vbs` and `scripts/register-reader-task.ps1` both refuse
   to run on an older Node and tell you so instead of failing silently later.
 - **You need your own DeepSeek API key** and an internet connection for new
-  requests. Cached answers, saved expressions, and already-read articles keep
-  working offline.
+  requests. Cached answers, saved expressions, stored article bodies, and reading
+  progress keep working offline; an article whose body was not kept needs its
+  publisher again when you open it.
 - **A daily issue can come up short.** Some publishers block automated readers or
   put articles behind a paywall. Reader reports a partial or missing issue honestly
   rather than substituting lower-quality content.
