@@ -887,4 +887,51 @@ describe("Reader workspace", () => {
     expect(snapshot.displayedIssue).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/reader/issues/archive"))).toBe(true);
   });
+
+  it("labels an undelivered date and visibly dates older delivered articles", async () => {
+    const olderArticle = { ...article, id: "article-2026-10-11", title: "October 11 verified article" };
+    const olderIssue = {
+      ...issue,
+      id: "issue-2026-10-11",
+      localDate: "2026-10-11",
+      articles: [olderArticle],
+    };
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/reader/preferences") return jsonResponse({ preferences });
+      if (url === "/api/reader/issues/today") {
+        return jsonResponse({
+          issue: null,
+          latest: {
+            date: "2026-10-13",
+            issue: null,
+            occurrence: null,
+            delivered: false,
+            latestDeliveredDate: "2026-10-11",
+          },
+          calendarDate: "2026-10-13",
+          occurrence: null,
+          attempts: [],
+        });
+      }
+      if (url.startsWith("/api/reader/issues/archive")) return jsonResponse({ issues: [olderIssue] });
+      throw new Error(`Unexpected missing-issue fetch: ${url}`);
+    });
+    props = { ...props, active: true };
+
+    await render();
+    await flush();
+
+    const headingDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" })
+      .format(new Date("2026-10-13T12:00:00.000Z"));
+    const olderDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" })
+      .format(new Date("2026-10-11T12:00:00.000Z"));
+    expect(container.querySelector("h1")?.textContent).toBe(headingDate);
+    expect(container.querySelector('[role="status"]')?.textContent)
+      .toContain(`No collection occurrence or attempt is recorded for ${headingDate}.`);
+    expect(container.textContent).toContain(`Most recent delivered issue · ${olderDate}`);
+    expect(container.textContent).toContain("October 11 verified article");
+    const snapshot = vi.mocked(props.onArchiveChange).mock.calls.at(-1)?.[0];
+    expect(snapshot?.archiveIssues.map((item) => item.localDate)).toContain("2026-10-11");
+  });
 });

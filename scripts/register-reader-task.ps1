@@ -47,12 +47,17 @@ if (-not (Test-Path $viteNode)) {
 }
 
 $entry = Join-Path $repo 'server\reader\scheduler-main.ts'
-$arguments = "`"$viteNode`" `"$entry`" --timeout-ms 600000"
+# The repository's Vite development mode starts a separate ReaderService for
+# the UI. The scheduler must be the only service owner in this process.
+$arguments = "`"$viteNode`" --mode production `"$entry`" --timeout-ms 600000"
 
 $action = New-ScheduledTaskAction -Execute $node -Argument $arguments -WorkingDirectory $repo
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(1) `
-  -RepetitionInterval (New-TimeSpan -Minutes $RepeatMinutes) `
-  -RepetitionDuration (New-TimeSpan -Days 1)
+# Start shortly after registration so a task created at any clock time has an
+# immediate first check. Omitting RepetitionDuration makes this time trigger
+# repeat indefinitely; StartWhenAvailable below resumes it after sleep/startup.
+$firstRun = (Get-Date).AddMinutes(1)
+$trigger = New-ScheduledTaskTrigger -Once -At $firstRun `
+  -RepetitionInterval (New-TimeSpan -Minutes $RepeatMinutes)
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
