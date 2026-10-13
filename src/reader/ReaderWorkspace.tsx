@@ -251,6 +251,7 @@ export const ReaderWorkspace = forwardRef<
   const [archiveIssues, setArchiveIssues] = useState<DailyIssue[]>([]);
   const [latestIssue, setLatestIssue] = useState<LatestIssueStatus | null>(null);
   const [calendarDate, setCalendarDate] = useState<string | null>(null);
+  const [todayAttemptCount, setTodayAttemptCount] = useState(0);
   /** The bookmark offered on the issue list; never entered automatically. */
   const [resumableArticle, setResumableArticle] = useState<ReaderArticleSummary | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<DailyIssue | null>(null);
@@ -361,6 +362,7 @@ export const ReaderWorkspace = forwardRef<
       setTodayIssue(nextToday);
       setLatestIssue(todayResult.value.latest);
       setCalendarDate(todayResult.value.calendarDate);
+      setTodayAttemptCount(todayResult.value.attempts.length);
       const running = todayResult.value.attempts.find(isActiveAttempt) ?? null;
       setActiveAttempt(running);
     } else {
@@ -414,6 +416,7 @@ export const ReaderWorkspace = forwardRef<
       setTodayIssue(todayResult.value.issue);
       setLatestIssue(todayResult.value.latest);
       setCalendarDate(todayResult.value.calendarDate);
+      setTodayAttemptCount(todayResult.value.attempts.length);
       setActiveAttempt(todayResult.value.attempts.find(isActiveAttempt) ?? null);
     }
     if (archiveResult.status === "fulfilled") {
@@ -1083,13 +1086,34 @@ export const ReaderWorkspace = forwardRef<
   const fallbackArticles = (fallbackIssue?.articles ?? []).filter(
     (article) => article.contentStatus === "FULL_TEXT",
   );
-  const latestOccurrenceFailed = Boolean(
-    !selectedIssue &&
-      latestIssue &&
-      !latestIssue.delivered &&
-      latestIssue.occurrence &&
-      ["EXHAUSTED", "MISSED", "COMPLETED"].includes(latestIssue.occurrence.status),
-  );
+  const latestIssueNotice = (() => {
+    if (selectedIssue || !latestIssue || latestIssue.delivered) return null;
+    const date = formatDate(latestIssue.date);
+    const status = activeAttempt && latestIssue.date === calendarDate
+      ? "RUNNING"
+      : latestIssue.occurrence?.status ?? null;
+    switch (status) {
+      case "RUNNING":
+        return `Collection is in progress for ${date}.`;
+      case "WAITING":
+        return `Collection is pending for ${date}.`;
+      case "RETRY_WAIT":
+        return `Collection failed; a retry is scheduled for ${date}.`;
+      case "EXHAUSTED":
+        return `Collection attempts were exhausted for ${date}; no verified full-text articles were delivered.`;
+      case "MISSED":
+        return `The scheduled collection was missed for ${date}; no verified full-text articles were delivered.`;
+      case "COMPLETED":
+        return `Collection finished for ${date}, but no verified full-text articles were delivered.`;
+      case "ALREADY_FULFILLED":
+        return `No verified full-text articles are recorded for ${date}.`;
+      default:
+        if (latestIssue.date === calendarDate && todayAttemptCount === 0) {
+          return `No collection occurrence or attempt is recorded for ${date}.`;
+        }
+        return `No collection occurrence is recorded for ${date}.`;
+    }
+  })();
 
   return (
     <main className="reader-main" hidden={!active} aria-label="SayIt Reader workspace">
@@ -1183,7 +1207,11 @@ export const ReaderWorkspace = forwardRef<
               </div>
             )}
 
-            {activeAttempt && <p className="reader-quiet-status">Collecting</p>}
+            {activeAttempt && (selectedIssue || latestIssue?.date !== calendarDate) && (
+              <p className="reader-quiet-status" role="status">
+                Collection is in progress for {calendarDate ? formatDate(calendarDate) : "today"}.
+              </p>
+            )}
 
             {resumableArticle && browsingArticles.some((article) => article.id === resumableArticle.id) && (
               <button
@@ -1198,12 +1226,9 @@ export const ReaderWorkspace = forwardRef<
               </button>
             )}
 
-            {latestOccurrenceFailed && (
+            {latestIssueNotice && (
               <p className="reader-quiet-status" role="status">
-                No verified full-text articles were delivered for {listDate ? formatDate(listDate) : "this issue"}.
-                {fallbackIssue
-                  ? ` Showing ${formatDate(fallbackIssue.localDate)}, the most recent delivered issue.`
-                  : ""}
+                {`${latestIssueNotice}${fallbackIssue ? ` Showing articles from ${formatDate(fallbackIssue.localDate)} below.` : ""}`}
               </p>
             )}
 
@@ -1222,16 +1247,21 @@ export const ReaderWorkspace = forwardRef<
                   ))}
               </ul>
             ) : fallbackIssue && fallbackArticles.length > 0 ? (
-              <ul className="reader-article-list" aria-label={`${fallbackIssue.localDate} articles`}>
-                {fallbackArticles.map((article) => (
-                  <ArticleListItem
-                    key={article.id}
-                    article={article}
-                    issue={fallbackIssue}
-                    onOpen={selectArticle}
-                  />
-                ))}
-              </ul>
+              <>
+                <p className="reader-eyebrow">
+                  Most recent delivered issue · {formatDate(fallbackIssue.localDate)}
+                </p>
+                <ul className="reader-article-list" aria-label={`${fallbackIssue.localDate} articles`}>
+                  {fallbackArticles.map((article) => (
+                    <ArticleListItem
+                      key={article.id}
+                      article={article}
+                      issue={fallbackIssue}
+                      onOpen={selectArticle}
+                    />
+                  ))}
+                </ul>
+              </>
             ) : (
               <div className="reader-empty-state">
                 <p>Nothing ready to read yet.</p>
