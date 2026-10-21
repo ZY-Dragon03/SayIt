@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArticleSummary, DailyIssue } from "../../src/shared/reader-contract";
+import { articleBodyHash } from "./article-body";
 import { ReaderStore, ReaderStoreError } from "./store";
 
 const directories: string[] = [];
@@ -307,29 +308,75 @@ describe("Reader versioned local store", () => {
     expect(stored.snapshot().preferencesConfigured).toBe(true);
   });
 
-  it("caches article bodies only when a full-text record explicitly permits it", async () => {
+  it("archives every verified Reader body locally regardless of the publisher cache signal", async () => {
+    const paragraph = Array.from({ length: 100 }, () => "word").join(" ");
+    const body = Array.from({ length: 8 }, () => paragraph);
+    const hash = articleBodyHash(body);
+
+    for (const permission of ["PERMITTED", "UNKNOWN", "NOT_PERMITTED"] as const) {
+      const directory = await createDirectory();
+      const store = track(new ReaderStore({ directory, now: () => new Date("2026-10-04T00:00:00Z") }));
+      await store.initialize();
+      const summary = article(permission);
+      await store.update((state) => state.issues.push(issue(summary)));
+      await store.saveCache(summary.id, 1, hash, body);
+      expect(await store.readCache(summary.id, 1, hash)).toEqual(body);
+
+      const reopened = track(new ReaderStore({ directory }));
+      await reopened.initialize();
+      expect(await reopened.readCache(summary.id, 1, hash)).toEqual(body);
+    }
+  });
+
+  it("archives a complete one-paragraph article without a minimum-length cutoff", async () => {
     const directory = await createDirectory();
-    const store = track(new ReaderStore({ directory, now: () => new Date("2026-10-04T00:00:00Z") }));
+    const store = track(new ReaderStore({ directory }));
     await store.initialize();
-    const allowed = article("PERMITTED");
-    await store.update((state) => state.issues.push(issue(allowed)));
-    const body = ["Authorized article paragraph.".repeat(20), "Second paragraph.", "Third paragraph."];
-    const hash = "a".repeat(64);
-    await store.saveCache(allowed.id, 1, hash, body);
-    expect(await store.readCache(allowed.id, 1, hash)).toEqual(body);
+    const summary = { ...article("UNKNOWN"), wordCount: 3, paragraphCount: 1 };
+    const body = ["Finance changed policy."];
+    const hash = articleBodyHash(body);
+    await store.update((state) => state.issues.push(issue(summary)));
 
-    // The permitted body is preserved for the reader across a restart.
-    const reopened = track(new ReaderStore({ directory }));
-    await reopened.initialize();
-    expect(await reopened.readCache(allowed.id, 1, hash)).toEqual(body);
+    await store.saveCache(summary.id, 1, hash, body);
 
-    const deniedStore = track(new ReaderStore({ directory: await createDirectory() }));
-    await deniedStore.initialize();
-    const denied = article("UNKNOWN");
-    await deniedStore.update((state) => state.issues.push(issue(denied)));
+    expect(await store.readCache(summary.id, 1, hash)).toEqual(body);
+  });
+
+  it("rolls back an issue write when its full-text body cannot pass the storage gate", async () => {
+    const directory = await createDirectory();
+    const store = track(new ReaderStore({ directory }));
+    await store.initialize();
+    const summary = article("UNKNOWN");
+    const body = ["Paragraph one.", "Paragraph two.", "Paragraph three."];
+    const hash = articleBodyHash(body);
+
     await expect(
-      deniedStore.saveCache(denied.id, 1, hash, body),
-    ).rejects.toBeInstanceOf(ReaderStoreError);
+      store.update(
+        (state) => state.issues.push(issue(summary)),
+        [{ articleId: summary.id, edition: 1, bodyHash: hash, paragraphs: body }],
+      ),
+    ).rejects.toMatchObject({ code: "article_body_invalid" });
+    expect(store.snapshot().issues).toHaveLength(0);
+    expect(store.snapshot().cachedBodies).toHaveLength(0);
+  });
+
+  it("does not return a persisted body when its article metrics no longer describe that body", async () => {
+    const directory = await createDirectory();
+    const store = track(new ReaderStore({ directory }));
+    await store.initialize();
+    const summary = article("UNKNOWN");
+    const paragraph = Array.from({ length: 100 }, () => "word").join(" ");
+    const body = Array.from({ length: 8 }, () => paragraph);
+    const hash = articleBodyHash(body);
+    await store.update((state) => state.issues.push(issue(summary)));
+    await store.saveCache(summary.id, 1, hash, body);
+
+    await store.update((state) => {
+      const savedArticle = state.issues[0]!.articles[0]!;
+      savedArticle.wordCount += 1;
+    });
+
+    expect(await store.readCache(summary.id, 1, hash)).toBeNull();
   });
 
   it("persists editorial rationale and provenance across restart while reading historical records", async () => {

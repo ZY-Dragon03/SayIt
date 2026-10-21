@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReaderPreferences, ReaderSemanticRuntimeTrace } from "../../src/shared/reader-contract";
+import { articleBodyHash } from "./article-body";
 import { collectEditorial } from "./editorial";
 import { EditorialCollectionError } from "./editorial";
 import type { JsonCompletionClient } from "../provider";
@@ -55,6 +56,15 @@ function defaultPreferences(overrides: Partial<ReaderPreferences> = {}): ReaderP
 }
 
 function article(overrides: Partial<EditorialArticle> = {}): EditorialArticle {
+  const wordCount = overrides.wordCount ?? 1400;
+  const paragraphCount = overrides.paragraphCount ?? 5;
+  const paragraphs = overrides.paragraphs ?? Array.from(
+    { length: paragraphCount },
+    (_, paragraphIndex) => {
+      const count = Math.floor(wordCount / paragraphCount) + (paragraphIndex < wordCount % paragraphCount ? 1 : 0);
+      return Array.from({ length: count }, (_, wordIndex) => `verified${paragraphIndex}_${wordIndex}`).join(" ");
+    },
+  );
   return {
     id: "article-technology-1",
     title: "Technology changes the energy market",
@@ -63,7 +73,7 @@ function article(overrides: Partial<EditorialArticle> = {}): EditorialArticle {
     accessiblePublication: "Example News",
     accessibleUrl: "https://news.example/story/technology",
     contentStatus: "FULL_TEXT",
-    wordCount: 1400,
+    wordCount,
     fkglWordCount: 1400,
     sentenceCount: 93,
     syllableCount: 2380,
@@ -73,9 +83,9 @@ function article(overrides: Partial<EditorialArticle> = {}): EditorialArticle {
     cachePermission: "NOT_PERMITTED",
     topics: ["Technology"],
     difficulty: "Intermediate",
-    paragraphCount: 5,
-    paragraphs: ["First verified paragraph.", "Second verified paragraph.", "Third verified paragraph."],
-    bodyHash: "a".repeat(64),
+    paragraphCount,
+    paragraphs,
+    bodyHash: articleBodyHash(paragraphs),
     ...overrides,
   };
 }
@@ -1370,6 +1380,27 @@ describe("Reader collection lifecycle", () => {
     expect(issue.articles).toHaveLength(1);
     expect(issue.articles[0]?.contentStatus).toBe("FULL_TEXT");
     expect(issue.articles.some((item) => item.title === "External candidate")).toBe(false);
+    await service.stop();
+  });
+
+  it("does not deliver a full-text candidate unless its complete body passes the output gate", async () => {
+    const now = () => new Date("2026-10-04T09:00:00.000Z");
+    const store = await createStore(now);
+    const invalid = article({
+      id: "invalid-body-candidate",
+      originalUrl: "https://news.example/story/invalid-body",
+      bodyHash: "a".repeat(64),
+    });
+    const { service } = makeService(store, now, async () => collection([invalid]));
+
+    await service.start();
+    await service.startManualRun("manual");
+    await service.waitForIdle();
+
+    const issue = service.today().issue!;
+    expect(issue.articles).toHaveLength(0);
+    expect(issue.actual.count).toBe(0);
+    expect(store.snapshot().cachedBodies).toHaveLength(0);
     await service.stop();
   });
 });

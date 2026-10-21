@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReaderPreferences } from "../../src/shared/reader-contract";
+import { articleBodyHash } from "./article-body";
 import { createReaderHandler } from "./api";
 import { ReaderService, type EditorialArticle, type EditorialCollector } from "./service";
 import { ReaderStore } from "./store";
@@ -45,6 +46,15 @@ function prefs(overrides: Partial<ReaderPreferences> = {}): ReaderPreferences {
 }
 
 function fullArticle(id = "editorial-id-1", overrides: Partial<EditorialArticle> = {}): EditorialArticle {
+  const wordCount = overrides.wordCount ?? 1400;
+  const paragraphCount = overrides.paragraphCount ?? 5;
+  const paragraphs = overrides.paragraphs ?? Array.from(
+    { length: paragraphCount },
+    (_, paragraphIndex) => {
+      const count = Math.floor(wordCount / paragraphCount) + (paragraphIndex < wordCount % paragraphCount ? 1 : 0);
+      return Array.from({ length: count }, (_, wordIndex) => `article${paragraphIndex}_${wordIndex}`).join(" ");
+    },
+  );
   return {
     id,
     title: "Technology changes the energy market",
@@ -53,7 +63,7 @@ function fullArticle(id = "editorial-id-1", overrides: Partial<EditorialArticle>
     accessiblePublication: "Example News",
     accessibleUrl: "https://news.example/story/technology",
     contentStatus: "FULL_TEXT",
-    wordCount: 1400,
+    wordCount,
     fkglWordCount: 1400,
     sentenceCount: 93,
     syllableCount: 2380,
@@ -63,9 +73,9 @@ function fullArticle(id = "editorial-id-1", overrides: Partial<EditorialArticle>
     cachePermission: "NOT_PERMITTED",
     topics: ["Technology"],
     difficulty: "Intermediate",
-    paragraphCount: 3,
-    paragraphs: ["First article paragraph.", "Second article paragraph.", "Third article paragraph."],
-    bodyHash: "b".repeat(64),
+    paragraphCount,
+    paragraphs,
+    bodyHash: articleBodyHash(paragraphs),
     ...overrides,
   };
 }
@@ -225,10 +235,7 @@ describe("Reader local API", () => {
         actual: { count: 1, topics: ["Technology"], difficulty: "Intermediate", readingMinutes: 7 },
         unmetConstraints: [],
       });
-    const reopen = vi.fn(async (reference) => ({
-      article: { ...fullArticle(reference.id), paragraphs: ["Live paragraph one.", "Live paragraph two."] },
-      reason: "",
-    }));
+    const reopen = vi.fn(async (reference) => ({ article: fullArticle(reference.id), reason: "" }));
     const harness = await createHarness(() => new Date(current), collect, reopen);
     const firstRun = await json(harness, "/run", {
       method: "POST",
@@ -254,11 +261,7 @@ describe("Reader local API", () => {
         contributionType: "analysis",
       },
     });
-    expect(articleResponse.body.paragraphs).toEqual([
-      "First article paragraph.",
-      "Second article paragraph.",
-      "Third article paragraph.",
-    ]);
+    expect(articleResponse.body.paragraphs).toEqual(fullArticle().paragraphs);
 
     const progress = await json(harness, "/progress", {
       method: "PUT",
@@ -302,6 +305,9 @@ describe("Reader local API", () => {
     expect(firstRun.response.status).toBe(202);
 
     const reloadedStore = new ReaderStore({ directory: harness.directory, now: () => new Date(current) });
+    await reloadedStore.initialize();
+    expect(await reloadedStore.readCache(oldArticleId, 1)).toEqual(fullArticle(oldArticleId).paragraphs);
+    await reloadedStore.removeCache(oldArticleId, 1);
     const restarted = new ReaderService({
       store: reloadedStore,
       now: () => new Date(current),
@@ -313,7 +319,7 @@ describe("Reader local API", () => {
     });
     await restarted.start();
     const restoredBody = await restarted.article(oldArticleId, 1);
-    expect(restoredBody.paragraphs).toEqual(["Live paragraph one.", "Live paragraph two."]);
+    expect(restoredBody.paragraphs).toEqual(fullArticle(oldArticleId).paragraphs);
     expect(restoredBody.article).toMatchObject({
       editorial: {
         contractVersion: "reader-editorial-curation.v1",
@@ -325,6 +331,7 @@ describe("Reader local API", () => {
       expect.objectContaining({ id: oldArticleId, originalUrl: "https://news.example/story/technology" }),
       expect.any(Function),
     );
+    expect(await reloadedStore.readCache(oldArticleId, 1)).toEqual(fullArticle(oldArticleId).paragraphs);
     await restarted.stop();
     // A second store on the same directory holds its own SQLite handle.
     restarted.close();

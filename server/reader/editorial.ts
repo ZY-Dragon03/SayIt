@@ -920,12 +920,14 @@ function cachePermission(values: string[], robots: string): CachePermission {
   return "UNKNOWN";
 }
 
-function englishConfidence(body: string): boolean {
+function englishConfidence(body: string, declaredLanguage = ""): boolean {
   const tokens = wordTokens(body);
-  if (tokens.length < 200) return false;
+  if (tokens.length === 0) return false;
+  if (/^en(?:-|$)/iu.test(declaredLanguage)) return true;
   const ascii = tokens.filter((token) => /^[a-z]+(?:['’][a-z]+)*$/iu.test(token)).length;
   const markers = tokens.filter((token) => ENGLISH_MARKERS.has(token.toLowerCase())).length;
-  return ascii / tokens.length >= 0.85 && markers >= 5 && markers / tokens.length >= 0.02;
+  const requiredMarkers = Math.max(1, Math.min(5, Math.ceil(tokens.length * 0.02)));
+  return ascii / tokens.length >= 0.85 && markers >= requiredMarkers && markers / tokens.length >= 0.02;
 }
 
 function pageFailure(document: Document, bodyText: string, title: string): string | null {
@@ -1129,13 +1131,12 @@ function paragraphsFromReadability(content: string): string[] {
   const document = new JSDOM(content).window.document;
   return [...document.querySelectorAll("p")]
     .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
-    .filter((paragraph) => paragraph.length >= 20);
+    .filter(Boolean);
 }
 
 interface SourceArticleParagraphs {
   paragraphs: string[];
   verifiedBodyBoundary: boolean;
-  readabilityReconstructionAllowed: boolean;
 }
 
 function hasVerifiedStandaloneArticleRoot(
@@ -1149,12 +1150,7 @@ function hasVerifiedStandaloneArticleRoot(
   ).toLowerCase();
   if (openGraphType !== "article" && !hasStructuredArticleType) return false;
   const normalizedTitle = normalizeWhitespace(title).toLowerCase();
-  if (
-    declaredTitles.length === 0 ||
-    !declaredTitles.every((declared) => declared.toLowerCase() === normalizedTitle)
-  ) {
-    return false;
-  }
+  if (declaredTitles.length === 0) return false;
   const roots = [...document.querySelectorAll("article")];
   if (roots.length > 1) return false;
   const normalizeHeading = (heading: Element) =>
@@ -1164,7 +1160,28 @@ function hasVerifiedStandaloneArticleRoot(
     : [...document.querySelectorAll("h1")])
     .map(normalizeHeading)
     .filter(Boolean);
-  return headings.length === 1 && headings[0] === normalizedTitle;
+  if (headings.length !== 1 || headings[0] !== normalizedTitle) return false;
+
+  // Some publisher schemas append the site name to the structured headline
+  // while the visible H1 and Open Graph title carry the exact article title.
+  // Permit only an exact publisher suffix; conflicting titles still fail.
+  const publisherNames = [
+    document.querySelector<HTMLMetaElement>('meta[property="og:site_name"]')?.content,
+    document.querySelector<HTMLMetaElement>('meta[property="article:publisher"]')?.content,
+    extractStructuredArticle(document).publisher,
+  ]
+    .map((value) => normalizeWhitespace(value ?? "").toLowerCase())
+    .filter(Boolean);
+  return declaredTitles.every((declared) => {
+    const normalized = normalizeWhitespace(declared).toLowerCase();
+    if (normalized === normalizedTitle) return true;
+    return publisherNames.some(
+      (publisher) =>
+        normalized === `${normalizedTitle} | ${publisher}` ||
+        normalized === `${normalizedTitle} - ${publisher}` ||
+        normalized === `${normalizedTitle} — ${publisher}`,
+    );
+  });
 }
 
 function isMediaCredit(paragraph: string): boolean {
@@ -1175,7 +1192,7 @@ function storyParagraphs(root: ParentNode): string[] {
   return [...root.querySelectorAll("p")]
     .filter((paragraph) => !paragraph.closest("form, aside, nav, footer, [role='complementary']"))
     .map((paragraph) => normalizeWhitespace(paragraph.textContent ?? ""))
-    .filter((paragraph) => paragraph.length >= 20 && !isMediaCredit(paragraph));
+    .filter((paragraph) => paragraph.length > 0 && !isMediaCredit(paragraph));
 }
 
 function narrowFallbackContentRoot(root: Element): Element {
@@ -1216,13 +1233,10 @@ function sourceArticleParagraphs(
   const structuredBodyMatchesSource = Boolean(
     structuredBody && normalizeWhitespace(paragraphs.join(" ")) === normalizeWhitespace(structuredBody),
   );
-  const publisherBodyIsSource = articleBodyRoots.length === 0 && publisherBodyRoots.length > 0;
   return {
     paragraphs,
     verifiedBodyBoundary:
       articleBodyRoots.length > 0 || publisherBodyRoots.length > 0 || structuredBodyMatchesSource || verifiedStandaloneArticleRoot,
-    readabilityReconstructionAllowed:
-      articleBodyRoots.length > 0 || structuredBodyMatchesSource || (verifiedStandaloneArticleRoot && !publisherBodyIsSource),
   };
 }
 
@@ -1331,23 +1345,22 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   }
   const reader = new Readability(document.cloneNode(true) as Document, { charThreshold: 100 });
   const parsedArticle = reader.parse();
-  if (!parsedArticle) {
-    const summary = makeCandidateSummary(source, "SUMMARY", "The page did not expose a readable article body.", page.statusCode);
-    return { article: null, body: "", summary, reason: "The page did not expose a readable article body." };
-  }
-  if (!parsedArticle.content?.trim()) {
-    const summary = makeCandidateSummary(source, "SUMMARY", "The page did not expose readable article paragraphs.", page.statusCode);
-    return { article: null, body: "", summary, reason: "The page did not expose readable article paragraphs." };
-  }
-  const title = normalizeWhitespace(parsedArticle.title || structured.headline || source.title);
+  const readabilityContent = parsedArticle?.content ?? "";
   const declaredTitles = titleMetadata(document, structured.headline);
+  // Prefer the visible H1 over Readability's title and schema headlines, which
+  // sometimes append the site name. The standalone-root check below requires
+  // the H1 and every declared headline to agree, allowing only an exact site
+  // suffix on publisher metadata.
+  const title = normalizeWhitespace(
+    document.querySelector("h1")?.textContent || declaredTitles[0] || parsedArticle?.title || source.title,
+  );
   const standaloneArticleVerified = hasVerifiedStandaloneArticleRoot(
     document,
     title,
     structured.hasArticleType,
     declaredTitles,
   );
-  if (isCategoryOrListingPage(document, parsedArticle.content, page.finalUrl, title)) {
+  if (isCategoryOrListingPage(document, readabilityContent, page.finalUrl, title)) {
     const summary = makeCandidateSummary(
       source,
       "SUMMARY",
@@ -1364,7 +1377,7 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   if (!standaloneArticleVerified) {
     return fallbackForProvenance("Standalone article structure and title metadata do not agree.", title);
   }
-  let paragraphs = paragraphsFromReadability(parsedArticle.content)
+  let paragraphs = paragraphsFromReadability(readabilityContent)
     .filter((paragraph) => !isMediaCredit(paragraph));
   const sourceBody = sourceArticleParagraphs(
     document,
@@ -1372,8 +1385,8 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     standaloneArticleVerified,
   );
   const sourceParagraphs = sourceBody.paragraphs;
-  if (!sourceBody.verifiedBodyBoundary || sourceParagraphs.length < 3) {
-    const reason = "The source did not expose a verified, continuous standalone article body; extracted text was too short or incomplete.";
+  if (!sourceBody.verifiedBodyBoundary || sourceParagraphs.length === 0) {
+    const reason = "The publisher page did not expose a verified article body.";
     const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
     return { article: null, body: "", summary, reason };
   }
@@ -1381,11 +1394,6 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   let recoveredParagraphCount = 0;
   const sourceText = normalizeWhitespace(sourceParagraphs.join(" ")).toLowerCase();
   const extraneousParagraphs = paragraphs.filter((paragraph) => !sourceText.includes(normalizeWhitespace(paragraph).toLowerCase()));
-  if (paragraphs.length > 0 && extraneousParagraphs.length / paragraphs.length > 0.1) {
-    const reason = "Extracted paragraphs are incomplete or include material outside the verified article body.";
-    const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
-    return { article: null, body: "", summary, reason };
-  }
   if (extraneousParagraphs.length > 0) {
     const extraneous = new Set(extraneousParagraphs);
     paragraphs = paragraphs.filter((paragraph) => !extraneous.has(paragraph));
@@ -1394,15 +1402,11 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   if (
     omittedParagraphCount > 0 &&
     sourceParagraphs.length > 0 &&
-    sourceBody.verifiedBodyBoundary &&
-    sourceBody.readabilityReconstructionAllowed &&
-    omittedParagraphCount / sourceParagraphs.length <= 0.1
+    sourceBody.verifiedBodyBoundary
   ) {
-    // Readability can discard real paragraphs because of publisher CSS classes such as
-    // "comment" even when article-level metadata and one matching article root establish
-    // the page's source body boundary.
-    // Reconstruct from that semantic source sequence, then keep the exact completeness
-    // check: every meaningful source paragraph must still appear in the delivered body.
+    // The publisher's verified article body is the output source of truth. Readability
+    // may omit any number of real paragraphs or include page chrome, so rebuild the
+    // Reader body from that source instead of rejecting a complete article by ratio.
     const reconstructedParagraphs = [...sourceParagraphs];
     recoveredParagraphCount = omittedParagraphCount;
     paragraphs = reconstructedParagraphs;
@@ -1410,7 +1414,7 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
   }
   const body = paragraphs.join("\n\n");
   if (omittedParagraphCount > 0) {
-    const reason = `Readability omitted ${omittedParagraphCount} of ${sourceParagraphs.length} meaningful paragraphs from the semantic article body; the extracted text is incomplete.`;
+    const reason = "The verified publisher body could not be reconstructed from its article paragraphs.";
     const summary = makeCandidateSummary(source, "SUMMARY", reason, page.statusCode);
     return { article: null, body, summary, reason };
   }
@@ -1420,21 +1424,9 @@ function extractPage(source: SearchCandidate, page: FetchedArticlePage): {
     return { article: null, body, summary, reason: failedPage };
   }
   const reading = readingMetrics(body);
-  if (reading.wordCount < 200 || paragraphs.length < 3) {
-    const summary = makeCandidateSummary(source, "SUMMARY", "The accessible text is too short or lacks continuous article paragraphs.", page.statusCode);
-    return { article: null, body, summary, reason: "The candidate is a teaser or summary, not a sufficiently complete article." };
-  }
-  if (!englishConfidence(body)) {
+  if (!englishConfidence(body, declaredLanguage)) {
     const summary = makeCandidateSummary(source, "EXTERNAL_ONLY", "The extracted body could not be verified as English.", page.statusCode);
     return { article: null, body, summary, reason: "The extracted text did not meet the English-language check." };
-  }
-  const structuredBody = structured.articleBody;
-  if (structuredBody) {
-    const structuredWords = whitespaceWordCount(structuredBody);
-    if (structuredWords >= 200 && reading.wordCount / structuredWords < 0.7) {
-      const summary = makeCandidateSummary(source, "SUMMARY", "The extracted article is substantially shorter than the structured full body.", page.statusCode);
-      return { article: null, body, summary, reason: "Extracted body is below 70% of the structured NewsArticle.articleBody." };
-    }
   }
   const originalHost = hostOf(sourceUrl);
   const originalPublication = originalHost ? displayPublication(originalHost) : publisherIdentity;
@@ -1545,45 +1537,59 @@ export async function readArticleFullText(
   signal?: AbortSignal,
 ): Promise<{ article: EditorialArticle | null; reason: string }> {
   const originalUrl = normalizeUrl(reference.originalUrl);
-  if (!originalUrl || !reference.topics.length) {
+  const accessibleUrl = normalizeUrl(reference.accessibleUrl);
+  const sourceUrls = [...new Set([originalUrl, accessibleUrl].filter((url): url is string => Boolean(url)))];
+  if (!sourceUrls.length || !reference.topics.length) {
     return { article: null, reason: "Stored article reference is incomplete or invalid." };
   }
-  try {
-    const page = await fetchArticle(originalUrl, signal);
-    const source: SearchCandidate = {
-      url: originalUrl,
-      title: reference.title,
-      snippet: "",
-      publication: reference.originalPublication,
-    };
-    const extracted = extractPage(source, page);
-    if (!extracted.article) return { article: null, reason: extracted.reason };
-    if (titleSimilarity(reference.title, extracted.article.title) < 0.35) {
-      return { article: null, reason: "The current page title no longer matches the archived article." };
-    }
-    const matched = topicEvidence(reference.topics, extracted.article.title, extracted.body);
-    if (matched.topics.length === 0) {
-      return { article: null, reason: "The current page no longer matches the archived article topics." };
-    }
-    return {
-      article: {
-        ...extracted.article,
-        id: reference.id,
+  let lastReason = "The archived article could not be revalidated.";
+  for (const sourceUrl of sourceUrls) {
+    try {
+      const page = await fetchArticle(sourceUrl, signal);
+      // A publisher-affiliate copy may declare the original publisher's URL as
+      // its canonical. Accept that only for the already saved accessible URL;
+      // the normal extractor still verifies the page publisher, article title,
+      // and H1 against the saved article.
+      const identityUrl =
+        sourceUrl === accessibleUrl && originalUrl ? originalUrl : sourceUrl;
+      const source: SearchCandidate = {
+        url: identityUrl,
         title: reference.title,
-        originalPublication: reference.originalPublication,
-        originalUrl,
-        accessiblePublication: extracted.article.accessiblePublication,
-        accessibleUrl: extracted.article.accessibleUrl,
-        topics: matched.topics,
-      },
-      reason: "The archived article was re-fetched and its full text was revalidated.",
-    };
-  } catch (error) {
-    return {
-      article: null,
-      reason: error instanceof Error ? error.message : "The archived article could not be revalidated.",
-    };
+        snippet: "",
+        publication: reference.originalPublication,
+      };
+      const extracted = extractPage(source, page);
+      if (!extracted.article) {
+        lastReason = extracted.reason;
+        continue;
+      }
+      if (titleSimilarity(reference.title, extracted.article.title) < 0.35) {
+        lastReason = "The current page title no longer matches the archived article.";
+        continue;
+      }
+      const matched = topicEvidence(reference.topics, extracted.article.title, extracted.body);
+      if (matched.topics.length === 0) {
+        lastReason = "The current page no longer matches the archived article topics.";
+        continue;
+      }
+      return {
+        article: {
+          ...extracted.article,
+          id: reference.id,
+          title: reference.title,
+          originalPublication: reference.originalPublication,
+          originalUrl: originalUrl ?? sourceUrl,
+          accessiblePublication: extracted.article.accessiblePublication,
+          accessibleUrl: extracted.article.accessibleUrl,
+          topics: matched.topics,
+        },
+        reason: "The archived article was re-fetched and its full text was revalidated.",
+      };
+    } catch (error) {
+      lastReason = error instanceof Error ? error.message : "The archived article could not be revalidated.";
+    }
   }
+  return { article: null, reason: lastReason };
 }
 
 function titleSimilarity(left: string, right: string): number {

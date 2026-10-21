@@ -92,9 +92,10 @@ still eligible, and the closest match is chosen first; an article two tiers away
 refused. The measured difficulty is always shown as measured.
 
 While reading, select text to get a local dictionary entry with IPA, hear it, copy
-it, or send it to SayIt. Articles whose publisher permits caching are kept locally
-and stay readable offline; the rest are re-read from the publisher when you open
-them.
+it, or send it to SayIt. Every article that passes Reader's full-text verification
+is archived in the local Reader database in the same transaction that delivers its
+Daily Issue, so saved articles remain readable offline. Older issues without a body
+snapshot are revalidated and archived the next time they are opened.
 
 ---
 
@@ -204,8 +205,9 @@ runs on its own once you schedule it.**
 **SayIt requests are always user-triggered.** A request reaches the DeepSeek API only
 when you press **Say it**. Playing audio, looking up a word in the local dictionary,
 and browsing History are local and make no network request at all. Opening an article
-is local when its body is already stored; a full-text article whose body was not kept
-is re-fetched from its publisher at the moment you open it.
+is local when its body is already stored. If an older issue is missing a snapshot,
+Reader re-fetches and verifies it from the publisher, saves it locally, and then
+displays it.
 
 **Reader can make automatic requests.** Once the `SayIt Reader Collection` task is
 registered, each due collection makes three kinds of outbound request without you
@@ -272,8 +274,8 @@ article supply live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   to run on an older Node and tell you so instead of failing silently later.
 - **You need your own DeepSeek API key** and an internet connection for new
   requests. Cached answers, saved expressions, stored article bodies, and reading
-  progress keep working offline; an article whose body was not kept needs its
-  publisher again when you open it.
+  progress and all archived Reader article bodies keep working offline. A legacy
+  issue without a body snapshot needs its publisher once when it is reopened.
 - **A daily issue can come up short.** Some publishers block automated readers or
   put articles behind a paywall. Reader reports a partial or missing issue honestly
   rather than substituting lower-quality content.

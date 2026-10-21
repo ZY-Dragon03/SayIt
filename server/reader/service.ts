@@ -29,6 +29,7 @@ import type { JsonCompletionClient } from "../provider";
 import type { SemanticExistingArticleInput } from "./semantic";
 import { addLocalDays, localDateTime, resolveScheduledTime } from "./time";
 import { ReaderStore, type ReaderState, type ReaderTrace } from "./store";
+import { matchesArticleSummaryBody } from "./article-body";
 
 export interface EditorialArticle extends ArticleSummary {
   paragraphs?: string[] | null;
@@ -1137,21 +1138,30 @@ export class ReaderService {
       ) ?? null;
     if (!article || !issue) throw new ReaderServiceError("article_not_found", "This article is not in the saved archive.", 404);
     if (!isFullText(article)) return { article, paragraphs: null, progress };
-
-    const memoryBody = this.bodies.get(articleId + "|" + edition);
-    if (memoryBody) return { article, paragraphs: memoryBody.paragraphs, progress };
-
     const store = this.requireStore();
-    const cachedMeta = store.snapshot().cachedBodies.find(
-      (item) => item.articleId === articleId && item.edition === edition,
-    );
-    if (cachedMeta && article.cachePermission === "PERMITTED") {
-      const cachedParagraphs = await store.readCache(articleId, edition, cachedMeta.bodyHash);
-      if (cachedParagraphs) {
-        this.bodies.set(articleId + "|" + edition, { paragraphs: cachedParagraphs, bodyHash: cachedMeta.bodyHash });
-        return { article, paragraphs: cachedParagraphs, progress };
+    const bodyKey = articleId + "|" + edition;
+    const findArchivedArticle = () => store.snapshot().issues
+      .find((item) => item.edition === edition && item.articles.some((saved) => saved.id === articleId))
+      ?.articles.find((item) => item.id === articleId);
+    const cachedParagraphs = await store.readCache(articleId, edition);
+    if (cachedParagraphs) {
+      const cachedMeta = store.snapshot().cachedBodies.find(
+        (item) => item.articleId === articleId && item.edition === edition,
+      );
+      if (cachedMeta) {
+        this.bodies.set(bodyKey, { paragraphs: cachedParagraphs, bodyHash: cachedMeta.bodyHash });
+        const archivedArticle = findArchivedArticle();
+        return { article: archivedArticle ?? article, paragraphs: cachedParagraphs, progress };
       }
     }
+
+    const memoryBody = this.bodies.get(bodyKey);
+    if (memoryBody && matchesArticleSummaryBody(article, memoryBody.paragraphs, memoryBody.bodyHash)) {
+      await store.saveCache(articleId, edition, memoryBody.bodyHash, memoryBody.paragraphs);
+      const archivedArticle = findArchivedArticle();
+      return { article: archivedArticle ?? article, paragraphs: memoryBody.paragraphs, progress };
+    }
+    this.bodies.delete(bodyKey);
     if (!this.reopenArticle) {
       return {
         article: { ...article, contentStatus: "UNAVAILABLE" as const },
@@ -1172,16 +1182,32 @@ export class ReaderService {
         },
         this.fetchArticle,
       );
-      if (!result.article?.paragraphs?.length) {
+      const reopenedArticle = result.article;
+      const paragraphs = reopenedArticle?.paragraphs;
+      const bodyHash = reopenedArticle?.bodyHash;
+      if (
+        !reopenedArticle ||
+        typeof bodyHash !== "string" ||
+        !matchesArticleSummaryBody(reopenedArticle, paragraphs, bodyHash)
+      ) {
         return { article: { ...article, contentStatus: "UNAVAILABLE" as const }, paragraphs: null, progress };
       }
-      const paragraphs = result.article.paragraphs;
-      const bodyHash = result.article.bodyHash ?? "";
-      this.bodies.set(articleId + "|" + edition, { paragraphs, bodyHash });
-      if (article.cachePermission === "PERMITTED" && /^[a-f0-9]{64}$/.test(bodyHash)) {
-        await store.saveCache(articleId, edition, bodyHash, paragraphs).catch(() => undefined);
-      }
-      return { article, paragraphs, progress };
+      const verifiedMetrics = {
+        wordCount: reopenedArticle.wordCount,
+        fkglWordCount: reopenedArticle.fkglWordCount,
+        sentenceCount: reopenedArticle.sentenceCount,
+        syllableCount: reopenedArticle.syllableCount,
+        readingMinutes: reopenedArticle.readingMinutes,
+        fkgl: reopenedArticle.fkgl,
+        difficulty: reopenedArticle.difficulty,
+        paragraphCount: reopenedArticle.paragraphCount,
+        accessiblePublication: reopenedArticle.accessiblePublication,
+        accessibleUrl: reopenedArticle.accessibleUrl,
+      };
+      await store.saveCache(articleId, edition, bodyHash, paragraphs, verifiedMetrics);
+      const archivedArticle = findArchivedArticle();
+      this.bodies.set(bodyKey, { paragraphs, bodyHash });
+      return { article: archivedArticle ?? article, paragraphs, progress };
     } catch {
       return { article: { ...article, contentStatus: "UNAVAILABLE" as const }, paragraphs: null, progress };
     }
@@ -1519,7 +1545,10 @@ export class ReaderService {
           )
           .map((entry) => entry.item)) {
           const summary = scopeSummary(candidate, issue.id, issue.edition);
-          if (!isSuitable(summary, started.preferences)) continue;
+          if (
+            !isSuitable(summary, started.preferences) ||
+            !matchesArticleSummaryBody(summary, candidate.paragraphs, candidate.bodyHash)
+          ) continue;
           const urlKeys = [
             normalizedArticleUrl(summary.originalUrl),
             normalizedArticleUrl(summary.accessibleUrl),
@@ -1536,9 +1565,10 @@ export class ReaderService {
           urlKeys.forEach((key) => selectedUrls.add(key));
           if (title) recentTitles.add(title);
           recentArticleIds.add(summary.id);
-          if (candidate.paragraphs?.length && candidate.bodyHash) {
-            bodyRecords.push({ summary, body: { paragraphs: candidate.paragraphs, bodyHash: candidate.bodyHash } });
-          }
+          bodyRecords.push({
+            summary,
+            body: { paragraphs: candidate.paragraphs, bodyHash: candidate.bodyHash! },
+          });
         }
         const fulfillment = issueFulfillment(
           started.preferences,
@@ -1607,13 +1637,15 @@ export class ReaderService {
           this.carryProgress(state, replacement, started.issue.edition - 1);
         }
         return replacement;
-      });
+      }, () => bodyRecords.map(({ summary, body }) => ({
+        articleId: summary.id,
+        edition: started.issue.edition,
+        bodyHash: body.bodyHash,
+        paragraphs: body.paragraphs,
+      })));
       if (!saved) return;
       for (const { summary, body } of bodyRecords) {
         this.bodies.set(summary.id + "|" + saved.edition, body);
-        if (summary.cachePermission === "PERMITTED" && /^[a-f0-9]{64}$/.test(body.bodyHash)) {
-          await this.store.saveCache(summary.id, saved.edition, body.bodyHash, body.paragraphs).catch(() => undefined);
-        }
       }
     } catch (error) {
       await this.recordFailure(started, error);

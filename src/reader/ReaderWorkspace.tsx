@@ -470,9 +470,8 @@ export const ReaderWorkspace = forwardRef<
     });
     try {
       await flushProgressWrites().catch(() => undefined);
-      // Reuse a body that is already loaded in this session. Nothing restricted
-      // is persisted for speed: this is the same in-memory response the server
-      // would return, kept only while the workspace is mounted.
+      // Reuse a body that is already loaded in this session; the service also
+      // keeps a verified local archive so historical issues survive restarts.
       const cached = articleBodyCacheRef.current.get(articleCacheKey(summary.id, issue.edition));
       if (cached) {
         setArticleResponse(cached);
@@ -480,11 +479,7 @@ export const ReaderWorkspace = forwardRef<
         lastProgressRef.current = cached.progress;
         restorePendingRef.current = Boolean(cached.progress);
         if (!cached.paragraphs) {
-          setArticleError(
-            cached.article.contentStatus === "FULL_TEXT"
-              ? "Verified article text is unavailable now. Check the source link for access."
-              : "This item is available from its publisher, but Reader does not have verified full text.",
-          );
+          setArticleError("Reader could not restore the saved article body. Retry to revalidate it from the publisher.");
         }
         return;
       }
@@ -498,11 +493,7 @@ export const ReaderWorkspace = forwardRef<
       lastProgressRef.current = response.progress;
       restorePendingRef.current = Boolean(response.progress);
       if (!response.paragraphs) {
-        setArticleError(
-          response.article.contentStatus === "FULL_TEXT"
-            ? "Verified article text is unavailable now. Check the source link for access."
-            : "This item is available from its publisher, but Reader does not have verified full text.",
-        );
+        setArticleError("Reader could not restore the saved article body. Retry to revalidate it from the publisher.");
       }
     } catch (error) {
       setArticleError(error instanceof Error ? error.message : "The article could not be opened.");
@@ -1320,8 +1311,20 @@ export const ReaderWorkspace = forwardRef<
                 </section>
               ) : (
                 <div className="reader-unavailable-body" role="status">
-                  <strong>{articleError ?? "Full text is not available in Reader."}</strong>
-                  <p>This item is not counted as an in-app full-text article while its verified body is unavailable.</p>
+                  <strong>{articleError ?? "Reader could not open this saved article."}</strong>
+                  <p>Reader verifies and saves the complete article locally before displaying it.</p>
+                  {selectedIssue && selectedArticle && (
+                    <button
+                      className="reader-secondary-button"
+                      type="button"
+                      onClick={() => {
+                        articleBodyCacheRef.current.delete(articleCacheKey(selectedArticle.id, selectedIssue.edition));
+                        void loadArticle(selectedIssue, selectedArticle);
+                      }}
+                    >
+                      Retry in Reader
+                    </button>
+                  )}
                   {selectedSourceUrl && (
                     <a href={selectedSourceUrl} target="_blank" rel="noopener noreferrer">
                       Open publisher page <span aria-hidden="true">↗</span>

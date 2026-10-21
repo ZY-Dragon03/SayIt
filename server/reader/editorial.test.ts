@@ -93,10 +93,16 @@ function pageFor(
   title: string,
   body: string,
   publisher = new URL(url).hostname.replace(/^www\./u, "").split(".")[0],
+  canonicalUrl = url,
+  structuredHeadline?: string,
 ): FetchedArticlePage {
   const paragraphs = body.split("\n\n").map((paragraph) => `<p>${paragraph}</p>`).join("");
+  const structuredArticle = structuredHeadline
+    ? `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "NewsArticle", headline: structuredHeadline, publisher: { name: publisher } })}</script>`
+    : "";
   const html = `<!doctype html><html lang="en"><head><title>${title} | ${publisher}</title>
-    <link rel="canonical" href="${url}">
+    <link rel="canonical" href="${canonicalUrl}">
+    ${structuredArticle}
     <meta property="og:type" content="article">
     <meta property="og:title" content="${title}">
     <meta name="citation_title" content="${title}">
@@ -811,22 +817,23 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(fetchArticle).not.toHaveBeenCalled();
   });
 
-  it("returns ordinary NOT_DELIVERED when every fetched result is summary-only", async () => {
+  it("delivers a short article when its publisher page verifies the complete body", async () => {
     const url = "https://www.reuters.com/finance/central-bank-summary";
-    const summary = pageFor(url, "Finance summary of a central bank decision", "A brief summary of the central bank decision and its effect on finance.", "Reuters");
-    const result = await collectEditorial(preferencesForTopic(articleBody("central bank policy"), "Finance"), {
-      search: async () => [{ url, title: "Finance summary of a central bank decision", snippet: "A short summary" }],
-      fetchArticle: async () => summary,
+    const title = "Finance officials publish a short policy report";
+    const paragraphs = ["Finance officials changed the policy.", "Yes."];
+    const result = await collectEditorial(preferencesForTopic(paragraphs.join("\n\n"), "Finance"), {
+      search: async () => [{ url, title, snippet: "A short finance report" }],
+      fetchArticle: async () => pageFor(url, title, paragraphs.join("\n\n"), "Reuters"),
       maxArticleChecks: 1,
     });
 
-    expect(result.status).toBe("NOT_DELIVERED");
-    expect(result.articles).toHaveLength(0);
-    expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0]?.contentStatus).toBe("SUMMARY");
+    expect(result.articles).toHaveLength(1);
+    expect(result.articles[0]?.contentStatus).toBe("FULL_TEXT");
+    expect(result.articles[0]?.paragraphs).toEqual(paragraphs);
+    expect(result.articles[0]?.paragraphCount).toBe(paragraphs.length);
   });
 
-  it("rejects an incomplete Readability extraction when story paragraphs are omitted", { timeout: 30_000 }, async () => {
+  it("rebuilds a full publisher body when Readability omits many story paragraphs", { timeout: 30_000 }, async () => {
     const url = "https://www.reuters.com/world/analysis/synthetic-continuity-case";
     const title = "Synthetic report on finance and economic evidence";
     const paragraphs = Array.from({ length: 47 }, (_, index) => [
@@ -843,11 +850,13 @@ describe("SayIt Reader Editorial Agent", () => {
       maxArticleChecks: 1,
     });
 
-    expect(result.articles).toHaveLength(0);
-    expect(result.status).toBe("NOT_DELIVERED");
-    expect(result.candidates[0]?.contentStatus).toBe("SUMMARY");
+    expect(result.status).toBe("COMPLETE");
+    expect(result.articles).toHaveLength(1);
+    expect(result.articles[0]?.contentStatus).toBe("FULL_TEXT");
+    expect(result.articles[0]?.paragraphs).toEqual(paragraphs);
+    expect(result.articles[0]?.paragraphCount).toBe(paragraphs.length);
     expect(result.trace.candidates.some(
-      (candidate) => candidate.url === url && candidate.outcome === "REJECTED" && /incomplete|omitted|coverage/iu.test(candidate.reason),
+      (candidate) => candidate.url === url && candidate.outcome === "ACCEPTED" && /Reconstructed 14 paragraph/iu.test(candidate.reason),
     )).toBe(true);
 
     const completeResult = await collectEditorial(preferences, {
@@ -859,7 +868,7 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(completeResult.articles[0]?.paragraphCount).toBe(47);
   });
 
-  it("rejects a Guardian article when article-level text hides a missing paragraph inside its body boundary", async () => {
+  it("rebuilds from a verified Guardian body while excluding adjacent article-level text", async () => {
     const url = "https://www.theguardian.com/technology/2026/sep/14/synthetic-body-boundary";
     const title = "Guardian report examines finance and regional technology investment";
     const paragraphs = Array.from({ length: 30 }, (_, index) => [
@@ -881,11 +890,14 @@ describe("SayIt Reader Editorial Agent", () => {
       maxArticleChecks: 1,
     });
 
-    expect(damaged.status).toBe("NOT_DELIVERED");
-    expect(damaged.articles).toHaveLength(0);
-    expect(damaged.candidates[0]?.contentStatus).toBe("SUMMARY");
+    expect(damaged.articles).toHaveLength(1);
+    expect(damaged.articles[0]?.contentStatus).toBe("FULL_TEXT");
+    expect(damaged.articles[0]?.paragraphs).toEqual(paragraphs);
+    for (const articleLevelParagraph of articleLevelParagraphs) {
+      expect(damaged.articles[0]?.paragraphs).not.toContain(articleLevelParagraph);
+    }
     expect(damaged.trace.candidates.some(
-      (candidate) => candidate.url === url && /incomplete|omitted|coverage/iu.test(candidate.reason),
+      (candidate) => candidate.url === url && candidate.outcome === "ACCEPTED" && /Reconstructed 1 paragraph/iu.test(candidate.reason),
     )).toBe(true);
 
     const complete = await collectEditorial(preferences, {
@@ -898,13 +910,14 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(complete.articles[0]?.paragraphs).toEqual(paragraphs);
   });
 
-  it("reconstructs small Readability omissions from verified semantic article bodies", async () => {
+  it("reconstructs Readability omissions of any size from verified semantic article bodies", async () => {
     const title = "How finance researchers track regional lending changes";
     const cases = [
       { paragraphCount: 31, omittedIndexes: [4, 13, 26], semanticSource: "itemprop" },
       { paragraphCount: 31, omittedIndexes: [4, 13, 26], semanticSource: "json-ld" },
       { paragraphCount: 33, omittedIndexes: [4, 13, 26], semanticSource: "article-page" },
       { paragraphCount: 15, omittedIndexes: [7], semanticSource: "article-page" },
+      { paragraphCount: 15, omittedIndexes: [0, 1, 2, 3, 4, 5, 6, 7, 8], semanticSource: "article-page" },
     ] as const;
     for (const testCase of cases) {
       const paragraphs = Array.from({ length: testCase.paragraphCount }, (_, index) => [
@@ -984,7 +997,7 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(result.actual.readingMinutes).toBeGreaterThanOrEqual(preferences.readingBudgetMinutes * 0.7);
     expect(result.actual.readingMinutes).toBeLessThanOrEqual(preferences.readingBudgetMinutes);
     expect(result.trace.candidates.some((candidate) => candidate.url === inaccessible && candidate.statusCode === 403)).toBe(true);
-    expect(result.trace.candidates.some((candidate) => candidate.url === summary && /summary|short/iu.test(candidate.reason))).toBe(true);
+    expect(result.trace.candidates.some((candidate) => candidate.url === summary && candidate.outcome === "ACCEPTED")).toBe(true);
     expect(result.trace.candidates.some((candidate) => candidate.url === vanished && candidate.statusCode === 404)).toBe(true);
     expect(result.trace.decisions.some((decision) => decision.includes("no article URL list was supplied as input"))).toBe(true);
   });
@@ -1040,6 +1053,41 @@ describe("SayIt Reader Editorial Agent", () => {
     expect(article?.originalUrl).toBe(originalUrl);
     expect(article?.accessiblePublication).toBe("The Guardian");
     expect(article?.accessibleUrl).toBe(redirectedUrl);
+    expect(article?.paragraphs?.length).toBeGreaterThanOrEqual(3);
+    expect(reason).toContain("revalidated");
+  });
+
+  it("revalidates a syndicated historical article with publisher-suffixed schema title when the original is unavailable", async () => {
+    const originalUrl = "https://www.npr.org/2026/10/15/nx-s1-6003857/suspicious-mailings-election-congressional-offices";
+    const accessibleUrl = "https://www.wbur.org/npr/nx-s1-6003857/suspicious-mailings-election-congressional-offices";
+    const title = "Suspicious mailings to election officials, congressional offices under investigation";
+    const body = articleBody("government election officials and the suspicious mailings");
+    const accessiblePage = pageFor(accessibleUrl, title, body, "WBUR", originalUrl, `${title} | WBUR`);
+    const calls: string[] = [];
+    const { article, reason } = await readArticleFullText({
+      id: "historical-npr-article",
+      title,
+      originalPublication: "NPR",
+      originalUrl,
+      accessiblePublication: "WBUR",
+      accessibleUrl,
+      topics: ["Politics"],
+    }, async (url) => {
+      calls.push(url);
+      if (url === originalUrl) throw new Error("The original source is unavailable.");
+      return { ...accessiblePage, finalUrl: accessibleUrl };
+    });
+
+    expect(calls).toEqual([originalUrl, accessibleUrl]);
+    expect(article).toMatchObject({
+      id: "historical-npr-article",
+      contentStatus: "FULL_TEXT",
+      originalPublication: "NPR",
+      originalUrl,
+      accessiblePublication: "WBUR",
+      accessibleUrl,
+      provenance: { bodyCompletenessVerified: true },
+    });
     expect(article?.paragraphs?.length).toBeGreaterThanOrEqual(3);
     expect(reason).toContain("revalidated");
   });

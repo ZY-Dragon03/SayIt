@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { matchesArticleSummaryBody } from "./article-body";
 import {
   articleSummarySchema,
   dailyIssueSchema,
@@ -67,6 +68,13 @@ const cachedBodyMetaSchema = z.object({
   verifiedAt: z.string().datetime({ offset: true }),
 });
 export type CachedBodyMeta = z.infer<typeof cachedBodyMetaSchema>;
+
+export interface ArticleBodyWrite {
+  articleId: string;
+  edition: number;
+  bodyHash: string;
+  paragraphs: string[];
+}
 
 export interface ReaderState {
   preferences: ReaderPreferences;
@@ -323,7 +331,12 @@ export class ReaderStore {
    * The transaction is opened before the state is read and held until the
    * result is committed, so concurrent writers serialize instead of clobbering.
    */
-  async update<T>(mutator: (state: ReaderState) => T | Promise<T>): Promise<T> {
+  async update<T>(
+    mutator: (state: ReaderState) => T | Promise<T>,
+    articleBodies:
+      | readonly ArticleBodyWrite[]
+      | ((state: ReaderState, result: T) => readonly ArticleBodyWrite[]) = [],
+  ): Promise<T> {
     this.assertInitialized();
     const execute = async (): Promise<T> => {
       const database = this.requireDatabase();
@@ -334,6 +347,35 @@ export class ReaderStore {
         const committed = this.readCommittedState();
         const next = structuredClone(committed);
         const result = await mutator(next);
+        const requestedBodies =
+          typeof articleBodies === "function"
+            ? articleBodies(next, result)
+            : articleBodies;
+        const bodyWrites = new Map<string, ArticleBodyWrite>();
+        for (const body of requestedBodies) {
+          const key = `${body.articleId}|${body.edition}`;
+          if (bodyWrites.has(key)) throw new ReaderStoreError("duplicate_article_body");
+          const article = next.issues
+            .find((issue) =>
+              issue.edition === body.edition &&
+              issue.articles.some((item) => item.id === body.articleId),
+            )
+            ?.articles.find((item) => item.id === body.articleId);
+          if (!article || !matchesArticleSummaryBody(article, body.paragraphs, body.bodyHash)) {
+            throw new ReaderStoreError("article_body_invalid");
+          }
+          const verifiedAt = this.now().toISOString();
+          next.cachedBodies = next.cachedBodies.filter(
+            (item) => item.articleId !== body.articleId || item.edition !== body.edition,
+          );
+          next.cachedBodies.push({
+            articleId: body.articleId,
+            edition: body.edition,
+            bodyHash: body.bodyHash,
+            verifiedAt,
+          });
+          bodyWrites.set(key, { ...body, paragraphs: [...body.paragraphs] });
+        }
         const parsed = stateSchema.safeParse(next);
         if (!parsed.success) {
           const issues = parsed.error.issues
@@ -347,6 +389,26 @@ export class ReaderStore {
         // the UI for as long as the whole state took to rewrite. The version this
         // transaction read says exactly which tables changed.
         this.writeState(parsed.data, committed);
+        if (bodyWrites.size > 0) {
+          const insertBody = database.prepare(
+            `INSERT OR REPLACE INTO article_bodies
+               (article_id, edition, body_hash, verified_at, paragraphs)
+             VALUES (?, ?, ?, ?, ?)`,
+          );
+          for (const body of bodyWrites.values()) {
+            const meta = parsed.data.cachedBodies.find(
+              (item) => item.articleId === body.articleId && item.edition === body.edition,
+            );
+            if (!meta) throw new ReaderStoreError("article_body_invalid");
+            insertBody.run(
+              body.articleId,
+              body.edition,
+              body.bodyHash,
+              meta.verifiedAt,
+              JSON.stringify(body.paragraphs),
+            );
+          }
+        }
         database.exec("COMMIT");
         transactionOpen = false;
         this.state = parsed.data;
@@ -784,68 +846,55 @@ export class ReaderStore {
     edition: number,
     bodyHash: string,
     paragraphs: string[],
+    verifiedMetrics?: Pick<
+      ArticleSummary,
+      | "wordCount"
+      | "fkglWordCount"
+      | "sentenceCount"
+      | "syllableCount"
+      | "readingMinutes"
+      | "fkgl"
+      | "difficulty"
+      | "paragraphCount"
+      | "accessiblePublication"
+      | "accessibleUrl"
+    >,
   ): Promise<void> {
     this.assertInitialized();
-    await this.update((state) => {
-      const cacheAllowed = state.issues.some(
-        (issue) =>
-          issue.edition === edition &&
-          issue.articles.some(
-            (article) =>
-              article.id === articleId &&
-              article.contentStatus === "FULL_TEXT" &&
-              article.cachePermission === "PERMITTED",
-          ),
-      );
-      if (!cacheAllowed) throw new ReaderStoreError("cache_not_permitted");
-      state.cachedBodies = state.cachedBodies.filter(
-        (item) => item.articleId !== articleId || item.edition !== edition,
-      );
-      state.cachedBodies.push({
-        articleId,
-        edition,
-        bodyHash,
-        verifiedAt: this.now().toISOString(),
-      });
-      this.requireDatabase()
-        .prepare(
-          `INSERT OR REPLACE INTO article_bodies
-             (article_id, edition, body_hash, verified_at, paragraphs)
-           VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run(
-          articleId,
-          edition,
-          bodyHash,
-          this.now().toISOString(),
-          JSON.stringify(paragraphs),
+    await this.update(
+      (state) => {
+        if (!verifiedMetrics) return;
+        const issue = state.issues.find((item) =>
+          item.edition === edition && item.articles.some((candidate) => candidate.id === articleId),
         );
-    });
+        const article = issue?.articles.find((item) => item.id === articleId);
+        if (!article || article.contentStatus !== "FULL_TEXT") {
+          throw new ReaderStoreError("article_body_invalid");
+        }
+        Object.assign(article, verifiedMetrics);
+      },
+      [{ articleId, edition, bodyHash, paragraphs }],
+    );
   }
 
   async readCache(
     articleId: string,
     edition: number,
-    expectedHash: string,
+    expectedHash?: string,
   ): Promise<string[] | null> {
     this.assertInitialized();
     await this.reload();
-    const cacheStillAllowed = this.state.issues.some(
-      (issue) =>
-        issue.edition === edition &&
-        issue.articles.some(
-          (article) =>
-            article.id === articleId &&
-            article.contentStatus === "FULL_TEXT" &&
-            article.cachePermission === "PERMITTED",
-        ),
-    );
-    if (!cacheStillAllowed) return null;
+    const article = this.state.issues
+      .find((issue) =>
+        issue.edition === edition && issue.articles.some((item) => item.id === articleId),
+      )
+      ?.articles.find((item) => item.id === articleId);
+    if (!article || article.contentStatus !== "FULL_TEXT") return null;
     const meta = this.state.cachedBodies.find(
       (item) =>
         item.articleId === articleId &&
         item.edition === edition &&
-        item.bodyHash === expectedHash,
+          (expectedHash === undefined || item.bodyHash === expectedHash),
     );
     if (!meta) return null;
     const row = this.requireDatabase()
@@ -855,16 +904,16 @@ export class ReaderStore {
       .get(articleId, edition) as
       | { body_hash: string; paragraphs: string }
       | undefined;
-    if (!row || row.body_hash !== expectedHash) return null;
+    if (
+      !row ||
+      row.body_hash !== meta.bodyHash ||
+      (expectedHash !== undefined && row.body_hash !== expectedHash)
+    ) return null;
     try {
       const decoded = JSON.parse(row.paragraphs) as unknown;
-      if (
-        !Array.isArray(decoded) ||
-        decoded.some((item) => typeof item !== "string")
-      ) {
-        return null;
-      }
-      return decoded as string[];
+      return matchesArticleSummaryBody(article, decoded, row.body_hash)
+        ? decoded
+        : null;
     } catch {
       return null;
     }

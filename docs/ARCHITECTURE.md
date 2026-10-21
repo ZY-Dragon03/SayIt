@@ -204,5 +204,7 @@ workspace and position. The two storage models stay separate.
 - Article fetching is fail-closed: loopback, private, link-local, and reserved
   addresses, URL credentials, private DNS answers, and redirects that leave the
   verified public destination are all rejected.
-- Reader cache permissions are respected per source; a non-permitted body is never
-  stored.
+- A verified full-text body is stored only in the user's local Reader database,
+  atomically with its delivered issue. Publisher cache signals remain descriptive
+  provenance and do not disable the private archive required for historical reading;
+  Reader does not publish or transmit the saved body.
